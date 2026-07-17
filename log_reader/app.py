@@ -902,17 +902,10 @@ class LogTab(QWidget):
         if error:
             self._search_results_label.setText(self.t("lbl_search_results_empty"))
             return
-        # Limit wyników w modelu — powyżej 100K aplikacja by się zawiesiła
-        MAX_DISPLAY_RESULTS = 100000
         self._search_results_all = [(ln, text) for (ln, _off, text) in results]
         total_hits = len(self._search_results_all)
 
-        if total_hits > MAX_DISPLAY_RESULTS:
-            self._search_results = self._search_results_all[:MAX_DISPLAY_RESULTS]
-            truncated_count = total_hits - MAX_DISPLAY_RESULTS
-        else:
-            self._search_results = self._search_results_all
-            truncated_count = 0
+        self._search_results = self._search_results_all
 
         if self._search_model:
             self._search_model.set_results(self._search_results)
@@ -927,13 +920,7 @@ class LogTab(QWidget):
         self._search_result_index = 0
         QTimer.singleShot(0, lambda: self._navigate_to_search_result(0))
 
-        if truncated_count > 0:
-            self._search_results_label.setText(
-                f"{self.t('lbl_search_results_count').format(n=total_hits, current=1, total=total_hits)}"
-                f"  (showing first {MAX_DISPLAY_RESULTS:,})"
-            )
-        else:
-            self._update_search_results_label()
+        self._update_search_results_label()
 
     def _update_search_results_label(self) -> None:
         total = len(self._search_results_all)
