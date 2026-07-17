@@ -1,0 +1,197 @@
+"""Testy edit_buffer.py — EditBuffer, save_to_file, FileChangedError, CompressedSaveError."""
+import os
+import gzip
+import stat
+import time
+import pytest
+from log_reader.edit_buffer import EditBuffer
+from log_reader.exceptions import FileChangedError, CompressedSaveError
+
+
+class TestEditBuffer:
+    def test_basic_operations(self):
+        buf = EditBuffer()
+        assert len(buf) == 0
+        buf.set(10, "EDITED LINE 10")
+        assert len(buf) == 1
+        assert buf.has(10)
+        assert not buf.has(11)
+        assert buf.get(10) == "EDITED LINE 10"
+        buf.discard(10)
+        assert len(buf) == 0
+        assert not buf.has(10)
+
+    def test_clear(self):
+        buf = EditBuffer()
+        buf.set(1, "a")
+        buf.set(2, "b")
+        buf.set(3, "c")
+        assert len(buf) == 3
+        buf.clear()
+        assert len(buf) == 0
+
+    def test_items(self):
+        buf = EditBuffer()
+        buf.set(5, "five")
+        buf.set(10, "ten")
+        items = dict(buf.items())
+        assert items == {5: "five", 10: "ten"}
+
+
+class TestEditBufferSave:
+    def test_save_basic(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        buf = EditBuffer()
+        buf.set(10, "EDITED LINE 10")
+        buf.set(50, "EDITED LINE 50")
+        backup = buf.save_to_file(path)
+        assert os.path.exists(backup)
+        with open(path, "rb") as f:
+            lines = f.readlines()
+        assert b"EDITED LINE 10" in lines[10]
+        assert b"EDITED LINE 50" in lines[50]
+        os.unlink(backup)
+
+    def test_save_preserves_permissions(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        os.chmod(path, 0o640)
+        original_mode = stat.S_IMODE(os.stat(path).st_mode)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        buf.save_to_file(path)
+        new_mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert new_mode == original_mode
+
+    def test_save_preserves_exec_bit(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        os.chmod(path, 0o755)
+        original_mode = stat.S_IMODE(os.stat(path).st_mode)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        buf.save_to_file(path)
+        new_mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert new_mode == original_mode
+
+    def test_save_preserves_mtime(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        old_time = time.time() - 86400
+        os.utime(path, (old_time, old_time))
+        original_mtime = os.stat(path).st_mtime
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        time.sleep(0.1)
+        buf.save_to_file(path)
+        new_mtime = os.stat(path).st_mtime
+        assert abs(new_mtime - original_mtime) < 1.0
+
+
+class TestEditBufferFileChanged:
+    def test_blocks_on_size_change(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        with open(path, "ab") as f:
+            f.write(b"appended\n")
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_size=original_size)
+
+    def test_blocks_on_mtime_change(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        original_mtime = os.stat(path).st_mtime
+        original_size = os.path.getsize(path)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        time.sleep(1.1)
+        new_mtime = time.time()
+        os.utime(path, (new_mtime, new_mtime))
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_mtime=original_mtime, expected_size=original_size)
+
+    def test_no_backup_on_blocked_save(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        with open(path, "ab") as f:
+            f.write(b"appended\n")
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_size=original_size)
+        assert not os.path.exists(path + ".bak")
+
+    def test_allows_when_unchanged(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime = os.stat(path).st_mtime
+        buf = EditBuffer()
+        buf.set(5, "EDITED LINE 5")
+        backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime)
+        assert os.path.exists(backup)
+        os.unlink(backup)
+
+    def test_allows_without_validation(self, temp_log_file):
+        path = temp_log_file(num_lines=1000)
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        with open(path, "ab") as f:
+            f.write(b"appended\n")
+        # Bez expected_size/mtime — zapis powinien zadziałać
+        backup = buf.save_to_file(path)
+        assert os.path.exists(backup)
+        os.unlink(backup)
+
+    def test_mtime_exact_match_required(self, temp_log_file):
+        """Po naprawie #3 (Gemini Pro) — brak tolerancji mtime.
+        Zmiana mtime nawet o 0.5s powinna być wykryta."""
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime = os.stat(path).st_mtime
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        # Zmień mtime o 0.5s — powinno być wykryte (brak tolerancji)
+        new_mtime = original_mtime + 0.5
+        os.utime(path, (new_mtime, new_mtime))
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime)
+
+    def test_encoding_passed_to_save(self, temp_log_file):
+        """Po naprawie #1 (Gemini Pro) — save_to_file używa podanego kodowania."""
+        path = temp_log_file(num_lines=1000)
+        buf = EditBuffer()
+        # Edytuj linię z polskimi znakami
+        buf.set(5, "zażółć gęślą jaźń")
+        backup = buf.save_to_file(path, encoding="utf-8")
+        # Sprawdź że polskie znaki są poprawnie zapisane w UTF-8
+        with open(path, "rb") as f:
+            lines = f.readlines()
+        assert "zażółć gęślą jaźń".encode("utf-8") in lines[5]
+        os.unlink(backup)
+
+    def test_encoding_latin1(self, temp_log_file):
+        """Save z encoding=latin-1 zapisuje znaki Latin-1."""
+        path = temp_log_file(num_lines=1000)
+        buf = EditBuffer()
+        # Użyj znaków które istnieją w Latin-1 (é, ü, ñ)
+        buf.set(5, "café résumé niño")
+        backup = buf.save_to_file(path, encoding="latin-1")
+        # Sprawdź zapis w Latin-1
+        with open(path, "rb") as f:
+            lines = f.readlines()
+        assert "café résumé niño".encode("latin-1") in lines[5]
+        os.unlink(backup)
+
+
+class TestEditBufferCompressed:
+    def test_blocks_compressed_save(self):
+        import tempfile
+        path = tempfile.mktemp(suffix=".gz")
+        try:
+            with gzip.open(path, "wb") as f:
+                f.write(b"line 1\nline 2\n")
+            buf = EditBuffer()
+            buf.set(0, "EDITED")
+            with pytest.raises(CompressedSaveError):
+                buf.save_to_file(path)
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
