@@ -229,8 +229,8 @@ class SearchResultsModel(QAbstractListModel):
     """
     Model dla QListView wyświetlający wyniki wyszukiwania.
 
-    Używa QAbstractListModel — QListView renderuje tylko widoczne elementy,
-    więc model obsługuje setki tysięcy wyników bez spadku wydajności.
+    Używa QAbstractListModel z canFetchMore/fetchMore, aby doładowywać
+    kolejne elementy po przescrollowaniu, zapobiegając opóźnieniom.
 
     Każdy wynik to krotka (line_no, text). DisplayRole pokazuje
     "  linia: tekst" (przycięty do 200 znaków). UserRole zwraca line_no.
@@ -238,32 +238,65 @@ class SearchResultsModel(QAbstractListModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._results: List[Tuple[int, str]] = []
+        self._all_results: List[Tuple[int, str]] = []
+        self._visible_count = 0
+        self._batch_size = 1000
+
+        from .helpers import THEME_DARK
+        self._color_error = QColor(THEME_DARK["error"])
+        self._color_warn = QColor(THEME_DARK["warn"])
+        self._color_info = QColor(THEME_DARK["info"])
+        self._color_debug = QColor(THEME_DARK["debug"])
 
     def set_results(self, results: List[Tuple[int, str]]) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
-        self._results = results
+        self._all_results = results
+        self._visible_count = min(len(results), self._batch_size)
         self.endResetModel()
 
     def append_results(self, results: List[Tuple[int, str]]) -> None:
         """Dodaje wyniki na końcu. Wywołuje beginInsertRows/endInsertRows."""
         if not results:
             return
-        start = len(self._results)
+        # Dołączone wyniki powinny być widoczne od razu, jeśli jesteśmy na końcu
+        # lub jeśli po prostu chcemy się upewnić, że są dodane czysto.
+        # append_results jest obecnie używane tylko w testach (silnik wyszukiwania
+        # całkowicie zastępuje wyniki przez set_results).
+        # Przywracamy podstawową funkcjonalność: dodanie do all_results i
+        # visible_count oraz emisję insertRows, żeby widok się zaktualizował.
+        start = self._visible_count
         self.beginInsertRows(QModelIndex(), start, start + len(results) - 1)
-        self._results.extend(results)
+        self._all_results.extend(results)
+        self._visible_count += len(results)
         self.endInsertRows()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
-        return len(self._results)
+        return self._visible_count
+
+    def canFetchMore(self, parent: QModelIndex = QModelIndex()) -> bool:
+        if parent.isValid():
+            return False
+        return self._visible_count < len(self._all_results)
+
+    def fetchMore(self, parent: QModelIndex = QModelIndex()) -> None:
+        if parent.isValid():
+            return
+        remainder = len(self._all_results) - self._visible_count
+        items_to_fetch = min(remainder, self._batch_size)
+        if items_to_fetch <= 0:
+            return
+
+        self.beginInsertRows(QModelIndex(), self._visible_count, self._visible_count + items_to_fetch - 1)
+        self._visible_count += items_to_fetch
+        self.endInsertRows()
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
-        if not index.isValid() or index.row() >= len(self._results):
+        if not index.isValid() or index.row() >= self._visible_count:
             return None
-        line_no, text = self._results[index.row()]
+        line_no, text = self._all_results[index.row()]
         if role == Qt.DisplayRole:
             display = text[:200]
             if len(text) > 200:
@@ -272,28 +305,27 @@ class SearchResultsModel(QAbstractListModel):
         if role == Qt.UserRole:
             return line_no
         if role == Qt.ForegroundRole:
-            # Koloruj według poziomu logu — kolory z motywu (dark/light)
-            from .helpers import THEME_DARK
             upper = text[:200].upper()
             if "[ERROR]" in upper or " ERROR " in upper:
-                return QColor(THEME_DARK["error"])
+                return self._color_error
             elif "[WARN]" in upper or " WARN " in upper:
-                return QColor(THEME_DARK["warn"])
+                return self._color_warn
             elif "[INFO]" in upper or " INFO " in upper:
-                return QColor(THEME_DARK["info"])
+                return self._color_info
             elif "[DEBUG]" in upper or " DEBUG " in upper:
-                return QColor(THEME_DARK["debug"])
+                return self._color_debug
         return None
 
     def clear(self) -> None:
         self.beginResetModel()
-        self._results = []
+        self._all_results = []
+        self._visible_count = 0
         self.endResetModel()
 
     def get_line_no(self, row: int) -> Optional[int]:
         """Zwraca numer linii pliku dla danego wiersza wyników."""
-        if 0 <= row < len(self._results):
-            return self._results[row][0]
+        if 0 <= row < len(self._all_results):
+            return self._all_results[row][0]
         return None
 
     def find_row_by_line_no(self, line_no: int) -> int:
@@ -303,9 +335,15 @@ class SearchResultsModel(QAbstractListModel):
         Zwraca -1 jeśli nie znaleziono dokładnego dopasowania.
         """
         import bisect
-        keys = [r[0] for r in self._results]
+        keys = [r[0] for r in self._all_results]
         idx = bisect.bisect_left(keys, line_no)
-        if idx < len(self._results) and self._results[idx][0] == line_no:
+        if idx < len(self._all_results) and self._all_results[idx][0] == line_no:
+            # Upewnij się, że element jest widoczny (doładowany) w jednym kroku
+            if idx >= self._visible_count:
+                items_to_fetch = idx - self._visible_count + 1
+                self.beginInsertRows(QModelIndex(), self._visible_count, self._visible_count + items_to_fetch - 1)
+                self._visible_count += items_to_fetch
+                self.endInsertRows()
             return idx
         return -1
 
