@@ -475,6 +475,28 @@ class LogTab(QWidget):
         if not self.indexer:
             return
         self._is_loading = True
+
+        # Pokaż progress dialog dla skakania w dużych plikach,
+        # bo `indexer.read_lines` -> `offset_of_line` musi przeczytać
+        # potencjalnie wiele megabajtów za pomocą readline().
+        distance = abs(at_line - self.window_start)
+        show_progress = distance > 100000
+
+        if show_progress:
+            progress = QProgressDialog(self.t("st_loading"), self.t("btn_cancel"), 0, 0, self._main)
+            progress.setWindowTitle(self.t("app_title"))
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(500)
+            progress.show()
+            QApplication.processEvents()
+
+        try:
+            self._load_window_impl(at_line)
+        finally:
+            if show_progress:
+                progress.close()
+
+    def _load_window_impl(self, at_line: int) -> None:
         if self.filter_active and self.filter_results:
             # W trybie filtra łączymy trafienia + linie kontekstu w jedną
             # posortowaną listę numerów linii pliku. Trafienia i kontekst
@@ -983,6 +1005,34 @@ class LogTab(QWidget):
             self._navigate_to_search_result(self._search_result_index - 1)
         else:
             self._navigate_to_search_result(len(self._search_results_all) - 1)
+
+    def cmd_clear_search(self) -> None:
+        if self._search_engine and self._search_engine.is_running():
+            self._search_engine.cancel()
+        if self._search_thread is not None:
+            try:
+                if self._search_thread.isRunning():
+                    self._search_thread.quit()
+                    self._search_thread.wait(2000)
+            except RuntimeError:
+                pass
+        self._search_thread = None
+        self._search_worker = None
+
+        self.search_pattern = ""
+        self._search_results = []
+        self._search_results_all = []
+        self._search_result_index = -1
+        self._search_extra_sel = None
+
+        if self._search_model:
+            self._search_model.clear()
+
+        self._search_results_label.setText(self.t("lbl_search_results_empty"))
+        self._main.search_entry.clear()
+
+        self._update_current_line_highlight()
+        self._refresh_status()
 
     def _get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
         if self.edit_buffer.has(file_line_no):
@@ -1994,6 +2044,8 @@ class LogViewerWindow(QMainWindow):
             self.btn_find_next.setText(self.t("btn_find_next"))
         if hasattr(self, "btn_find_prev"):
             self.btn_find_prev.setText(self.t("btn_find_prev"))
+        if hasattr(self, "btn_clear_search"):
+            self.btn_clear_search.setText(self.t("btn_clear_search"))
         if hasattr(self, "btn_apply_filter"):
             self.btn_apply_filter.setText(self.t("btn_apply_filter"))
         if hasattr(self, "btn_clear_filter"):
@@ -2315,6 +2367,9 @@ class LogViewerWindow(QMainWindow):
         self.btn_find_prev = QPushButton(self.t("btn_find_prev"))
         self.btn_find_prev.clicked.connect(self.cmd_find_prev)
         toolbar.addWidget(self.btn_find_prev)
+        self.btn_clear_search = QPushButton(self.t("btn_clear_search"))
+        self.btn_clear_search.clicked.connect(self.cmd_clear_search)
+        toolbar.addWidget(self.btn_clear_search)
 
         toolbar.addSeparator()
 
@@ -2367,6 +2422,7 @@ class LogViewerWindow(QMainWindow):
         edit_menu.addAction(self._mkaction(self.t("mi_find"), "Ctrl+F", self.cmd_find_dialog))
         edit_menu.addAction(self._mkaction(self.t("mi_find_next"), "F3", self.cmd_find_next))
         edit_menu.addAction(self._mkaction(self.t("mi_find_prev"), "Shift+F3", self.cmd_find_prev))
+        edit_menu.addAction(self._mkaction(self.t("btn_clear_search"), "", self.cmd_clear_search))
         edit_menu.addSeparator()
         edit_menu.addAction(self._mkaction(self.t("mi_filter"), "Ctrl+L", self.cmd_filter_dialog))
         edit_menu.addAction(self._mkaction(self.t("mi_clear_filter"), "", self.cmd_clear_filter))
@@ -2508,6 +2564,9 @@ class LogViewerWindow(QMainWindow):
 
     def cmd_find_prev(self):
         return self._delegate_to_tab("cmd_find_prev")
+
+    def cmd_clear_search(self):
+        return self._delegate_to_tab("cmd_clear_search")
 
     def cmd_filter_dialog(self):
         return self._delegate_to_tab("cmd_filter_dialog")
