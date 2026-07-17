@@ -274,7 +274,7 @@ class SearchResultsModel(QAbstractListModel):
         if role == Qt.ForegroundRole:
             # Koloruj według poziomu logu — kolory z motywu (dark/light)
             from .helpers import THEME_DARK
-            upper = text.upper()
+            upper = text[:200].upper()
             if "[ERROR]" in upper or " ERROR " in upper:
                 return QColor(THEME_DARK["error"])
             elif "[WARN]" in upper or " WARN " in upper:
