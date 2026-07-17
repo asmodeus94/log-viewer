@@ -261,6 +261,7 @@ class LogTab(QWidget):
         search_layout.addWidget(self._search_results_label)
         self._search_model = SearchResultsModel()
         self.search_results_view = QListView()
+        self.search_results_view.setUniformItemSizes(True)
         self.search_results_view.setModel(self._search_model)
         self.search_results_view.setAlternatingRowColors(True)
         mono_font = QFont("Menlo", 9) if sys.platform == "darwin" else QFont("DejaVu Sans Mono", 9)
