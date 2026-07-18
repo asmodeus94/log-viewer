@@ -2095,6 +2095,27 @@ class LogViewerWindow(QMainWindow):
             self.btn_apply_filter.setText(self.t("btn_apply_filter"))
         if hasattr(self, "btn_clear_filter"):
             self.btn_clear_filter.setText(self.t("btn_clear_filter"))
+
+        # Zaktualizuj labelki i opcje paska narzędzi
+        if hasattr(self, "lbl_search"):
+            self.lbl_search.setText(self.t("lbl_search"))
+        if hasattr(self, "lbl_filter"):
+            self.lbl_filter.setText(self.t("lbl_filter"))
+        if hasattr(self, "lbl_filter_context"):
+            self.lbl_filter_context.setText(self.t("lbl_filter_context"))
+        if hasattr(self, "search_regex_cb"):
+            self.search_regex_cb.setText(self.t("cb_regex"))
+        if hasattr(self, "search_case_cb"):
+            self.search_case_cb.setText(self.t("cb_case"))
+        if hasattr(self, "search_negate_cb"):
+            self.search_negate_cb.setText(self.t("cb_negate"))
+        if hasattr(self, "filter_regex_cb"):
+            self.filter_regex_cb.setText(self.t("cb_regex"))
+        if hasattr(self, "filter_case_cb"):
+            self.filter_case_cb.setText(self.t("cb_case"))
+        if hasattr(self, "filter_negate_cb"):
+            self.filter_negate_cb.setText(self.t("cb_negate"))
+
         # Zaktualizuj każdy tab (labelki paneli bocznych, etc.)
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
@@ -2393,7 +2414,8 @@ class LogViewerWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        toolbar.addWidget(QLabel(self.t("lbl_search")))
+        self.lbl_search = QLabel(self.t("lbl_search"))
+        toolbar.addWidget(self.lbl_search)
         self.search_entry = QLineEdit()
         self.search_entry.setMaximumWidth(250)
         self.search_entry.returnPressed.connect(self.cmd_find_next)
@@ -2420,7 +2442,8 @@ class LogViewerWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        toolbar.addWidget(QLabel(self.t("lbl_filter")))
+        self.lbl_filter = QLabel(self.t("lbl_filter"))
+        toolbar.addWidget(self.lbl_filter)
         self.filter_entry = QLineEdit()
         self.filter_entry.setMaximumWidth(250)
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
@@ -2437,7 +2460,8 @@ class LogViewerWindow(QMainWindow):
         toolbar.addSeparator()
 
         # Ile linii kontekstu po każdym trafieniu filtru (dla stack trace).
-        toolbar.addWidget(QLabel(self.t("lbl_filter_context")))
+        self.lbl_filter_context = QLabel(self.t("lbl_filter_context"))
+        toolbar.addWidget(self.lbl_filter_context)
         self.filter_context_spin = QSpinBox()
         self.filter_context_spin.setRange(0, 50)
         self.filter_context_spin.setValue(0)
@@ -2498,8 +2522,22 @@ class LogViewerWindow(QMainWindow):
         view_menu.addSeparator()
 
         lang_menu = view_menu.addMenu(self.t("mi_lang"))
-        lang_menu.addAction(self._mkaction(self.t("mi_lang_pl"), "", lambda: self.set_language("pl")))
-        lang_menu.addAction(self._mkaction(self.t("mi_lang_en"), "", lambda: self.set_language("en")))
+
+        self._lang_action_group = QtGui.QActionGroup(self)
+        self._lang_action_group.setExclusive(True)
+
+        act_pl = self._mkaction(self.t("mi_lang_pl"), "", lambda: self.set_language("pl"))
+        act_pl.setCheckable(True)
+        act_pl.setChecked(self.lang == "pl")
+        self._lang_action_group.addAction(act_pl)
+        lang_menu.addAction(act_pl)
+
+        act_en = self._mkaction(self.t("mi_lang_en"), "", lambda: self.set_language("en"))
+        act_en.setCheckable(True)
+        act_en.setChecked(self.lang == "en")
+        self._lang_action_group.addAction(act_en)
+        lang_menu.addAction(act_en)
+
         view_menu.addSeparator()
         view_menu.addAction(self._mkaction(self.t("mi_settings"), "", self.cmd_settings))
 
