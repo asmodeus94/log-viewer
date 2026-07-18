@@ -1308,6 +1308,20 @@ class LogTab(QWidget):
             self._load_window(at_line=line_no)
         self.text.verticalScrollBar().setValue(0)
 
+    def cmd_goto_end(self) -> None:
+        if not self.indexer:
+            return
+        if self.filter_active:
+            total = max(1, len(self.filter_results))
+            self._load_window(at_line=total - 1)
+        else:
+            total = max(1, self.indexer.line_count)
+            self._load_window(at_line=total - 1)
+
+        # Opcjonalnie można zjechać scrollem na sam dół
+        scrollbar = self.text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     # ------------------------------------------------------------ edit ----
     def cmd_format_selection(self) -> None:
         """Pobiera zaznaczony tekst i wywołuje dialog do jego sformatowania."""
@@ -2460,7 +2474,6 @@ class LogViewerWindow(QMainWindow):
         edit_menu.addAction(self._mkaction(self.t("mi_filter"), "Ctrl+L", self.cmd_filter_dialog))
         edit_menu.addAction(self._mkaction(self.t("mi_clear_filter"), "", self.cmd_clear_filter))
         edit_menu.addSeparator()
-        edit_menu.addAction(self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto))
         edit_menu.addAction(self._mkaction(self.t("mi_edit_line"), "Ctrl+D", self.cmd_edit_line))
         edit_menu.addAction(self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection))
         edit_menu.addSeparator()
@@ -2496,6 +2509,10 @@ class LogViewerWindow(QMainWindow):
         bm_menu.addAction(self._mkaction(self.t("mi_prev_bookmark"), "Shift+F4", self.cmd_prev_bookmark))
         bm_menu.addSeparator()
         bm_menu.addAction(self._mkaction(self.t("mi_clear_bookmarks"), "", self.cmd_clear_bookmarks))
+
+        goto_menu = menubar.addMenu(self.t("menu_goto"))
+        goto_menu.addAction(self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto))
+        goto_menu.addAction(self._mkaction(self.t("mi_goto_end"), "Ctrl+End", self.cmd_goto_end))
 
         help_menu = menubar.addMenu(self.t("menu_help"))
         help_menu.addAction(self._mkaction(self.t("mi_about"), "", self.cmd_about))
@@ -2613,6 +2630,9 @@ class LogViewerWindow(QMainWindow):
 
     def cmd_goto(self):
         return self._delegate_to_tab("cmd_goto")
+
+    def cmd_goto_end(self):
+        return self._delegate_to_tab("cmd_goto_end")
 
     def cmd_edit_line(self):
         return self._delegate_to_tab("cmd_edit_line")
