@@ -59,24 +59,24 @@ class TestTruncateForDisplay:
 
 class TestParseDndFiles:
     def test_simple_unix_path(self):
-        assert parse_dnd_files("/tmp/test.log") == ["/tmp/test.log"]
+        assert parse_dnd_files("/tmp/test.log") == [os.path.normpath("/tmp/test.log")]
 
     def test_path_with_spaces_braces(self):
-        assert parse_dnd_files("{C:/My Documents/a.log}") == ["C:/My Documents/a.log"]
+        assert parse_dnd_files("{C:/My Documents/a.log}") == [os.path.normpath("C:/My Documents/a.log")]
 
     def test_file_uri(self):
-        assert parse_dnd_files("file:///tmp/test.log") == ["/tmp/test.log"]
+        assert parse_dnd_files("file:///tmp/test.log") == [os.path.normpath("/tmp/test.log")]
 
     def test_file_uri_with_spaces(self):
-        assert parse_dnd_files("file:///tmp/with%20space.log") == ["/tmp/with space.log"]
+        assert parse_dnd_files("file:///tmp/with%20space.log") == [os.path.normpath("/tmp/with space.log")]
 
     def test_multiple_paths(self):
         result = parse_dnd_files("/tmp/a.log /tmp/b.log /tmp/c.log")
-        assert result == ["/tmp/a.log", "/tmp/b.log", "/tmp/c.log"]
+        assert result == [os.path.normpath("/tmp/a.log"), os.path.normpath("/tmp/b.log"), os.path.normpath("/tmp/c.log")]
 
     def test_multiple_paths_with_braces(self):
         result = parse_dnd_files("{/tmp/with space.log} /tmp/no-space.log {/tmp/another space.log}")
-        assert result == ["/tmp/with space.log", "/tmp/no-space.log", "/tmp/another space.log"]
+        assert result == [os.path.normpath("/tmp/with space.log"), os.path.normpath("/tmp/no-space.log"), os.path.normpath("/tmp/another space.log")]
 
     def test_empty_input(self):
         assert parse_dnd_files("") == []
@@ -84,11 +84,11 @@ class TestParseDndFiles:
         assert parse_dnd_files(None) == []
 
     def test_file_uri_localhost(self):
-        assert parse_dnd_files("file://localhost/tmp/test.log") == ["/tmp/test.log"]
+        assert parse_dnd_files("file://localhost/tmp/test.log") == [os.path.normpath("/tmp/test.log")]
 
     def test_polish_chars(self):
         encoded = "file:///tmp/za%C5%BC%C3%B3%C5%82%C4%87.log"
-        assert parse_dnd_files(encoded) == ["/tmp/zażółć.log"]
+        assert parse_dnd_files(encoded) == [os.path.normpath("/tmp/zażółć.log")]
 
 
 class TestDndFilesToOpen:

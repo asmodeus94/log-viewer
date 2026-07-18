@@ -31,7 +31,10 @@ def temp_log_file():
     # Cleanup
     for p in paths:
         if os.path.exists(p):
-            os.unlink(p)
+            try:
+                os.unlink(p)
+            except PermissionError:
+                pass
 
 
 @pytest.fixture
@@ -40,4 +43,7 @@ def temp_config_path():
     path = tempfile.mktemp(suffix=".json")
     yield path
     if os.path.exists(path):
-        os.unlink(path)
+        try:
+            os.unlink(path)
+        except PermissionError:
+            pass

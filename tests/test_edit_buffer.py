@@ -50,7 +50,10 @@ class TestEditBufferSave:
             lines = f.readlines()
         assert b"EDITED LINE 10" in lines[10]
         assert b"EDITED LINE 50" in lines[50]
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_save_preserves_permissions(self, temp_log_file):
         path = temp_log_file(num_lines=100)
@@ -127,7 +130,10 @@ class TestEditBufferFileChanged:
         buf.set(5, "EDITED LINE 5")
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime)
         assert os.path.exists(backup)
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_allows_without_validation(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
@@ -138,7 +144,10 @@ class TestEditBufferFileChanged:
         # Bez expected_size/mtime — zapis powinien zadziałać
         backup = buf.save_to_file(path)
         assert os.path.exists(backup)
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_mtime_exact_match_required(self, temp_log_file):
         """Po naprawie #3 (Gemini Pro) — brak tolerancji mtime.
@@ -165,7 +174,10 @@ class TestEditBufferFileChanged:
         with open(path, "rb") as f:
             lines = f.readlines()
         assert "zażółć gęślą jaźń".encode("utf-8") in lines[5]
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_encoding_latin1(self, temp_log_file):
         """Save z encoding=latin-1 zapisuje znaki Latin-1."""
@@ -178,7 +190,10 @@ class TestEditBufferFileChanged:
         with open(path, "rb") as f:
             lines = f.readlines()
         assert "café résumé niño".encode("latin-1") in lines[5]
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
 
 class TestEditBufferCompressed:
@@ -194,4 +209,7 @@ class TestEditBufferCompressed:
                 buf.save_to_file(path)
         finally:
             if os.path.exists(path):
-                os.unlink(path)
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
