@@ -40,7 +40,10 @@ class TestMtimeNsTolerance:
         buf.set(5, "EDITED LINE 5")
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_ns)
         assert os.path.exists(backup)
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_blocks_on_real_mtime_change(self, temp_log_file):
         """Zapis zablokowany gdy mtime zmienił się o >1ms."""
@@ -66,7 +69,10 @@ class TestMtimeNsTolerance:
         fake_mtime_ns = original_mtime_ns + 500_000
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=fake_mtime_ns)
         assert os.path.exists(backup)
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
     def test_blocks_on_2ms_drift(self, temp_log_file):
         """Blokada przy różnicy 2ms (poza tolerancją)."""
@@ -90,7 +96,10 @@ class TestMtimeNsTolerance:
         # float → konwersja na ns w edit_buffer.py
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_float)
         assert os.path.exists(backup)
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
 
 
 # =============================================================================
@@ -228,7 +237,10 @@ class TestChunkedWorker:
             result = _indexer_worker_chunk((0, size, path, 1024 * 1024, 0))
             assert result[0] == 2  # 2 linie
         finally:
-            os.unlink(path)
+            try:
+                os.unlink(path)
+            except PermissionError:
+                pass
 
     def test_worker_memory_efficient(self, temp_log_file):
         """Worker nie ładuje całego zakresu do pamięci — czyta w chunkach 4MB."""
@@ -437,7 +449,10 @@ class TestIntegrationFlow:
             lines = f.readlines()
         assert b"EDITED LINE 5" in lines[5]
 
-        os.unlink(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
         idx.close()
 
     def test_parallel_indexing_correctness(self, temp_log_file):

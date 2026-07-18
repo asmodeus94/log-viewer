@@ -43,10 +43,18 @@ def app_instance():
 
     yield window, test_file
 
+    window.close()
+    app.processEvents()
     if os.path.exists(test_file):
-        os.unlink(test_file)
+        try:
+            os.unlink(test_file)
+        except PermissionError:
+            pass
     if os.path.exists(cfg.path):
-        os.unlink(cfg.path)
+        try:
+            os.unlink(cfg.path)
+        except PermissionError:
+            pass
     window.deleteLater()
     app.processEvents()
 
@@ -557,9 +565,15 @@ class TestEditLineAfterScroll:
             )
             assert widget_line > 0, "Nie powinien edytować linii 0 gdy user widzi inną"
         finally:
-            os.unlink(test_file)
+            try:
+                os.unlink(test_file)
+            except PermissionError:
+                pass
             if os.path.exists(cfg.path):
-                os.unlink(cfg.path)
+                try:
+                    os.unlink(cfg.path)
+                except PermissionError:
+                    pass
             window.deleteLater()
             app.processEvents()
 
@@ -764,7 +778,10 @@ class TestIndexingProgress:
             finally:
                 idx.close()
         finally:
-            os.unlink(test_file)
+            try:
+                os.unlink(test_file)
+            except PermissionError:
+                pass
 
     def test_indexer_worker_has_cancel_method(self):
         """IndexerWorker ma metodę cancel() i is_cancelled()."""
@@ -838,7 +855,10 @@ class TestIndexingProgress:
             finally:
                 idx.close()
         finally:
-            os.unlink(test_file)
+            try:
+                os.unlink(test_file)
+            except PermissionError:
+                pass
 
     def test_indexing_performance_benchmark(self):
         """Benchmark: indeksowanie 200 MB powinno trwać < 10s (przy ~20 MB/s+
@@ -875,7 +895,10 @@ class TestIndexingProgress:
             finally:
                 idx.close()
         finally:
-            os.unlink(test_file)
+            try:
+                os.unlink(test_file)
+            except PermissionError:
+                pass
 
 
 # =============================================================================

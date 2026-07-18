@@ -49,10 +49,18 @@ def app_instance():
 
     yield window, test_file
 
+    window.close()
+    app.processEvents()
     if os.path.exists(test_file):
-        os.unlink(test_file)
+        try:
+            os.unlink(test_file)
+        except PermissionError:
+            pass
     if os.path.exists(cfg.path):
-        os.unlink(cfg.path)
+        try:
+            os.unlink(cfg.path)
+        except PermissionError:
+            pass
     window.deleteLater()
     app.processEvents()
 

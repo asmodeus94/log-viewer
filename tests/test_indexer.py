@@ -57,7 +57,10 @@ class TestLineIndexerBasic:
             assert idx.read_lines(0, 10) == []
             idx.close()
         finally:
-            os.unlink(path)
+            try:
+                os.unlink(path)
+            except PermissionError:
+                pass
 
 
 class TestLineIndexerCompression:
@@ -77,7 +80,10 @@ class TestLineIndexerCompression:
             idx.close()
         finally:
             if os.path.exists(path):
-                os.unlink(path)
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
 
 
 class TestLineIndexerEncoding:
@@ -153,7 +159,10 @@ class TestLineIndexerParallel:
             idx.close()
         finally:
             if os.path.exists(path):
-                os.unlink(path)
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
 
 
 class TestLineIndexerUpdateFrom:
