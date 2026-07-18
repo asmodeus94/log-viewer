@@ -13,10 +13,11 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QWidget, QPlainTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
     QDialog, QDialogButtonBox, QSpinBox, QFontComboBox, QGridLayout,
-    QFrame, QSizePolicy, QListView,
+    QFrame, QSizePolicy, QListView, QVBoxLayout, QHBoxLayout, QComboBox
 )
 
 from .helpers import THEME
+from .formatters import FORMATTERS
 
 
 class LineNumberArea(QWidget):
@@ -448,3 +449,67 @@ class MiniMap(QWidget):
         pct = y / self.height()
         line_no = int(pct * self._total_lines)
         self.position_clicked.emit(line_no)
+
+
+class FormatDialog(QDialog):
+    """
+    Dialog pozwalający na sformatowanie przekazanego fragmentu tekstu
+    (np. JSON) i jego podgląd. Pamięta wybrany formatter w trakcie sesji.
+    """
+    def __init__(self, parent, text: str, initial_formatter: str = "JSON"):
+        super().__init__(parent)
+        self.original_text = text
+        self.app = parent.window() if hasattr(parent, 'window') else parent
+        self.t = self.app.t if hasattr(self.app, 't') else lambda k: k
+
+        self.setWindowTitle(self.t("dlg_format_title"))
+        self.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(self)
+
+        # Panel kontrolny na górze
+        ctrl_layout = QHBoxLayout()
+        ctrl_layout.addWidget(QLabel(self.t("lbl_formatter")))
+        self.formatter_combo = QComboBox()
+        self.formatter_combo.addItems(list(FORMATTERS.keys()))
+
+        # Ustaw początkowy formatter, jeśli istnieje
+        idx = self.formatter_combo.findText(initial_formatter)
+        if idx >= 0:
+            self.formatter_combo.setCurrentIndex(idx)
+
+        self.formatter_combo.currentTextChanged.connect(self._apply_format)
+        ctrl_layout.addWidget(self.formatter_combo)
+        ctrl_layout.addStretch()
+        layout.addLayout(ctrl_layout)
+
+        # Podgląd sformatowanego tekstu
+        self.text_edit = QPlainTextEdit()
+        self.text_edit.setReadOnly(True)
+        # Zastosuj czcionkę stałej szerokości
+        font = QFont("Monospace", 10)
+        font.setStyleHint(QFont.Monospace)
+        self.text_edit.setFont(font)
+
+        layout.addWidget(self.text_edit)
+
+        # Przycisk zamknięcia
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        # Zastosuj formatowanie przy otwarciu
+        self._apply_format(self.formatter_combo.currentText())
+
+    def _apply_format(self, formatter_name: str) -> None:
+        """Aplikuje wybrany formatter. Jeśli się nie uda, pokazuje oryginalny tekst."""
+        from .formatters import format_log
+        formatted = format_log(self.original_text, formatter_name)
+        if formatted:
+            self.text_edit.setPlainText(formatted)
+        else:
+            self.text_edit.setPlainText(self.t("msg_format_failed") + "\n\n" + self.original_text)
+
+    def get_selected_formatter(self) -> str:
+        """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
+        return self.formatter_combo.currentText()
