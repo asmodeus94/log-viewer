@@ -441,6 +441,10 @@ class LogTab(QWidget):
         if err == "cancelled":
             # Anulowane przez usera — nie pokazuj jako błąd, tylko status.
             self._status(self.t("st_cancelled"))
+            if self.indexer is None:
+                idx = self._main.tabs.indexOf(self)
+                if idx >= 0:
+                    self._main._on_tab_close_requested(idx)
             return
         QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_index_error").format(e=err))
         self._status(self.t("st_ready"))
