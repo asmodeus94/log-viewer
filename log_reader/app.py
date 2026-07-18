@@ -40,7 +40,7 @@ from .indexer import LineIndexer, IndexEntry
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
-from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap
+from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog
 
 
 # =====================================================================
@@ -134,6 +134,9 @@ class LogTab(QWidget):
         self._save_thread: Optional[QThread] = None
         self._save_worker: Optional[SaveWorker] = None
         self._save_progress: Optional[QProgressDialog] = None
+
+        # Ostatnio wybrany formatter w sesji
+        self._last_formatter: str = "JSON"
 
         # Build UI
         self._build_ui()
@@ -1306,6 +1309,24 @@ class LogTab(QWidget):
         self.text.verticalScrollBar().setValue(0)
 
     # ------------------------------------------------------------ edit ----
+    def cmd_format_selection(self) -> None:
+        """Pobiera zaznaczony tekst i wywołuje dialog do jego sformatowania."""
+        cursor = self.text.textCursor()
+        if not cursor.hasSelection():
+            # Jeżeli nie ma zaznaczenia, bierzemy całą bieżącą linię
+            cursor.select(QtGui.QTextCursor.LineUnderCursor)
+
+        selected_text = cursor.selectedText().replace("\u2029", "\n")
+
+        if not selected_text.strip():
+            return
+
+        dialog = FormatDialog(self, selected_text, self._last_formatter)
+        dialog.exec()
+
+        # Zapisz na przyszłość (tylko w sesji) wybór formattera
+        self._last_formatter = dialog.get_selected_formatter()
+
     def cmd_edit_line(self) -> None:
         if not self.indexer:
             QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
@@ -2158,18 +2179,20 @@ class LogViewerWindow(QMainWindow):
                 spacing: 4px;
             }}
             QPushButton {{
-                background-color: {t["accent"]};
-                color: {t["fg_bright"]};
-                border: none;
+                background-color: {t["bg_input"]};
+                color: {t["fg_main"]};
+                border: 1px solid {t["border"]};
                 padding: 3px 10px;
                 border-radius: 2px;
                 font-weight: normal;
             }}
             QPushButton:hover {{
-                background-color: {t["accent_hover"]};
+                background-color: {t["bg_hover"]};
+                border: 1px solid {t["border_light"]};
             }}
             QPushButton:pressed {{
-                background-color: {t["bg_input"]};
+                background-color: {t["bg_selected"]};
+                color: {t["fg_bright"]};
             }}
             QSlider {{
                 background: transparent;
@@ -2429,6 +2452,7 @@ class LogViewerWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto))
         edit_menu.addAction(self._mkaction(self.t("mi_edit_line"), "Ctrl+D", self.cmd_edit_line))
+        edit_menu.addAction(self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection))
         edit_menu.addSeparator()
         edit_menu.addAction(self._mkaction(self.t("mi_save_edits"), "", self.cmd_save_edits))
         edit_menu.addAction(self._mkaction(self.t("mi_clear_edits"), "", self.cmd_clear_edits))
@@ -2582,6 +2606,9 @@ class LogViewerWindow(QMainWindow):
 
     def cmd_edit_line(self):
         return self._delegate_to_tab("cmd_edit_line")
+
+    def cmd_format_selection(self):
+        return self._delegate_to_tab("cmd_format_selection")
 
     def cmd_save_edits(self):
         return self._delegate_to_tab("cmd_save_edits")
