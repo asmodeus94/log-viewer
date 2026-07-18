@@ -1811,13 +1811,16 @@ class LogTab(QWidget):
             QTimer.singleShot(FOLLOW_POLL_MS, self._follow_poll)
             return
 
+        mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_stat.st_mtime))
+        ctime_str = time.strftime("%H:%M:%S")
+
         if current_size > self._last_file_size:
             next_poll = 200
             try:
                 new_lines = self.indexer.update_from(current_size)
                 self._last_file_size = current_size
                 if new_lines > 0:
-                    self._on_follow_new_lines(new_lines)
+                    self._on_follow_new_lines(new_lines, mtime_str, ctime_str)
             except Exception:
                 pass
         elif current_size < self._last_file_size:
@@ -1826,7 +1829,7 @@ class LogTab(QWidget):
             self._start_follow_reindex(current_size, current_inode)
         else:
             next_poll = 1000
-            self._status(self.t("st_following").format(t=time.strftime("%H:%M:%S")))
+            self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
         QTimer.singleShot(next_poll, self._follow_poll)
 
     def _start_follow_reindex(self, current_size: int, current_inode: int) -> None:
@@ -1862,7 +1865,7 @@ class LogTab(QWidget):
         """Czyści flagę _follow_reindexing po zakończeniu reindex."""
         self._follow_reindexing = False
 
-    def _on_follow_new_lines(self, new_line_count: int = 0) -> None:
+    def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
         if not self.indexer or self.indexer.line_count == 0:
             return
         if new_line_count > 0 and self.line_map:
@@ -1877,7 +1880,7 @@ class LogTab(QWidget):
             last_start = max(0, self.indexer.line_count - self.window_size_lines)
             self._load_window(at_line=last_start)
             self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-        self._status(self.t("st_following").format(t=time.strftime("%H:%M:%S")))
+        self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(object, int, int)
     def _on_follow_reindex(self, idx: LineIndexer, new_size: int, new_inode: int) -> None:
@@ -1893,7 +1896,14 @@ class LogTab(QWidget):
         last_start = max(0, idx.line_count - self.window_size_lines)
         self._load_window(at_line=last_start)
         self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-        self._status(self.t("st_following").format(t=time.strftime("%H:%M:%S")))
+        mtime_str = ""
+        try:
+            mtime = os.stat(self.file_path).st_mtime
+            mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+        except OSError:
+            mtime_str = "?"
+        ctime_str = time.strftime("%H:%M:%S")
+        self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(str)
     def _on_follow_reindex_failed(self, err: str) -> None:
