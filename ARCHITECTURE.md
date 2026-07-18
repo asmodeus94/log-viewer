@@ -8,15 +8,16 @@ Poniższy diagram ilustruje, w jaki sposób komponenty wewnątrz pakietu współ
 
 ```mermaid
 flowchart TD
-    A[app.py (LogViewerWindow)] --> B[app.py (LogTab)]
-    B -->|Zleca indeksację w tle| C(workers.py: IndexerWorker)
-    C -->|Indeksuje plik partiami| D[indexer.py: LineIndexer]
+    A["app.py (LogViewerWindow)"] --> B["app.py (LogTab)"]
+    B -->|Zleca indeksację w tle| C("workers.py: IndexerWorker")
+    C -->|Indeksuje plik partiami| D["indexer.py: LineIndexer"]
     D -->|Zwraca indeksy linii do GUI| B
     B -->|Pobiera potrzebne linie do wizualizacji| D
-    B -->|Aktualizuje i renderuje| E[widgets.py: LogPlainTextEdit & MiniMap]
-    B -->|Żąda wyszukiwania / filtrowania| F(workers.py: FilterWorker)
-    F -->|Przeszukuje bajty asynchronicznie| G[filter_engine.py: FilterEngine]
+    B -->|Aktualizuje i renderuje| E["widgets.py: LogPlainTextEdit & MiniMap"]
+    B -->|Żąda wyszukiwania / filtrowania| F("workers.py: FilterWorker")
+    F -->|Przeszukuje bajty asynchronicznie| G["filter_engine.py: FilterEngine"]
     G -->|Zwraca trafienia regex/zwykłe| B
+
 ```
 
 ## Podział na Moduły i Ich Odpowiedzialność
