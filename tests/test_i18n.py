@@ -25,9 +25,9 @@ class TestI18N:
     def test_known_keys_exist(self):
         """Sprawdź kluczowe klucze które muszą istnieć."""
         required = [
-            "app_title", "menu_file", "menu_edit", "menu_view",
+            "app_title", "menu_file", "menu_edit", "menu_view", "menu_goto",
             "mi_open", "mi_save", "mi_exit", "mi_find", "mi_filter",
-            "mi_goto", "mi_follow", "mi_about", "mi_settings",
+            "mi_goto", "mi_goto_end", "mi_follow", "mi_about", "mi_settings",
             "st_ready", "st_indexing", "st_done",
             "msg_no_file", "msg_about",
         ]
