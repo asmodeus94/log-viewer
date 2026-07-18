@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 import multiprocessing
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
@@ -20,6 +21,14 @@ class IndexEntry:
     __slots__ = ("offset", "line")
     offset: int   # byte offset początku tej linii (0-indexed)
     line: int     # numer linii (0-indexed)
+
+
+_shared_progress_bytes = None
+
+
+def _init_worker(progress_val):
+    global _shared_progress_bytes
+    _shared_progress_bytes = progress_val
 
 
 def _indexer_worker_chunk(args):
@@ -43,11 +52,12 @@ def _indexer_worker_chunk(args):
     """
     start, end, path, interval, chunk_id = args
     try:
+        global _shared_progress_bytes
         line_count = 0
         index_entries: List[Tuple[int, int]] = []
         last_idx = start  # ostatni offset gdzie zapisaliśmy index entry
         local_line = 0
-        READ_CHUNK = 16 * 1024 * 1024  # 16 MB — większy = lepsza lokalność
+        READ_CHUNK = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
         carry = b""
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
@@ -60,6 +70,11 @@ def _indexer_worker_chunk(args):
                     break
                 chunk_len = len(chunk)
                 bytes_processed += chunk_len
+
+                # Aktualizuj postęp płynnie
+                if _shared_progress_bytes is not None:
+                    with _shared_progress_bytes.get_lock():
+                        _shared_progress_bytes.value += chunk_len
 
                 # Połącz carry z poprzedniego chunka z nowym chunkiem.
                 # carry to niepełna ostatnia linia z poprzedniego chunku TEGO
@@ -184,44 +199,52 @@ class LineIndexer:
     def _build_parallel(self) -> None:
         """Indeksowanie równoległe z multiprocessing.
 
-        Emituje postęp w trakcie — dzieli plik na dużo mniejsze chunki (~256 MB)
-        niż liczba workerów, dzięki czemu postęp aktualizuje się płynnie
-        (co ~2-3 sekundy przy 100 MB/s dysku), a nie skokami co 12.5% na 8 CPU.
-        Pool automatycznie kolejkuje chunki między workerami.
+        Emituje postęp niezwykle płynnie przy użyciu współdzielonego licznika.
+        Dzieli plik na chunki dla workerów proporcjonalnie do ich ilości.
         """
         n_workers = max(2, multiprocessing.cpu_count())
-        # Podziel na chunki ~256 MB — więcej chunków niż workerów = płynny postęp.
-        # Dla 25 GB → ~100 chunków, postęp co ~2.5s. Dla 1 GB → 4 chunki.
-        CHUNK_BYTES = 256 * 1024 * 1024
-        n_chunks = max(n_workers, (self.size + CHUNK_BYTES - 1) // CHUNK_BYTES)
+        # Mniej chunków przyspiesza wykonanie bez narzutu na inicjalizację workerów,
+        # bo płynny postęp jest teraz raportowany z wnętrza chunka na bieżąco.
+        # Minimalna liczba chunków = n_workers * 2 aby równo rozłożyć pracę.
+        n_chunks = n_workers * 2
         chunk_size = self.size // n_chunks
         ranges = []
         for i in range(n_chunks):
             start = i * chunk_size
             end = (i + 1) * chunk_size if i < n_chunks - 1 else self.size
-            ranges.append((start, end, self.path, self.index_interval_bytes, i))
+            if end > start:  # zapobiega przekazaniu pustych przedziałów
+                ranges.append((start, end, self.path, self.index_interval_bytes, i))
 
-        # imap_unordered — zwraca wyniki gdy tylko są gotowe (nie czeka na
-        # wszystkie). Pozwala emitować postęp w trakcie.
-        # chunksize=1 — każdy chunk jest duży (256 MB), więc nie opłaca się
-        # grupować ich dalej. Lepsze dla płynnego postępu.
+        if not ranges:
+            self._build_single()
+            return
+
+        shared_progress = multiprocessing.Value('Q', 0)
         results = []
         cancelled = False
-        with multiprocessing.Pool(n_workers) as pool:
-            for i, result in enumerate(pool.imap_unordered(_indexer_worker_chunk, ranges, chunksize=1)):
-                # Sprawdź anulowanie — jeśli user wcisnął Anuluj, przerwij.
+
+        with multiprocessing.Pool(n_workers, initializer=_init_worker, initargs=(shared_progress,)) as pool:
+            # Użyj map_async zamiast imap_unordered, by móc aktywnie monitorować postęp
+            result_async = pool.map_async(_indexer_worker_chunk, ranges)
+
+            # Pętla nasłuchująca w czasie rzeczywistym
+            while not result_async.ready():
                 if self._cancel_event is not None and self._cancel_event.is_set():
                     cancelled = True
+                    pool.terminate()
                     break
-                results.append(result)
-                # Emituj postęp proporcjonalnie do ukończonych chunków.
+
                 if self._progress_cb:
-                    pct = (i + 1) / len(ranges) * 100.0
+                    bytes_done = shared_progress.value
+                    pct = (bytes_done / self.size) * 100.0
+                    if pct > 99.9:
+                        pct = 99.9
                     self._progress_cb(pct)
-            # pool.terminate() automatycznie przy __exit__, ale jeśli
-            # anulowano, wymuś natychmiastowe zamknięcie.
-            if cancelled:
-                pool.terminate()
+
+                time.sleep(0.05)  # Częstotliwość odświeżania paska: 20 FPS
+
+            if not cancelled:
+                results = result_async.get()
 
         if cancelled:
             # Nie buduj indeksu — wróć z pustym. Worker sprawdzi cancel_event
