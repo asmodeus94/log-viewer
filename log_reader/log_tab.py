@@ -41,7 +41,7 @@ from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
 from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog
-
+from .ui.ui_log_tab import Ui_LogTab
 
 class LogTab(QWidget):
     """Jedna zakładka = jeden plik. Zawiera całą logikę per-file.
@@ -135,7 +135,9 @@ class LogTab(QWidget):
         self._last_formatter: str = "JSON"
 
         # Build UI
-        self._build_ui()
+        self.ui = Ui_LogTab()
+        self.ui.setupUi(self)
+        self._setup_ui_elements()
         self._apply_font_to_text()
 
         # Timer do sprawdzania krawędzi
@@ -190,114 +192,67 @@ class LogTab(QWidget):
         return self._main.theme
 
     # ------------------------------------------------------------------ UI
-    def _build_ui(self) -> None:
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+    def _setup_ui_elements(self) -> None:
+        self.splitter = self.ui.splitter
+        self.v_splitter = self.ui.v_splitter
 
-        self.splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(self.splitter)
+        self.splitter.setSizes([200, 900, 48])
+        self.v_splitter.setSizes([500, 150])
 
-        # Panel boczny
-        side_panel = QWidget()
-        side_layout = QVBoxLayout(side_panel)
-        side_layout.setContentsMargins(4, 4, 4, 4)
-        self.splitter.addWidget(side_panel)
+        # Aliases for convenience
+        self._lbl_bookmarks = self.ui._lbl_bookmarks
+        self._lbl_edits = self.ui._lbl_edits
+        self.bm_tree = self.ui.bm_tree
+        self.ed_tree = self.ui.ed_tree
+        self.btn_del_bookmarks = self.ui.btn_del_bookmarks
+        self.btn_del_edits = self.ui.btn_del_edits
+        self.text = self.ui.text
+        self._search_results_label = self.ui._search_results_label
+        self.search_results_view = self.ui.search_results_view
+        self.minimap = self.ui.minimap
+        self.pct_label = self.ui.pct_label
 
-        self._lbl_bookmarks = QLabel(self.t("lbl_bookmarks"))
-        side_layout.addWidget(self._lbl_bookmarks)
-        self.bm_tree = QTreeWidget()
-        self.bm_tree.setHeaderLabels([self.t("col_line")])
-        self.bm_tree.setRootIsDecorated(False)
-        self.bm_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.bm_tree.setUniformRowHeights(True)
+        # Set up signals
         self.bm_tree.itemDoubleClicked.connect(self._goto_bookmark)
-        side_layout.addWidget(self.bm_tree, 1)
-        self.btn_del_bookmarks = QPushButton(self.t("btn_delete_sel"))
         self.btn_del_bookmarks.clicked.connect(self._delete_selected_bookmarks)
-        side_layout.addWidget(self.btn_del_bookmarks)
-        # Delete/Backspace usuwa zaznaczone zakładki (pojedynczą lub wiele)
         QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.bm_tree,
                         activated=self._delete_selected_bookmarks)
         QtGui.QShortcut(QKeySequence("Backspace"), self.bm_tree,
                         activated=self._delete_selected_bookmarks)
 
-        self._lbl_edits = QLabel(self.t("lbl_edits"))
-        side_layout.addWidget(self._lbl_edits)
-        self.ed_tree = QTreeWidget()
-        self.ed_tree.setHeaderLabels([self.t("col_line")])
-        self.ed_tree.setRootIsDecorated(False)
-        self.ed_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.ed_tree.setUniformRowHeights(True)
         self.ed_tree.itemDoubleClicked.connect(self._goto_edit)
-        side_layout.addWidget(self.ed_tree, 1)
-        self.btn_del_edits = QPushButton(self.t("btn_delete_sel"))
         self.btn_del_edits.clicked.connect(self._delete_selected_edits)
-        side_layout.addWidget(self.btn_del_edits)
         QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.ed_tree,
                         activated=self._delete_selected_edits)
         QtGui.QShortcut(QKeySequence("Backspace"), self.ed_tree,
                         activated=self._delete_selected_edits)
 
-        # Log view + Search results (vertical splitter)
-        self.text = LogPlainTextEdit()
-        # DnD z text widget → deleguj do LogViewerWindow
         self.text.files_dropped.connect(self._main._on_files_dropped)
-        # Połącz scrollbar z aktualizacją slidera (z debouncing)
         self.text.verticalScrollBar().valueChanged.connect(self._on_scroll_changed)
-        # Bieżąca linia — delikatne tło pod kursorem (VS Code-style).
-        # Utrzymujemy listę ExtraSelections z aktualną linią + ewentualnym
-        # podświetleniem wyniku wyszukiwania. cursorPositionChanged odświeża
-        # tę listę przy każdym ruchu kursora (strzałki, klik, skok z panelu).
         self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
         self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
-        # Uruchomione lazy — pierwsze przerysowanie po _load_window.
 
-        # Panel wyników wyszukiwania (pod log view)
-        search_panel = QWidget()
-        search_layout = QVBoxLayout(search_panel)
-        search_layout.setContentsMargins(4, 0, 4, 4)
-        self._search_results_label = QLabel(self.t("lbl_search_results_empty"))
-        search_layout.addWidget(self._search_results_label)
         self._search_model = SearchResultsModel()
-        self.search_results_view = QListView()
-        self.search_results_view.setUniformItemSizes(True)
         self.search_results_view.setModel(self._search_model)
-        self.search_results_view.setAlternatingRowColors(True)
         mono_font = QFont("Menlo", 9) if sys.platform == "darwin" else QFont("DejaVu Sans Mono", 9)
         mono_font.setStyleHint(QFont.Monospace)
         self.search_results_view.setFont(mono_font)
         self.search_results_view.clicked.connect(self._on_search_result_clicked)
-        search_layout.addWidget(self.search_results_view, 1)
 
-        self.v_splitter = QSplitter(Qt.Vertical)
-        self.v_splitter.addWidget(self.text)
-        self.v_splitter.addWidget(search_panel)
-        self.v_splitter.setSizes([500, 150])
-
-        self.splitter.addWidget(self.v_splitter)
-        self.splitter.setSizes([200, 900])
-
-        # Mini-map + Slider pozycji (po prawej)
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(0)
-
-        self.minimap = MiniMap()
         self.minimap.position_clicked.connect(self._on_minimap_click)
-        right_layout.addWidget(self.minimap, 1)
-
-        sep = QFrame()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background-color: {THEME_DARK['border']};")
-        right_layout.addWidget(sep)
-
-        self.pct_label = QLabel("0%")
-        self.pct_label.setAlignment(Qt.AlignCenter)
         self.pct_label.setStyleSheet(f"color: {THEME_DARK['fg_dim']}; font-size: 10px; padding: 4px;")
-        right_layout.addWidget(self.pct_label)
+        if hasattr(self.ui, 'sep'):
+            self.ui.sep.setStyleSheet(f"background-color: {THEME_DARK['border']};")
 
-        self.splitter.addWidget(right_panel)
+        # Set up translated labels that UI compiler wouldn't know
+        self._lbl_bookmarks.setText(self.t("lbl_bookmarks"))
+        self._lbl_edits.setText(self.t("lbl_edits"))
+        self.bm_tree.setHeaderLabels([self.t("col_line")])
+        self.ed_tree.setHeaderLabels([self.t("col_line")])
+        self.btn_del_bookmarks.setText(self.t("btn_delete_sel"))
+        self.btn_del_edits.setText(self.t("btn_delete_sel"))
+        self._search_results_label.setText(self.t("lbl_search_results_empty"))
+
 
     def _apply_font_to_text(self) -> None:
         family = self.font_family or (
