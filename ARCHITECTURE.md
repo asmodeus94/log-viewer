@@ -8,26 +8,30 @@ Poniższy diagram ilustruje, w jaki sposób komponenty wewnątrz pakietu współ
 
 ```mermaid
 flowchart TD
-    A["app.py (LogViewerWindow)"] --> B["app.py (LogTab)"]
-    B -->|Zleca indeksację w tle| C("workers.py: IndexerWorker")
-    C -->|Indeksuje plik partiami| D["indexer.py: LineIndexer"]
-    D -->|Zwraca indeksy linii do GUI| B
-    B -->|Pobiera potrzebne linie do wizualizacji| D
-    B -->|Aktualizuje i renderuje| E["widgets.py: LogPlainTextEdit & MiniMap"]
-    B -->|Żąda wyszukiwania / filtrowania| F("workers.py: FilterWorker")
-    F -->|Przeszukuje bajty asynchronicznie| G["filter_engine.py: FilterEngine"]
-    G -->|Zwraca trafienia regex/zwykłe| B
+    A["main_window.py (LogViewerWindow)"] --> B["log_tab.py (LogTab)"]
+    B -->|"Zleca indeksację w tle"| C("workers.py: IndexerWorker")
+    C -->|"Indeksuje plik partiami"| D["indexer.py: LineIndexer"]
+    D -->|"Zwraca indeksy linii do GUI"| B
+    B -->|"Pobiera potrzebne linie do wizualizacji"| D
+    B -->|"Aktualizuje i renderuje"| E["widgets.py: LogPlainTextEdit & MiniMap"]
+    B -->|"Żąda wyszukiwania / filtrowania"| F("workers.py: FilterWorker")
+    F -->|"Przeszukuje bajty asynchronicznie"| G["filter_engine.py: FilterEngine"]
+    G -->|"Zwraca trafienia regex/zwykłe"| B
 
 ```
 
 ## Podział na Moduły i Ich Odpowiedzialność
 
-### 1. `app.py`
-Pełni rolę kontrolera i punktu wejścia dla logiki biznesowej okna aplikacji. Zawiera dwie główne klasy:
-* `LogViewerWindow`: Główne okno (dziedziczy z `QMainWindow`), które zawiaduje globalnymi konfiguracjami, wsparciem dla Drag & Drop oraz globalnymi skrótami klawiszowymi. Reaguje jako menedżer kart (tabs).
-* `LogTab`: Widżet jednej otwartej zakładki dla pojedynczego pliku. Klasa spina komponenty z widoku, workerów pracujących w tle oraz silnik filtrów. Odpowiada również za utrzymanie wirtualnego ekranu (ładowanie widocznych bloków tekstu).
+### 1. `main_window.py`
+Pełni rolę kontrolera głównego okna aplikacji. Zawiera klasę `LogViewerWindow` (dziedziczącą z `QMainWindow`), która zawiaduje globalnymi konfiguracjami, wsparciem dla Drag & Drop, globalnymi skrótami klawiszowymi oraz zarządza menedżerem kart (tabs).
 
-### 2. `indexer.py`
+### 2. `log_tab.py`
+Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą zakładkę pliku. Klasa ta łączy i spina komponenty z widoku, workerów asynchronicznych oraz silnik filtrowania. Odpowiada za bezpośrednią edycję tekstu i podtrzymanie wirtualnego widoku w UI (ładowanie jedynie widocznych bloków tekstu z pamięci).
+
+### 3. `app.py`
+Plik zredukowany do roli fasady importującej klasy z `main_window.py` oraz `log_tab.py`, zachowując wsteczną kompatybilność importów w innych częściach aplikacji i testach.
+
+### 4. `indexer.py`
 Stanowi jądro mechanizmu pozwalającego obsłużyć ogromne pliki. Moduł wykorzystuje paczkę `multiprocessing` oraz metody indeksowania w celu minimalizowania obciążenia pamięci.
 * Zawiera moduł `LineIndexer`, który z wykorzystaniem asynchronicznych workerów analizuje plik w dużych częściach (np. po 256MB), ustalając relacje liczby linii w stosunku do przesunięć bajtów w pliku (`IndexEntry`). Indeks jest potem używany w aplikacji do szybkiego poruszania się po wielogigabajtowym pliku.
 

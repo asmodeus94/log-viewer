@@ -244,7 +244,7 @@ class TestSearchFlow:
         # Patch messagebox by uniknąć blokowania
         from log_reader import app as app_module
         from unittest.mock import patch
-        with patch.object(app_module.QtWidgets.QMessageBox, 'information'):
+        with patch.object(QtWidgets.QMessageBox, 'information'):
             window.search_entry.setText("NONEXISTENT_XYZ_12345")
             window.cmd_find_next()
             for _ in range(200):
