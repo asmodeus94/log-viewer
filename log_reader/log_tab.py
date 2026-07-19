@@ -196,7 +196,7 @@ class LogTab(QWidget):
         self.splitter = self.ui.splitter
         self.v_splitter = self.ui.v_splitter
 
-        self.splitter.setSizes([200, 900])
+        self.splitter.setSizes([200, 900, 48])
         self.v_splitter.setSizes([500, 150])
 
         # Aliases for convenience
