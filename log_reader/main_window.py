@@ -258,8 +258,33 @@ class LogViewerWindow(QMainWindow):
                 color: {t["fg_main"]};
                 border: 1px solid {t["border"]};
             }}
+
             QMenu::item:selected {{
                 background-color: {t["accent"]};
+            }}
+            QMenu::item:disabled {{
+                color: #555555;
+            }}
+            QPushButton:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
+            }}
+            QLineEdit:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
+            }}
+            QCheckBox:disabled {{
+                color: #555555;
+            }}
+            QLabel:disabled {{
+                color: #555555;
+            }}
+            QSpinBox:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
             }}
             QStatusBar {{
                 background-color: {t["bg_statusbar"]};
