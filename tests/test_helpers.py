@@ -56,6 +56,34 @@ class TestTruncateForDisplay:
         assert was_truncated is True
         assert len(result) == 100  # code points, nie bajty
 
+    def test_very_short_max_length(self):
+        # Kiedy max_length jest mniejsze niż długość generowanego sufiksu.
+        # Np. dla text = "A" * 50 i max_length = 10
+        # Sufiks " ... [truncated 40 chars]" ma 25 znaków.
+        # W tym przypadku funkcja powinna zwrócić sam sufiks (mimo że przekracza on max_length).
+        text = "A" * 50
+        result, was_truncated = truncate_for_display(text, max_length=10)
+        assert was_truncated is True
+        assert result == " ... [truncated 40 chars]"
+
+    @pytest.mark.parametrize("length, max_length, should_truncate", [
+        (99, 100, False),   # Krótszy niż limit
+        (100, 100, False),  # Dokładnie równy limitowi
+        (101, 100, True),   # O jeden znak dłuższy niż limit
+    ])
+    def test_boundary_lengths(self, length, max_length, should_truncate):
+        text = "x" * length
+        result, was_truncated = truncate_for_display(text, max_length=max_length)
+
+        assert was_truncated is should_truncate
+
+        if should_truncate:
+            assert len(result) == max_length
+            assert "truncated" in result
+        else:
+            assert result == text
+            assert len(result) == length
+
 
 class TestParseDndFiles:
     def test_simple_unix_path(self):
