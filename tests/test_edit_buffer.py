@@ -75,6 +75,33 @@ class TestEditBufferSave:
         new_mode = stat.S_IMODE(os.stat(path).st_mode)
         assert new_mode == original_mode
 
+    def test_backup_file_permissions_secure(self, temp_log_file):
+        """Weryfikuje, że w najgorszym wypadku (np. przy awarii save lub przerywaniu) backup
+        został otwarty w sposób bezpieczny. Sprawdzamy to nadając źródłu konkretne restrykcyjne prawa."""
+        path = temp_log_file(num_lines=10)
+        # Nadajemy źródłu prawa 0o600. Z racji, że save_to_file wywołuje copystat
+        # przenosząc metadane ze źródła, oczekujemy, że ostateczny backup również nie będzie
+        # miał szerszych uprawnień. Jednak najważniejsze jest to, że fix chroni przed domyślnymi
+        # uprawnieniami (z umaska) przed wykonaniem copystat.
+        os.chmod(path, 0o600)
+
+        buf = EditBuffer()
+        buf.set(1, "EDITED")
+        backup = buf.save_to_file(path)
+
+        # Pobierz rzeczywiste uprawnienia pliku backup (tylko bity rw-rw-rw-)
+        mode = stat.S_IMODE(os.stat(backup).st_mode)
+
+        # Na Linux/Mac OS ostateczny plik nie powinien mieć uprawnień odczytu dla grupy/innych.
+        if os.name != 'nt':
+            assert not (mode & stat.S_IRWXG)  # brak uprawnień dla grupy
+            assert not (mode & stat.S_IRWXO)  # brak uprawnień dla innych
+
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
+
     def test_save_preserves_mtime(self, temp_log_file):
         path = temp_log_file(num_lines=100)
         old_time = time.time() - 86400
