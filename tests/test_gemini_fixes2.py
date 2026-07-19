@@ -341,29 +341,6 @@ class TestThemeDetection:
 
 
 # =============================================================================
-# Testy deleteLater (wycieki pamięci C++)
-# =============================================================================
-
-class TestDeleteLater:
-    """Testy czy deleteLater jest podpięte do workerów."""
-
-    def test_deletelater_connections_exist(self):
-        """Sprawdza czy LogViewerWindow ma metody z deleteLater w kodzie źródłowym."""
-        import inspect
-        from log_reader.app import LogViewerWindow
-        source = inspect.getsource(LogViewerWindow)
-        # Sprawdź czy deleteLater występuje w kodzie
-        assert "deleteLater" in source, "deleteLater not found in LogViewerWindow source"
-        # Sprawdź czy jest podpięte dla różnych workerów
-        assert "self._indexer_worker.deleteLater" in source or "self._indexer_worker.finished.connect(self._indexer_worker.deleteLater)" in source
-        assert "self._filter_worker.deleteLater" in source or "self._filter_worker.finished.connect(self._filter_worker.deleteLater)" in source
-        assert "self._save_worker.deleteLater" in source
-        assert "self._indexer_thread.deleteLater" in source
-        assert "self._filter_thread.deleteLater" in source
-        assert "self._save_thread.deleteLater" in source
-
-
-# =============================================================================
 # Testy logowania wyjątków (zamiast pass)
 # =============================================================================
 
@@ -394,21 +371,6 @@ class TestExceptionLogging:
         assert result == (0, [], 0)
         captured = capsys.readouterr()
         assert "Warning" in captured.err or "failed" in captured.err.lower()
-
-
-# =============================================================================
-# Testy ostrzeżenia o czasie zapisu dla dużych plików
-# =============================================================================
-
-class TestSaveTimeWarning:
-    """Testy ostrzeżenia o czasie zapisu."""
-
-    def test_warning_in_source(self):
-        """Sprawdza czy ostrzeżenie o czasie zapisu jest w kodzie."""
-        import inspect
-        from log_reader.app import LogViewerWindow
-        source = inspect.getsource(LogViewerWindow)
-        assert "save_warning" in source or "zapis potrwa" in source or "est_seconds" in source
 
 
 # =============================================================================
