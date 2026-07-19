@@ -41,7 +41,7 @@ from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
 from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog
-
+from .ui.ui_main_window import Ui_LogViewerWindow
 
 from .log_tab import LogTab
 
@@ -67,6 +67,9 @@ class LogViewerWindow(QMainWindow):
     def __init__(self, config: Optional[UserConfig] = None,
                  initial_file: Optional[str] = None):
         super().__init__()
+        self.ui = Ui_LogViewerWindow()
+        self.ui.setupUi(self)
+
         self.config = config if config is not None else UserConfig()
         self.lang = self.config.get("language", "pl")
         self.encoding: str = self.config.get("encoding", DEFAULT_ENCODING)
@@ -83,9 +86,17 @@ class LogViewerWindow(QMainWindow):
         self._enc_action_group: Optional[QtGui.QActionGroup] = None
 
         # Build UI
-        self._build_ui()
+        self.tabs = self.ui.tabs
+        self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+
+        self._build_toolbar()
+        self._rebuild_menubar()
+
         self._apply_language()
         self._apply_theme()
+
+        self.statusBar().showMessage(self.t("st_ready"))
 
         if initial_file:
             QTimer.singleShot(100, lambda: self.open_file_in_tab(initial_file))
@@ -435,28 +446,6 @@ class LogViewerWindow(QMainWindow):
             tab = self.tabs.widget(i)
             if isinstance(tab, LogTab):
                 tab._apply_theme()
-
-    def _build_ui(self) -> None:
-        self.setMinimumSize(900, 600)
-        self.setAcceptDrops(True)
-
-        central = QWidget()
-        self.setCentralWidget(central)
-        central_layout = QVBoxLayout(central)
-        central_layout.setContentsMargins(0, 0, 0, 0)
-        central_layout.setSpacing(0)
-
-        # QTabWidget — każda zakładka to LogTab
-        self.tabs = QTabWidget()
-        self.tabs.setTabsClosable(True)
-        self.tabs.setMovable(True)
-        self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
-        central_layout.addWidget(self.tabs)
-
-        self._build_toolbar()
-        self._rebuild_menubar()
-        self.statusBar().showMessage(self.t("st_ready"))
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar()

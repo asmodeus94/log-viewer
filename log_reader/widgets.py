@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 
 from .helpers import THEME
 from .formatters import FORMATTERS
+from .ui.ui_settings_dialog import Ui_SettingsDialog
+from .ui.ui_format_dialog import Ui_FormatDialog
 
 
 class LineNumberArea(QWidget):
@@ -151,68 +153,35 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent, app):
         super().__init__(parent)
+        self.ui = Ui_SettingsDialog()
+        self.ui.setupUi(self)
         self._app = app
         self.t = app.t
         self.setWindowTitle(self.t("dlg_settings_title"))
-        self.setMinimumWidth(440)
 
-        layout = QGridLayout(self)
-        row = 0
+        self.font_combo = self.ui.font_combo
+        self.size_spin = self.ui.size_spin
+        self.ws_spin = self.ui.ws_spin
+        self.md_spin = self.ui.md_spin
+        self.ml_spin = self.ui.ml_spin
+        self.ii_spin = self.ui.ii_spin
 
-        layout.addWidget(QLabel(self.t("lbl_font_family")), row, 0)
-        self.font_combo = QFontComboBox()
+        # Inicjalizacja wartości z configu
         if app.font_family:
             self.font_combo.setCurrentFont(QFont(app.font_family))
-        layout.addWidget(self.font_combo, row, 1)
-        row += 1
-
-        layout.addWidget(QLabel(self.t("lbl_font_size")), row, 0)
-        self.size_spin = QSpinBox()
-        self.size_spin.setRange(6, 72)
         self.size_spin.setValue(app.font_size)
-        layout.addWidget(self.size_spin, row, 1)
-        row += 1
-
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep, row, 0, 1, 2)
-        row += 1
-
-        layout.addWidget(QLabel(self.t("lbl_window_size")), row, 0)
-        self.ws_spin = QSpinBox()
-        self.ws_spin.setRange(100, 50000)
-        self.ws_spin.setSingleStep(100)
         self.ws_spin.setValue(app.window_size_lines)
-        layout.addWidget(self.ws_spin, row, 1)
-        row += 1
-
-        layout.addWidget(QLabel(self.t("lbl_max_display_lines")), row, 0)
-        self.md_spin = QSpinBox()
-        self.md_spin.setRange(1000, 200000)
-        self.md_spin.setSingleStep(1000)
         self.md_spin.setValue(app.max_display_lines)
-        layout.addWidget(self.md_spin, row, 1)
-        row += 1
-
-        layout.addWidget(QLabel(self.t("lbl_max_line_length")), row, 0)
-        self.ml_spin = QSpinBox()
-        self.ml_spin.setRange(100, 100000)
-        self.ml_spin.setSingleStep(100)
         self.ml_spin.setValue(app.max_display_line_length)
-        layout.addWidget(self.ml_spin, row, 1)
-        row += 1
-
-        layout.addWidget(QLabel(self.t("lbl_index_interval")), row, 0)
-        self.ii_spin = QSpinBox()
-        self.ii_spin.setRange(1, 100)
         self.ii_spin.setValue(app.index_interval_bytes // (1024 * 1024))
-        layout.addWidget(self.ii_spin, row, 1)
-        row += 1
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons, row, 0, 1, 2)
+        # Ustaw etykiety z i18n
+        self.ui.lbl_font_family.setText(self.t("lbl_font_family"))
+        self.ui.lbl_font_size.setText(self.t("lbl_font_size"))
+        self.ui.lbl_window_size.setText(self.t("lbl_window_size"))
+        self.ui.lbl_max_display_lines.setText(self.t("lbl_max_display_lines"))
+        self.ui.lbl_max_line_length.setText(self.t("lbl_max_line_length"))
+        self.ui.lbl_index_interval.setText(self.t("lbl_index_interval"))
 
     def get_values(self) -> Tuple[str, int, int, int, int, int]:
         family = self.font_combo.currentFont().family()
@@ -458,19 +427,17 @@ class FormatDialog(QDialog):
     """
     def __init__(self, parent, text: str, initial_formatter: str = "JSON"):
         super().__init__(parent)
+        self.ui = Ui_FormatDialog()
+        self.ui.setupUi(self)
+
         self.original_text = text
         self.app = parent.window() if hasattr(parent, 'window') else parent
         self.t = self.app.t if hasattr(self.app, 't') else lambda k: k
 
         self.setWindowTitle(self.t("dlg_format_title"))
-        self.setMinimumSize(600, 400)
+        self.ui.lbl_formatter.setText(self.t("lbl_formatter"))
 
-        layout = QVBoxLayout(self)
-
-        # Panel kontrolny na górze
-        ctrl_layout = QHBoxLayout()
-        ctrl_layout.addWidget(QLabel(self.t("lbl_formatter")))
-        self.formatter_combo = QComboBox()
+        self.formatter_combo = self.ui.formatter_combo
         self.formatter_combo.addItems(list(FORMATTERS.keys()))
 
         # Ustaw początkowy formatter, jeśli istnieje
@@ -479,24 +446,12 @@ class FormatDialog(QDialog):
             self.formatter_combo.setCurrentIndex(idx)
 
         self.formatter_combo.currentTextChanged.connect(self._apply_format)
-        ctrl_layout.addWidget(self.formatter_combo)
-        ctrl_layout.addStretch()
-        layout.addLayout(ctrl_layout)
 
-        # Podgląd sformatowanego tekstu
-        self.text_edit = QPlainTextEdit()
-        self.text_edit.setReadOnly(True)
+        self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
         font = QFont("Monospace", 10)
         font.setStyleHint(QFont.Monospace)
         self.text_edit.setFont(font)
-
-        layout.addWidget(self.text_edit)
-
-        # Przycisk zamknięcia
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
 
         # Zastosuj formatowanie przy otwarciu
         self._apply_format(self.formatter_combo.currentText())
