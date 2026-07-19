@@ -84,6 +84,7 @@ class LogViewerWindow(QMainWindow):
         self.theme: dict = THEME_DARK
         self._follow_action: Optional[QAction] = None
         self._enc_action_group: Optional[QtGui.QActionGroup] = None
+        self._is_restoring_toolbar: bool = False
 
         # Build UI
         self.tabs = self.ui.tabs
@@ -257,8 +258,33 @@ class LogViewerWindow(QMainWindow):
                 color: {t["fg_main"]};
                 border: 1px solid {t["border"]};
             }}
+
             QMenu::item:selected {{
                 background-color: {t["accent"]};
+            }}
+            QMenu::item:disabled {{
+                color: #555555;
+            }}
+            QPushButton:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
+            }}
+            QLineEdit:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
+            }}
+            QCheckBox:disabled {{
+                color: #555555;
+            }}
+            QLabel:disabled {{
+                color: #555555;
+            }}
+            QSpinBox:disabled {{
+                color: #555555;
+                background-color: {t["bg_panel"]};
+                border: 1px solid #333333;
             }}
             QStatusBar {{
                 background-color: {t["bg_statusbar"]};
@@ -514,33 +540,58 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
         toolbar.addWidget(self.btn_clear_filter)
 
+        self.search_entry.textChanged.connect(self._save_toolbar_to_tab)
+        self.search_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.search_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.search_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
+
+        self.filter_entry.textChanged.connect(self._save_toolbar_to_tab)
+        self.filter_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.filter_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.filter_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.filter_context_spin.valueChanged.connect(self._save_toolbar_to_tab)
+
+
     def _rebuild_menubar(self) -> None:
         menubar = self.menuBar()
         menubar.clear()
 
         file_menu = menubar.addMenu(self.t("menu_file"))
         file_menu.addAction(self._mkaction(self.t("mi_open"), "Ctrl+O", self.cmd_open))
-        file_menu.addAction(self._mkaction(self.t("mi_save"), "Ctrl+S", self.cmd_save_edits))
-        file_menu.addAction(self._mkaction(self.t("mi_save_as"), "", self.cmd_save_as))
+        self._action_save = self._mkaction(self.t("mi_save"), "Ctrl+S", self.cmd_save_edits)
+        file_menu.addAction(self._action_save)
+        self._action_save_as = self._mkaction(self.t("mi_save_as"), "", self.cmd_save_as)
+        file_menu.addAction(self._action_save_as)
         file_menu.addSeparator()
-        file_menu.addAction(self._mkaction(self.t("mi_export"), "Ctrl+E", self.cmd_export))
+        self._action_export = self._mkaction(self.t("mi_export"), "Ctrl+E", self.cmd_export)
+        file_menu.addAction(self._action_export)
         file_menu.addSeparator()
         file_menu.addAction(self._mkaction(self.t("mi_exit"), "Ctrl+Q", self.close))
 
         edit_menu = menubar.addMenu(self.t("menu_edit"))
-        edit_menu.addAction(self._mkaction(self.t("mi_find"), "Ctrl+F", self.cmd_find_dialog))
-        edit_menu.addAction(self._mkaction(self.t("mi_find_next"), "F3", self.cmd_find_next))
-        edit_menu.addAction(self._mkaction(self.t("mi_find_prev"), "Shift+F3", self.cmd_find_prev))
-        edit_menu.addAction(self._mkaction(self.t("btn_clear_search"), "", self.cmd_clear_search))
+        self._action_find = self._mkaction(self.t("mi_find"), "Ctrl+F", self.cmd_find_dialog)
+        edit_menu.addAction(self._action_find)
+        self._action_find_next = self._mkaction(self.t("mi_find_next"), "F3", self.cmd_find_next)
+        edit_menu.addAction(self._action_find_next)
+        self._action_find_prev = self._mkaction(self.t("mi_find_prev"), "Shift+F3", self.cmd_find_prev)
+        edit_menu.addAction(self._action_find_prev)
+        self._action_clear_search = self._mkaction(self.t("btn_clear_search"), "", self.cmd_clear_search)
+        edit_menu.addAction(self._action_clear_search)
         edit_menu.addSeparator()
-        edit_menu.addAction(self._mkaction(self.t("mi_filter"), "Ctrl+L", self.cmd_filter_dialog))
-        edit_menu.addAction(self._mkaction(self.t("mi_clear_filter"), "", self.cmd_clear_filter))
+        self._action_filter = self._mkaction(self.t("mi_filter"), "Ctrl+L", self.cmd_filter_dialog)
+        edit_menu.addAction(self._action_filter)
+        self._action_clear_filter = self._mkaction(self.t("mi_clear_filter"), "", self.cmd_clear_filter)
+        edit_menu.addAction(self._action_clear_filter)
         edit_menu.addSeparator()
-        edit_menu.addAction(self._mkaction(self.t("mi_edit_line"), "Ctrl+D", self.cmd_edit_line))
-        edit_menu.addAction(self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection))
+        self._action_edit_line = self._mkaction(self.t("mi_edit_line"), "Ctrl+D", self.cmd_edit_line)
+        edit_menu.addAction(self._action_edit_line)
+        self._action_format_selection = self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection)
+        edit_menu.addAction(self._action_format_selection)
         edit_menu.addSeparator()
-        edit_menu.addAction(self._mkaction(self.t("mi_save_edits"), "", self.cmd_save_edits))
-        edit_menu.addAction(self._mkaction(self.t("mi_clear_edits"), "", self.cmd_clear_edits))
+        self._action_save_edits = self._mkaction(self.t("mi_save_edits"), "", self.cmd_save_edits)
+        edit_menu.addAction(self._action_save_edits)
+        self._action_clear_edits = self._mkaction(self.t("mi_clear_edits"), "", self.cmd_clear_edits)
+        edit_menu.addAction(self._action_clear_edits)
 
         view_menu = menubar.addMenu(self.t("menu_view"))
         self._follow_action = self._mkaction(self.t("mi_follow"), "", self.cmd_toggle_follow)
@@ -580,18 +631,36 @@ class LogViewerWindow(QMainWindow):
         view_menu.addAction(self._mkaction(self.t("mi_settings"), "", self.cmd_settings))
 
         bm_menu = menubar.addMenu(self.t("menu_bookmarks"))
-        bm_menu.addAction(self._mkaction(self.t("mi_toggle_bookmark"), "Ctrl+B", self.cmd_toggle_bookmark))
-        bm_menu.addAction(self._mkaction(self.t("mi_next_bookmark"), "F4", self.cmd_next_bookmark))
-        bm_menu.addAction(self._mkaction(self.t("mi_prev_bookmark"), "Shift+F4", self.cmd_prev_bookmark))
+        self._action_toggle_bookmark = self._mkaction(self.t("mi_toggle_bookmark"), "Ctrl+B", self.cmd_toggle_bookmark)
+        bm_menu.addAction(self._action_toggle_bookmark)
+        self._action_next_bookmark = self._mkaction(self.t("mi_next_bookmark"), "F4", self.cmd_next_bookmark)
+        bm_menu.addAction(self._action_next_bookmark)
+        self._action_prev_bookmark = self._mkaction(self.t("mi_prev_bookmark"), "Shift+F4", self.cmd_prev_bookmark)
+        bm_menu.addAction(self._action_prev_bookmark)
         bm_menu.addSeparator()
-        bm_menu.addAction(self._mkaction(self.t("mi_clear_bookmarks"), "", self.cmd_clear_bookmarks))
+        self._action_clear_bookmarks = self._mkaction(self.t("mi_clear_bookmarks"), "", self.cmd_clear_bookmarks)
+        bm_menu.addAction(self._action_clear_bookmarks)
 
         goto_menu = menubar.addMenu(self.t("menu_goto"))
-        goto_menu.addAction(self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto))
-        goto_menu.addAction(self._mkaction(self.t("mi_goto_end"), "Ctrl+End", self.cmd_goto_end))
+        self._action_goto = self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto)
+        goto_menu.addAction(self._action_goto)
+        self._action_goto_end = self._mkaction(self.t("mi_goto_end"), "Ctrl+End", self.cmd_goto_end)
+        goto_menu.addAction(self._action_goto_end)
 
         help_menu = menubar.addMenu(self.t("menu_help"))
         help_menu.addAction(self._mkaction(self.t("mi_about"), "", self.cmd_about))
+
+        self._context_actions = [
+            self._action_save, self._action_save_as, self._action_export,
+            self._action_find, self._action_find_next, self._action_find_prev, self._action_clear_search,
+            self._action_filter, self._action_clear_filter,
+            self._action_edit_line, self._action_format_selection, self._action_save_edits, self._action_clear_edits,
+            self._follow_action,
+            self._action_toggle_bookmark, self._action_next_bookmark, self._action_prev_bookmark, self._action_clear_bookmarks,
+            self._action_goto, self._action_goto_end
+        ]
+        self._update_ui_state()
+
 
     def _mkaction(self, label: str, shortcut: str, handler) -> QAction:
         act = QAction(label, self)
@@ -621,6 +690,7 @@ class LogViewerWindow(QMainWindow):
             return None
         tab = self._new_tab(title=os.path.basename(path))
         tab.open_file(path)
+        self._update_ui_state()
         return tab
 
     def _on_tab_status_changed(self, msg: str) -> None:
@@ -636,13 +706,28 @@ class LogViewerWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         """Aktualizuje status bar, slider, minimap i follow action po zmianie zakładki."""
+        self._update_ui_state()
         if index < 0:
             self.statusBar().showMessage(self.t("st_ready"))
             if self._follow_action is not None:
                 self._follow_action.setChecked(False)
+            self._is_restoring_toolbar = True
+            try:
+                self.search_entry.clear()
+                self.search_regex_cb.setChecked(False)
+                self.search_case_cb.setChecked(False)
+                self.search_negate_cb.setChecked(False)
+                self.filter_entry.clear()
+                self.filter_regex_cb.setChecked(False)
+                self.filter_case_cb.setChecked(False)
+                self.filter_negate_cb.setChecked(False)
+                self.filter_context_spin.setValue(0)
+            finally:
+                self._is_restoring_toolbar = False
             return
         tab = self.tabs.widget(index)
         if isinstance(tab, LogTab):
+            self._load_toolbar_from_tab(tab)
             tab._refresh_status()
             tab._update_position_slider()
             tab._update_minimap_viewport()
@@ -655,6 +740,66 @@ class LogViewerWindow(QMainWindow):
             # wymusza przerysowanie.
             tab.text.setFocus()
             tab._update_current_line_highlight()
+
+
+    def _save_toolbar_to_tab(self, *args, **kwargs) -> None:
+        if self._is_restoring_toolbar: return
+        tab = self.tabs.currentWidget()
+        if not isinstance(tab, LogTab): return
+
+        tab.tb_search_text = self.search_entry.text()
+        tab.tb_search_regex = self.search_regex_cb.isChecked()
+        tab.tb_search_case = self.search_case_cb.isChecked()
+        tab.tb_search_negate = self.search_negate_cb.isChecked()
+
+        tab.tb_filter_text = self.filter_entry.text()
+        tab.tb_filter_regex = self.filter_regex_cb.isChecked()
+        tab.tb_filter_case = self.filter_case_cb.isChecked()
+        tab.tb_filter_negate = self.filter_negate_cb.isChecked()
+        tab.tb_filter_context = self.filter_context_spin.value()
+
+    def _load_toolbar_from_tab(self, tab: LogTab) -> None:
+        self._is_restoring_toolbar = True
+        try:
+            self.search_entry.setText(tab.tb_search_text)
+            self.search_regex_cb.setChecked(tab.tb_search_regex)
+            self.search_case_cb.setChecked(tab.tb_search_case)
+            self.search_negate_cb.setChecked(tab.tb_search_negate)
+
+            self.filter_entry.setText(tab.tb_filter_text)
+            self.filter_regex_cb.setChecked(tab.tb_filter_regex)
+            self.filter_case_cb.setChecked(tab.tb_filter_case)
+            self.filter_negate_cb.setChecked(tab.tb_filter_negate)
+            self.filter_context_spin.setValue(tab.tb_filter_context)
+        finally:
+            self._is_restoring_toolbar = False
+
+    def _update_ui_state(self) -> None:
+        has_tabs = self.tabs.count() > 0
+        if hasattr(self, "_context_actions"):
+            for action in self._context_actions:
+                action.setEnabled(has_tabs)
+
+        toolbar_widgets = [
+            getattr(self, "search_entry", None),
+            getattr(self, "search_regex_cb", None),
+            getattr(self, "search_case_cb", None),
+            getattr(self, "search_negate_cb", None),
+            getattr(self, "btn_find_next", None),
+            getattr(self, "btn_find_prev", None),
+            getattr(self, "btn_clear_search", None),
+
+            getattr(self, "filter_entry", None),
+            getattr(self, "filter_regex_cb", None),
+            getattr(self, "filter_case_cb", None),
+            getattr(self, "filter_negate_cb", None),
+            getattr(self, "filter_context_spin", None),
+            getattr(self, "btn_apply_filter", None),
+            getattr(self, "btn_clear_filter", None),
+        ]
+        for w in toolbar_widgets:
+            if w is not None:
+                w.setEnabled(has_tabs)
 
     def _on_tab_close_requested(self, index: int) -> None:
         tab = self.tabs.widget(index)
@@ -671,6 +816,7 @@ class LogViewerWindow(QMainWindow):
         tab.close()
         self.tabs.removeTab(index)
         tab.deleteLater()
+        self._update_ui_state()
 
     # ----------------------------------------------------------- file ops ---
     def cmd_open(self) -> None:
