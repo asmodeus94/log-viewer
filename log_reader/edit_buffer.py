@@ -100,9 +100,10 @@ class EditBuffer:
             prefix=".logreader_tmp_",
         )
         bytes_written = 0
+        bak_fd = os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             with open(src_path, "rb") as src, \
-                 open(backup_path, "wb") as bak, \
+                 os.fdopen(bak_fd, "wb") as bak, \
                  os.fdopen(tmp_fd, "wb") as out:
                 line_no = 0
                 for raw in src:
