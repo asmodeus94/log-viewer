@@ -35,18 +35,18 @@ Plik zredukowany do roli fasady importującej klasy z `main_window.py` oraz `log
 Stanowi jądro mechanizmu pozwalającego obsłużyć ogromne pliki. Moduł wykorzystuje paczkę `multiprocessing` oraz metody indeksowania w celu minimalizowania obciążenia pamięci.
 * Zawiera moduł `LineIndexer`, który z wykorzystaniem asynchronicznych workerów analizuje plik w dużych częściach (np. po 256MB), ustalając relacje liczby linii w stosunku do przesunięć bajtów w pliku (`IndexEntry`). Indeks jest potem używany w aplikacji do szybkiego poruszania się po wielogigabajtowym pliku.
 
-### 3. `filter_engine.py`
+### 5. `filter_engine.py`
 Niskopoziomowy silnik wyszukiwania i filtrowania danych realizowany w osobnym wątku.
 * Klasa `FilterEngine` przetwarza surowe bajty zamiast bezpośrednio wczytywać napisy typu String (jeśli nie zażądano wyrażeń regularnych w danym requeście). Skutkuje to ogromnym wzrostem wydajności dla wyszukiwania i odfiltrowania danych dla określonych "igieł". Moduł jest zabezpieczony przed sytuacjami typu *race conditions* dla przerywanych akcji poszukiwawczych.
 
-### 4. `workers.py`
+### 6. `workers.py`
 Katalog obiektów wspierających asynchroniczność w Qt przy użyciu technologii `QThread` i `QObject`.
 Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejścia/Wyjścia (I/O) z głównego pętli UI:
 * `IndexerWorker` – emituje zdarzenia w miarę postępu tworzenia mapowania offsetów indeksu z `LineIndexer`.
 * `FilterWorker` – spina działania `FilterEngine` wywołując asynchroniczne postępy wyszukiwania.
 * `SaveWorker` – obsługuje tło zapisu zawartości po wniesieniu edycji na poszczególnych linijkach.
 
-### 5. `widgets.py`
+### 7. `widgets.py`
 Definiuje wyspecjalizowane, wizualne komponenty widoku dla biblioteki PySide6:
 * `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
 * `MiniMap` – maluje na kanwie pionową mapę w oparciu o wykryte alerty typu *ERROR*, *WARN*, *INFO* czy *DEBUG*, oferując błyskawiczną nawigację.
