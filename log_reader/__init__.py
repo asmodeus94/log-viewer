@@ -14,7 +14,9 @@ Moduły:
   - edit_buffer: EditBuffer (edycja in-place, walidacja mtime)
   - workers: QThread workers (IndexerWorker, FilterWorker, SaveWorker)
   - widgets: LineNumberArea, LogPlainTextEdit, SettingsDialog
-  - app: LogViewerWindow (główna aplikacja PySide6)
+  - main_window: LogViewerWindow (główna aplikacja PySide6 - widżet z zakładkami)
+  - log_tab: LogTab (pojedyncza zakładka z logiem)
+  - app: Fasada w celu utrzymania kompatybilności wstecznej
 
 Użycie:
     python -m log_reader [plik.log]

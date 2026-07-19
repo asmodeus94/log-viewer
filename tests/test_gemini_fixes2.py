@@ -144,7 +144,7 @@ class TestRegexOnBytes:
         idx.close()
 
     def test_regex_with_pattern(self, temp_log_file):
-        """Regex z pattern \d+ na bajtach."""
+        """Regex z pattern \\d+ na bajtach."""
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
@@ -157,7 +157,7 @@ class TestRegexOnBytes:
             if done.is_set():
                 break
             time.sleep(0.05)
-        assert len(results) == 1000  # wszystkie linie mają line\d+
+        assert len(results) == 1000  # wszystkie linie mają line\\d+
         idx.close()
 
     def test_plain_text_and_regex_give_same_results(self, temp_log_file):
