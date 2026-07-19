@@ -21,7 +21,6 @@ Moduły:
 Użycie:
     python -m log_reader [plik.log]
 
-Autor: Super Z
 Licencja: MIT
 """
 
