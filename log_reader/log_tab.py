@@ -134,6 +134,18 @@ class LogTab(QWidget):
         # Ostatnio wybrany formatter w sesji
         self._last_formatter: str = "JSON"
 
+        # Stan Toolbara
+        self.tb_search_text: str = ""
+        self.tb_search_regex: bool = False
+        self.tb_search_case: bool = False
+        self.tb_search_negate: bool = False
+
+        self.tb_filter_text: str = ""
+        self.tb_filter_regex: bool = False
+        self.tb_filter_case: bool = False
+        self.tb_filter_negate: bool = False
+        self.tb_filter_context: int = 0
+
         # Build UI
         self.ui = Ui_LogTab()
         self.ui.setupUi(self)
