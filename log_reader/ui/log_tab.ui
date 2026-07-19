@@ -157,7 +157,14 @@
         <number>0</number>
        </property>
        <item>
-        <widget class="MiniMap" name="minimap" native="true"/>
+        <widget class="MiniMap" name="minimap" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+        </widget>
        </item>
        <item>
         <widget class="QFrame" name="sep">
