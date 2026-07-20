@@ -20,11 +20,18 @@ Aby twój wkład został pomyślnie zaakceptowany, prosimy o stosowanie się do 
 * Używaj adnotacji typów (_Type Hints_) na zdefiniowanych przez Ciebie obiektach i parametrach funkcji (np. `def fn(a: int) -> bool:`). Poprawia to czytelność kodu.
 * Skrypt i funkcjonalności powinny zawierać zwięzłe i merytoryczne tzw. _Docstrings_ (szczególnie jeżeli dany moduł realizuje złożone wyliczenia matematyczne lub specyficzną logikę wątkową).
 * Projekt korzysta i promuje posługiwanie się językiem polskim w sekcjach takich jak komentarze w kodzie, komunikacja czy dokumentacja, aby utrzymać zbieżność merytoryczną w zespole.
+* Dodając nowe teksty w interfejsie użytkownika, należy zaktualizować słowniki tłumaczeń (zarówno w języku polskim jak i angielskim) w pliku `log_reader/i18n.py`.
 
 ## Uruchamianie Testów Jednostkowych
 
 Aplikacja wykorzystuje `pytest` oraz rozszerzenie `pytest-qt` do egzekucji przypadków testowych.
-Ponieważ projekt bazuje w dużej mierze na widżetach graficznych w środowisku CI/CD lub w terminalach CLI mogą występować błędy związane z niedostępnością sesji "okienkowej" wyświetlania. Zalecamy dlatego uruchamianie testów wspierając się wirtualnym środowiskiem X (np. `xvfb` w dystrybucjach Linux).
+Ponieważ projekt bazuje w dużej mierze na widżetach graficznych, przed uruchomieniem testów upewnij się, że pliki interfejsu `.ui` są skompilowane. W przeciwnym razie testy mogą zakończyć się błędem braku modułu:
+
+```bash
+python scripts/compile_ui.py
+```
+
+W środowisku CI/CD lub w terminalach CLI mogą występować błędy związane z niedostępnością sesji "okienkowej" wyświetlania. Zalecamy dlatego uruchamianie testów wspierając się wirtualnym środowiskiem X (np. `xvfb` w dystrybucjach Linux).
 
 **Aby odpalić wszystkie testy zgrupowane pod katalogiem `tests/` wykonaj polecenie**:
 
