@@ -688,7 +688,7 @@ class LogViewerWindow(QMainWindow):
             self._action_edit_line, self._action_format_selection, self._action_save_edits, self._action_clear_edits,
             self._follow_action,
             self._action_toggle_bookmark, self._action_next_bookmark, self._action_prev_bookmark, self._action_clear_bookmarks,
-            self._action_goto, self._action_goto_end
+            self._action_goto, self._action_goto_start, self._action_goto_end
         ]
         self._update_ui_state()
 
