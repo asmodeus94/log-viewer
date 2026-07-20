@@ -18,8 +18,8 @@ def test_tab_shortcuts():
     next_shortcuts = [s.toString() for s in win._action_next_tab.shortcuts()]
     prev_shortcuts = [s.toString() for s in win._action_prev_tab.shortcuts()]
 
-    # Check that exact shortcuts are present and no others
-    # specifically ensuring there are no '{' or '}' which cause issues on macOS
+    # Sprawdzenie, czy obecne są tylko i wyłącznie poprawne skróty
+    # oraz weryfikacja braku kłopotliwych na macOS znaków '{' i '}'
     assert 'Ctrl+Tab' in next_shortcuts
     assert 'Ctrl+]' in next_shortcuts
     assert len(next_shortcuts) == 2
