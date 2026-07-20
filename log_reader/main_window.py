@@ -40,7 +40,7 @@ from .indexer import LineIndexer, IndexEntry
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
-from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog, ExpandingLineEdit
+from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog
 from .ui.ui_main_window import Ui_LogViewerWindow
 
 from .log_tab import LogTab
@@ -451,6 +451,12 @@ class LogViewerWindow(QMainWindow):
             }}
             QProgressDialog {{
                 background-color: {t["bg_panel"]};
+                min-width: 300px;
+                min-height: 120px;
+            }}
+            QProgressDialog > QPushButton {{
+                margin-top: 15px;
+                min-width: 80px;
             }}
             QDialog {{
                 background-color: {t["bg_panel"]};
@@ -483,7 +489,8 @@ class LogViewerWindow(QMainWindow):
 
         self.lbl_search = QLabel(self.t("lbl_search"))
         toolbar.addWidget(self.lbl_search)
-        self.search_entry = ExpandingLineEdit()
+        self.search_entry = QLineEdit()
+        self.search_entry.setMaximumWidth(250)
         self.search_entry.returnPressed.connect(self.cmd_find_next)
         toolbar.addWidget(self.search_entry)
 
@@ -510,7 +517,8 @@ class LogViewerWindow(QMainWindow):
 
         self.lbl_filter = QLabel(self.t("lbl_filter"))
         toolbar.addWidget(self.lbl_filter)
-        self.filter_entry = ExpandingLineEdit()
+        self.filter_entry = QLineEdit()
+        self.filter_entry.setMaximumWidth(250)
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
         toolbar.addWidget(self.filter_entry)
 
