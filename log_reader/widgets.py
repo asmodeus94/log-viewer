@@ -470,3 +470,37 @@ class FormatDialog(QDialog):
     def get_selected_formatter(self) -> str:
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
         return self.formatter_combo.currentText()
+
+class ExpandingLineEdit(QLineEdit):
+    """
+    Pole tekstowe, które dynamicznie dostosowuje swoją szerokość.
+    Ma małą minimalną szerokość, gdy jest nieaktywne (aby nie zajmować miejsca na pasku).
+    Po uzyskaniu focusu poszerza się, a w miarę wpisywania dłuższego tekstu rośnie
+    aż do limitu (max_width_limit).
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.base_min_width = 80
+        self.focused_min_width = 150
+        self.max_width_limit = 500
+
+        self.setMinimumWidth(self.base_min_width)
+        self.setMaximumWidth(self.max_width_limit)
+
+        self.textChanged.connect(self._adjust_width)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        self._adjust_width()
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        self.setMinimumWidth(self.base_min_width)
+
+    def _adjust_width(self):
+        if self.hasFocus():
+            fm = self.fontMetrics()
+            text_width = fm.horizontalAdvance(self.text()) + 30 # marginesy i padding
+            new_width = max(self.focused_min_width, text_width)
+            new_width = min(new_width, self.max_width_limit)
+            self.setMinimumWidth(new_width)
