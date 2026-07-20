@@ -628,11 +628,25 @@ class LogViewerWindow(QMainWindow):
         lang_menu.addAction(act_en)
 
         view_menu.addSeparator()
-        self._action_next_tab = self._mkaction(self.t("mi_next_tab"), QKeySequence.StandardKey.NextChild, self.cmd_next_tab)
+        self._action_next_tab = self._mkaction(
+            self.t("mi_next_tab"),
+            [QKeySequence.StandardKey.NextChild, "Ctrl+Tab", "Ctrl+}"],
+            self.cmd_next_tab
+        )
         view_menu.addAction(self._action_next_tab)
-        self._action_prev_tab = self._mkaction(self.t("mi_prev_tab"), QKeySequence.StandardKey.PreviousChild, self.cmd_prev_tab)
+
+        self._action_prev_tab = self._mkaction(
+            self.t("mi_prev_tab"),
+            [QKeySequence.StandardKey.PreviousChild, "Ctrl+Shift+Tab", "Ctrl+{"],
+            self.cmd_prev_tab
+        )
         view_menu.addAction(self._action_prev_tab)
-        self._action_close_tab = self._mkaction(self.t("mi_close_tab"), QKeySequence.StandardKey.Close, self.cmd_close_tab)
+
+        self._action_close_tab = self._mkaction(
+            self.t("mi_close_tab"),
+            QKeySequence.StandardKey.Close,
+            self.cmd_close_tab
+        )
         view_menu.addAction(self._action_close_tab)
 
         view_menu.addSeparator()
@@ -675,10 +689,19 @@ class LogViewerWindow(QMainWindow):
     def _mkaction(self, label: str, shortcut, handler) -> QAction:
         act = QAction(label, self)
         if shortcut:
-            if isinstance(shortcut, str):
-                act.setShortcut(QKeySequence(shortcut))
+            if isinstance(shortcut, list):
+                shortcuts = []
+                for s in shortcut:
+                    if isinstance(s, str):
+                        shortcuts.append(QKeySequence(s))
+                    else:
+                        shortcuts.append(s)
+                act.setShortcuts(shortcuts)
             else:
-                act.setShortcut(shortcut)
+                if isinstance(shortcut, str):
+                    act.setShortcut(QKeySequence(shortcut))
+                else:
+                    act.setShortcut(shortcut)
         act.triggered.connect(handler)
         return act
 
