@@ -11,7 +11,7 @@ from PySide6.QtGui import (
     QPainter, QFontMetrics, QDragEnterEvent, QDropEvent,
 )
 from PySide6.QtWidgets import (
-    QWidget, QPlainTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
+    QWidget, QPlainTextEdit, QTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
     QDialog, QDialogButtonBox, QSpinBox, QFontComboBox, QGridLayout,
     QFrame, QSizePolicy, QListView, QVBoxLayout, QHBoxLayout, QComboBox
 )
@@ -471,13 +471,24 @@ class FormatDialog(QDialog):
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
         return self.formatter_combo.currentText()
 
-class ExpandingLineEdit(QLineEdit):
+
+
+
+
+
+
+
+class ExpandingLineEdit(QTextEdit):
     """
-    Pole tekstowe, które dynamicznie dostosowuje swoją szerokość.
-    Ma małą minimalną szerokość, gdy jest nieaktywne (aby nie zajmować miejsca na pasku).
+    Pole tekstowe, które dynamicznie dostosowuje swoją szerokość i wysokość.
+    Udaje jednowierszowy QLineEdit, ale pod spodem jest QTextEdit.
     Po uzyskaniu focusu poszerza się, a w miarę wpisywania dłuższego tekstu rośnie
-    aż do limitu (max_width_limit).
+    aż do limitu (max_width_limit i max_height_limit). Przy przekroczeniu pojemności
+    pokazuje suwak.
+    Enter zatwierdza, Shift+Enter nowa linia.
     """
+    returnPressed = Signal()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.base_min_width = 80
@@ -487,20 +498,66 @@ class ExpandingLineEdit(QLineEdit):
         self.setMinimumWidth(self.base_min_width)
         self.setMaximumWidth(self.max_width_limit)
 
-        self.textChanged.connect(self._adjust_width)
+        self.base_height = self.fontMetrics().height() + 10
+        self.setMaximumHeight(self.base_height)
+        self.setMinimumHeight(self.base_height)
+        self.max_height_limit = 150
+
+        self.textChanged.connect(self._adjust_size)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.setAcceptRichText(False)
+
+    def text(self):
+        return self.toPlainText()
+
+    def setText(self, t):
+        self.setPlainText(t)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            if event.modifiers() & Qt.ShiftModifier:
+                super().keyPressEvent(event)
+            else:
+                self.returnPressed.emit()
+                event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
-        self._adjust_width()
+        self._adjust_size()
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
         self.setMinimumWidth(self.base_min_width)
+        self.setMaximumHeight(self.base_height)
+        self.setMinimumHeight(self.base_height)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.verticalScrollBar().setValue(0)
 
-    def _adjust_width(self):
+    def _adjust_size(self):
         if self.hasFocus():
             fm = self.fontMetrics()
-            text_width = fm.horizontalAdvance(self.text()) + 30 # marginesy i padding
+            doc = self.document()
+
+            text_str = self.toPlainText()
+            lines = text_str.split('\n')
+            max_line_width = max([fm.horizontalAdvance(line) for line in lines] + [0])
+
+            text_width = max_line_width + 30
             new_width = max(self.focused_min_width, text_width)
             new_width = min(new_width, self.max_width_limit)
             self.setMinimumWidth(new_width)
+
+            doc.setTextWidth(new_width)
+            doc_height = int(doc.size().height()) + 10
+            new_height = min(doc_height, self.max_height_limit)
+            new_height = max(new_height, self.base_height)
+            self.setMaximumHeight(new_height)
+            self.setMinimumHeight(new_height)
+
+            if doc_height > self.max_height_limit:
+                self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            else:
+                self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
