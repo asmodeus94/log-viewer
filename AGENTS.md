@@ -39,4 +39,4 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - Jeżeli pasek narzędzi lub inne elementy wymagają dynamicznych zmian wynikających np. z tłumaczeń to ich logika powinna rezydować bezpośrednio w kodzie Pythona, nie wewnątrz w `.ui`.
 
 ## 11. Zależności i Wymagania podczas Testów
-- Upewnij się, że odpowiednio zainsalowane są `pip install -r requirements.txt pytest pytest-qt xvfbwrapper` przed uruchomieniem jakichkolwiek testów graficznych. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów używaj polecenia: `xvfb-run -a python -m pytest tests/`.
+- Upewnij się, że odpowiednio zainsalowane są `pip install -r requirements.txt pytest xvfbwrapper` przed uruchomieniem jakichkolwiek testów graficznych. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów używaj polecenia: `xvfb-run -a python -m pytest tests/`.
