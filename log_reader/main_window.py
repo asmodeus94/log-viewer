@@ -633,14 +633,14 @@ class LogViewerWindow(QMainWindow):
         view_menu.addSeparator()
         self._action_next_tab = self._mkaction(
             self.t("mi_next_tab"),
-            [QKeySequence.StandardKey.NextChild, "Ctrl+Tab", "Ctrl+}"],
+            [QKeySequence.StandardKey.NextChild, "Ctrl+Tab", "Ctrl+]"],
             self.cmd_next_tab
         )
         view_menu.addAction(self._action_next_tab)
 
         self._action_prev_tab = self._mkaction(
             self.t("mi_prev_tab"),
-            [QKeySequence.StandardKey.PreviousChild, "Ctrl+Shift+Tab", "Ctrl+{"],
+            [QKeySequence.StandardKey.PreviousChild, "Ctrl+Shift+Tab", "Ctrl+["],
             self.cmd_prev_tab
         )
         view_menu.addAction(self._action_prev_tab)
