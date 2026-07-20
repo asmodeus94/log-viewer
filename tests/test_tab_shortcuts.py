@@ -19,7 +19,7 @@ def test_tab_shortcuts():
     prev_shortcuts = [s.toString() for s in win._action_prev_tab.shortcuts()]
 
     assert 'Ctrl+Tab' in next_shortcuts
-    assert 'Ctrl+}' in next_shortcuts
+    assert 'Ctrl+]' in next_shortcuts
 
     assert 'Ctrl+Shift+Tab' in prev_shortcuts
-    assert 'Ctrl+{' in prev_shortcuts
+    assert 'Ctrl+[' in prev_shortcuts
