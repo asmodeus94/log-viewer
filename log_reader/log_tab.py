@@ -12,8 +12,8 @@ from typing import Optional, List, Tuple, Dict, Any
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QSize, QPoint
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QDragEnterEvent,
-    QDropEvent, QCursor,
+    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase,
+    QDragEnterEvent, QDropEvent, QCursor,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPlainTextEdit, QWidget, QVBoxLayout,
@@ -246,7 +246,8 @@ class LogTab(QWidget):
 
         self._search_model = SearchResultsModel()
         self.search_results_view.setModel(self._search_model)
-        mono_font = QFont("Menlo", 9) if sys.platform == "darwin" else QFont("DejaVu Sans Mono", 9)
+        mono_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        mono_font.setPointSize(9)
         mono_font.setStyleHint(QFont.Monospace)
         self.search_results_view.setFont(mono_font)
         self.search_results_view.clicked.connect(self._on_search_result_clicked)
@@ -267,12 +268,11 @@ class LogTab(QWidget):
 
 
     def _apply_font_to_text(self) -> None:
-        family = self.font_family or (
-            "Consolas" if sys.platform == "win32"
-            else "Menlo" if sys.platform == "darwin"
-            else "DejaVu Sans Mono"
-        )
-        font = QFont(family, self.font_size)
+        if self.font_family:
+            font = QFont(self.font_family, self.font_size)
+        else:
+            font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+            font.setPointSize(self.font_size)
         font.setStyleHint(QFont.Monospace)
         self.text.setFont(font)
         if hasattr(self.text, "_line_number_area"):
