@@ -7,6 +7,9 @@ import pytest
 # Dodaj katalog nadrzędny do path by móc importować pakiet log_reader
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Wycisz ostrzeżenia z qt.qpa.fonts (np. brak czcionki "Sans Serif" na macOS)
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
+
 
 @pytest.fixture
 def temp_log_file():

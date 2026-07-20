@@ -23,12 +23,14 @@ class TestUserConfig:
         assert cfg2.get("encoding") == "latin-1"
         assert cfg2.get("font_size") == 12
 
-    def test_corrupted_file(self, temp_config_path):
+    def test_corrupted_file(self, temp_config_path, capsys):
         with open(temp_config_path, "w") as f:
             f.write("{ this is not valid json")
         cfg = UserConfig(config_path=temp_config_path)
         assert cfg.get("language") == "pl"
         assert cfg.get("encoding") == "utf-8"
+        # Oczyść wyjście błędu (stderr), by nie zanieczyszczać logów testowych
+        capsys.readouterr()
 
     def test_atomic_save(self, temp_config_path):
         cfg = UserConfig(config_path=temp_config_path)
