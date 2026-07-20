@@ -18,8 +18,16 @@ def test_tab_shortcuts():
     next_shortcuts = [s.toString() for s in win._action_next_tab.shortcuts()]
     prev_shortcuts = [s.toString() for s in win._action_prev_tab.shortcuts()]
 
+    # Check that exact shortcuts are present and no others
+    # specifically ensuring there are no '{' or '}' which cause issues on macOS
     assert 'Ctrl+Tab' in next_shortcuts
     assert 'Ctrl+]' in next_shortcuts
+    assert len(next_shortcuts) == 2
+    for s in next_shortcuts:
+        assert '{' not in s and '}' not in s
 
     assert 'Ctrl+Shift+Tab' in prev_shortcuts
     assert 'Ctrl+[' in prev_shortcuts
+    assert len(prev_shortcuts) == 2
+    for s in prev_shortcuts:
+        assert '{' not in s and '}' not in s
