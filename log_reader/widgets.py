@@ -7,8 +7,8 @@ from typing import List, Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Signal, QSize, QAbstractListModel, QModelIndex, QPoint, QRectF
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QPainter,
-    QFontMetrics, QDragEnterEvent, QDropEvent,
+    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase,
+    QPainter, QFontMetrics, QDragEnterEvent, QDropEvent,
 )
 from PySide6.QtWidgets import (
     QWidget, QPlainTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
@@ -92,7 +92,8 @@ class LogPlainTextEdit(QPlainTextEdit):
         self._update_line_number_area_width(0)
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setReadOnly(True)
-        font = QFont("Monospace", 10)
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font.setPointSize(10)
         font.setStyleHint(QFont.Monospace)
         self.setFont(font)
         self.setAcceptDrops(True)
@@ -449,7 +450,8 @@ class FormatDialog(QDialog):
 
         self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
-        font = QFont("Monospace", 10)
+        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font.setPointSize(10)
         font.setStyleHint(QFont.Monospace)
         self.text_edit.setFont(font)
 
