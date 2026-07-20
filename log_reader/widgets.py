@@ -21,7 +21,6 @@ from .formatters import FORMATTERS
 from .ui.ui_settings_dialog import Ui_SettingsDialog
 from .ui.ui_format_dialog import Ui_FormatDialog
 
-
 class LineNumberArea(QWidget):
     """Widget rysujący numery linii zsynchronizowany z QPlainTextEdit."""
 
@@ -77,7 +76,6 @@ class LineNumberArea(QWidget):
             bottom = top + round(self._editor.blockBoundingRect(block).height())
             if block is None:
                 break
-
 
 class LogPlainTextEdit(QPlainTextEdit):
     """QPlainTextEdit z wbudowanym LineNumberArea i obsługą drag&drop plików."""
@@ -148,7 +146,6 @@ class LogPlainTextEdit(QPlainTextEdit):
         else:
             event.ignore()
 
-
 class SettingsDialog(QDialog):
     """Dialog zmiany fontu i parametrów wyświetlania."""
 
@@ -194,7 +191,6 @@ class SettingsDialog(QDialog):
             self.ml_spin.value(),
             self.ii_spin.value() * 1024 * 1024,
         )
-
 
 class SearchResultsModel(QAbstractListModel):
     """
@@ -318,7 +314,6 @@ class SearchResultsModel(QAbstractListModel):
             return idx
         return -1
 
-
 class MiniMap(QWidget):
     """
     Mini-map pokazująca gęstość ERROR/WARN/INFO/DEBUG w całym pliku.
@@ -420,7 +415,6 @@ class MiniMap(QWidget):
         line_no = int(pct * self._total_lines)
         self.position_clicked.emit(line_no)
 
-
 class FormatDialog(QDialog):
     """
     Dialog pozwalający na sformatowanie przekazanego fragmentu tekstu
@@ -471,13 +465,6 @@ class FormatDialog(QDialog):
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
         return self.formatter_combo.currentText()
 
-
-
-
-
-
-
-
 class ExpandingLineEdit(QTextEdit):
     """
     Pole tekstowe, które dynamicznie dostosowuje swoją szerokość i wysokość.
@@ -505,6 +492,7 @@ class ExpandingLineEdit(QTextEdit):
 
         self.textChanged.connect(self._adjust_size)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setLineWrapMode(QTextEdit.WidgetWidth)
         self.setAcceptRichText(False)
 
@@ -550,7 +538,7 @@ class ExpandingLineEdit(QTextEdit):
             new_width = min(new_width, self.max_width_limit)
             self.setMinimumWidth(new_width)
 
-            doc.setTextWidth(new_width)
+
             doc_height = int(doc.size().height()) + 10
             new_height = min(doc_height, self.max_height_limit)
             new_height = max(new_height, self.base_height)
