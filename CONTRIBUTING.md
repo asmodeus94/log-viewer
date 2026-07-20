@@ -24,7 +24,7 @@ Aby twój wkład został pomyślnie zaakceptowany, prosimy o stosowanie się do 
 
 ## Uruchamianie Testów Jednostkowych
 
-Aplikacja wykorzystuje `pytest` oraz rozszerzenie `pytest-qt` do egzekucji przypadków testowych.
+Aplikacja wykorzystuje środowisko `pytest` do egzekucji przypadków testowych.
 Ponieważ projekt bazuje w dużej mierze na widżetach graficznych, przed uruchomieniem testów upewnij się, że pliki interfejsu `.ui` są skompilowane. W przeciwnym razie testy mogą zakończyć się błędem braku modułu:
 
 ```bash

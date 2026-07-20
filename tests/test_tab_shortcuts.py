@@ -8,11 +8,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # Konfiguracja Qt offscreen
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6 import QtWidgets
 from log_reader.app import LogViewerWindow
 
-def test_tab_shortcuts(qtbot):
+def test_tab_shortcuts():
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     win = LogViewerWindow()
-    qtbot.addWidget(win)
 
     next_shortcuts = [s.toString() for s in win._action_next_tab.shortcuts()]
     prev_shortcuts = [s.toString() for s in win._action_prev_tab.shortcuts()]
