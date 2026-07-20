@@ -1012,15 +1012,22 @@ class LogTab(QWidget):
         return ""
 
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
-        cursor = QtGui.QTextCursor(self.text.document().findBlockByNumber(widget_line_no))
-        cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        block_cursor = QtGui.QTextCursor(self.text.document().findBlockByNumber(widget_line_no))
+        sel_cursor = QtGui.QTextCursor(block_cursor)
+        sel_cursor.select(QtGui.QTextCursor.LineUnderCursor)
+
         sel = QtWidgets.QTextEdit.ExtraSelection()
-        sel.cursor = cursor
+        sel.cursor = sel_cursor
         sel.format.setBackground(QColor(self.theme["highlight"]))
+        sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
         self._search_extra_sel = sel
+
+        # Ustawiamy kursor bez fizycznego zaznaczenia tekstu w kontrolce,
+        # aby uniknąć szarego systemowego tła (nieaktywnego zaznaczenia)
+        # nakładającego się na nasze żółte tło ExtraSelection.
         # Po setTextCursor cursorPositionChanged odpali się i przebuduje listę
         # ExtraSelections łącznie z bieżącą linią + tym podświetleniem.
-        self.text.setTextCursor(cursor)
+        self.text.setTextCursor(block_cursor)
 
     def _update_current_line_highlight(self) -> None:
         """Przebudowuje listę ExtraSelections.
@@ -1074,6 +1081,7 @@ class LogTab(QWidget):
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
                 sel.format.setBackground(QColor(t["highlight"]))
+                sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
                 sels.append(sel)
 
         # 3) Zakładki — zielone tło.
