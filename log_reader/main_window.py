@@ -557,25 +557,25 @@ class LogViewerWindow(QMainWindow):
         menubar.clear()
 
         file_menu = menubar.addMenu(self.t("menu_file"))
-        file_menu.addAction(self._mkaction(self.t("mi_open"), "Ctrl+O", self.cmd_open))
-        self._action_save = self._mkaction(self.t("mi_save"), "Ctrl+S", self.cmd_save_edits)
+        file_menu.addAction(self._mkaction(self.t("mi_open"), QKeySequence.StandardKey.Open, self.cmd_open))
+        self._action_save = self._mkaction(self.t("mi_save"), QKeySequence.StandardKey.Save, self.cmd_save_edits)
         file_menu.addAction(self._action_save)
-        self._action_save_as = self._mkaction(self.t("mi_save_as"), "", self.cmd_save_as)
+        self._action_save_as = self._mkaction(self.t("mi_save_as"), QKeySequence.StandardKey.SaveAs, self.cmd_save_as)
         file_menu.addAction(self._action_save_as)
         file_menu.addSeparator()
         self._action_export = self._mkaction(self.t("mi_export"), "Ctrl+E", self.cmd_export)
         file_menu.addAction(self._action_export)
         file_menu.addSeparator()
-        file_menu.addAction(self._mkaction(self.t("mi_exit"), "Ctrl+Q", self.close))
+        file_menu.addAction(self._mkaction(self.t("mi_exit"), QKeySequence.StandardKey.Quit, self.close))
 
         edit_menu = menubar.addMenu(self.t("menu_edit"))
-        self._action_find = self._mkaction(self.t("mi_find"), "Ctrl+F", self.cmd_find_dialog)
+        self._action_find = self._mkaction(self.t("mi_find"), QKeySequence.StandardKey.Find, self.cmd_find_dialog)
         edit_menu.addAction(self._action_find)
-        self._action_find_next = self._mkaction(self.t("mi_find_next"), "F3", self.cmd_find_next)
+        self._action_find_next = self._mkaction(self.t("mi_find_next"), QKeySequence.StandardKey.FindNext, self.cmd_find_next)
         edit_menu.addAction(self._action_find_next)
-        self._action_find_prev = self._mkaction(self.t("mi_find_prev"), "Shift+F3", self.cmd_find_prev)
+        self._action_find_prev = self._mkaction(self.t("mi_find_prev"), QKeySequence.StandardKey.FindPrevious, self.cmd_find_prev)
         edit_menu.addAction(self._action_find_prev)
-        self._action_clear_search = self._mkaction(self.t("btn_clear_search"), "", self.cmd_clear_search)
+        self._action_clear_search = self._mkaction(self.t("btn_clear_search"), "Ctrl+Shift+C", self.cmd_clear_search)
         edit_menu.addAction(self._action_clear_search)
         edit_menu.addSeparator()
         self._action_filter = self._mkaction(self.t("mi_filter"), "Ctrl+L", self.cmd_filter_dialog)
@@ -594,7 +594,7 @@ class LogViewerWindow(QMainWindow):
         edit_menu.addAction(self._action_clear_edits)
 
         view_menu = menubar.addMenu(self.t("menu_view"))
-        self._follow_action = self._mkaction(self.t("mi_follow"), "", self.cmd_toggle_follow)
+        self._follow_action = self._mkaction(self.t("mi_follow"), "Ctrl+T", self.cmd_toggle_follow)
         self._follow_action.setCheckable(True)
         view_menu.addAction(self._follow_action)
         view_menu.addSeparator()
@@ -628,7 +628,15 @@ class LogViewerWindow(QMainWindow):
         lang_menu.addAction(act_en)
 
         view_menu.addSeparator()
-        view_menu.addAction(self._mkaction(self.t("mi_settings"), "", self.cmd_settings))
+        self._action_next_tab = self._mkaction(self.t("mi_next_tab"), QKeySequence.StandardKey.NextChild, self.cmd_next_tab)
+        view_menu.addAction(self._action_next_tab)
+        self._action_prev_tab = self._mkaction(self.t("mi_prev_tab"), QKeySequence.StandardKey.PreviousChild, self.cmd_prev_tab)
+        view_menu.addAction(self._action_prev_tab)
+        self._action_close_tab = self._mkaction(self.t("mi_close_tab"), QKeySequence.StandardKey.Close, self.cmd_close_tab)
+        view_menu.addAction(self._action_close_tab)
+
+        view_menu.addSeparator()
+        view_menu.addAction(self._mkaction(self.t("mi_settings"), QKeySequence.StandardKey.Preferences, self.cmd_settings))
 
         bm_menu = menubar.addMenu(self.t("menu_bookmarks"))
         self._action_toggle_bookmark = self._mkaction(self.t("mi_toggle_bookmark"), "Ctrl+B", self.cmd_toggle_bookmark)
@@ -644,7 +652,9 @@ class LogViewerWindow(QMainWindow):
         goto_menu = menubar.addMenu(self.t("menu_goto"))
         self._action_goto = self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto)
         goto_menu.addAction(self._action_goto)
-        self._action_goto_end = self._mkaction(self.t("mi_goto_end"), "Ctrl+End", self.cmd_goto_end)
+        self._action_goto_start = self._mkaction(self.t("mi_goto_start"), QKeySequence.StandardKey.MoveToStartOfDocument, self.cmd_goto_start)
+        goto_menu.addAction(self._action_goto_start)
+        self._action_goto_end = self._mkaction(self.t("mi_goto_end"), QKeySequence.StandardKey.MoveToEndOfDocument, self.cmd_goto_end)
         goto_menu.addAction(self._action_goto_end)
 
         help_menu = menubar.addMenu(self.t("menu_help"))
@@ -662,10 +672,13 @@ class LogViewerWindow(QMainWindow):
         self._update_ui_state()
 
 
-    def _mkaction(self, label: str, shortcut: str, handler) -> QAction:
+    def _mkaction(self, label: str, shortcut, handler) -> QAction:
         act = QAction(label, self)
         if shortcut:
-            act.setShortcut(QKeySequence(shortcut))
+            if isinstance(shortcut, str):
+                act.setShortcut(QKeySequence(shortcut))
+            else:
+                act.setShortcut(shortcut)
         act.triggered.connect(handler)
         return act
 
@@ -853,6 +866,9 @@ class LogViewerWindow(QMainWindow):
     def cmd_goto(self):
         return self._delegate_to_tab("cmd_goto")
 
+    def cmd_goto_start(self):
+        return self._delegate_to_tab("cmd_goto_start")
+
     def cmd_goto_end(self):
         return self._delegate_to_tab("cmd_goto_end")
 
@@ -891,6 +907,21 @@ class LogViewerWindow(QMainWindow):
 
     def cmd_set_encoding(self, encoding: str):
         return self._delegate_to_tab("cmd_set_encoding", encoding)
+
+    def cmd_next_tab(self):
+        if self.tabs.count() > 1:
+            idx = (self.tabs.currentIndex() + 1) % self.tabs.count()
+            self.tabs.setCurrentIndex(idx)
+
+    def cmd_prev_tab(self):
+        if self.tabs.count() > 1:
+            idx = (self.tabs.currentIndex() - 1) % self.tabs.count()
+            self.tabs.setCurrentIndex(idx)
+
+    def cmd_close_tab(self):
+        idx = self.tabs.currentIndex()
+        if idx >= 0:
+            self._on_tab_close_requested(idx)
 
     # --------------------------------------------------------- settings ---
     def cmd_settings(self) -> None:

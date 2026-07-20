@@ -1275,6 +1275,11 @@ class LogTab(QWidget):
             self._load_window(at_line=line_no)
         self.text.verticalScrollBar().setValue(0)
 
+    def cmd_goto_start(self) -> None:
+        if not self.indexer:
+            return
+        self._load_window(at_line=0)
+
     def cmd_goto_end(self) -> None:
         if not self.indexer:
             return
