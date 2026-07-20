@@ -12,6 +12,8 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 ## 3. Kompilacja i Skrypty Zewnętrzne
 - Skrypty narzędziowe i wspierające proces budowania aplikacji (jak np. skompilowanie plików interfejsu .ui do py) powinny być pisane w wieloplatformowym **Pythonie**, należy unikać specyficznych dla systemów narzędzi takich jak `make`.
 - Pliki interfejsu Qt (`.ui`) należy kompilować z wykorzystaniem narzędzia `pyside6-uic` do postaci plików python (np. `ui_*.py`). Nie należy korzystać z dynamicznego ładowania przez `QUiLoader`. Wygenerowane pliki należy traktować jako artefakty i trzymać je w `.gitignore`.
+- Kompilacja plików UI powinna odbywać się **przyrostowo** (inkrementalnie). Skrypt powinien weryfikować czas modyfikacji i kompilować jedynie pliki, których wersja `.ui` jest nowsza niż wygenerowany `.py`.
+- Preferowanym punktem wejścia do aplikacji łączącym kompilację przyrostową z uruchomieniem jest zautomatyzowany skrypt `run.py`.
 
 ## 4. Wieloplatformowość (Cross-platform)
 - Wykorzystuj metody neutralne platformowo dla operacji plikowych i systemowych (np. przy uzyskiwaniu metadanych o plikach). Ma to działać jednakowo pod Windowsem, macOS, a także w Linuksie.

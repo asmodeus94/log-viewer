@@ -42,22 +42,19 @@ Następnie aktywuj wirtualne środowisko i zainstaluj wymagane pakiety znajdują
   pip install -r requirements.txt
   ```
 
-## Kompilacja interfejsu (UI)
+## Uruchomienie i Kompilacja interfejsu (UI)
 
-Przed pierwszym uruchomieniem aplikacji (oraz po każdej zmianie w plikach `.ui`) konieczna jest kompilacja plików interfejsu stworzonych w Qt Designer do formatu Pythona. W katalogu głównym projektu wykonaj:
-
-```bash
-python scripts/compile_ui.py
-```
-
-## Uruchomienie
-
-Aby uruchomić aplikację po prawidłowym skonfigurowaniu środowiska i skompilowaniu interfejsu, z katalogu głównego projektu wykonaj następującą komendę:
+Aplikacja wykorzystuje pliki z interfejsem graficznym (`.ui`) tworzone w Qt Designerze. Przed uruchomieniem są one kompilowane do formatu Pythona.
+Rekomendowanym sposobem uruchamiania aplikacji jest skorzystanie ze skryptu `run.py` w głównym katalogu, który automatycznie wykona kompilację przyrostową (tylko dla zmienionych plików UI), a następnie włączy aplikację:
 
 ```bash
-python -m log_reader
+python run.py
 ```
-Możesz opcjonalnie od razu wywołać podgląd pliku, przekazując jego ścieżkę jako argument:
+
+Opcjonalnie możesz od razu wywołać podgląd pliku, przekazując jego ścieżkę jako argument:
+
 ```bash
-python -m log_reader /sciezka/do/twojego_logu.log
+python run.py /sciezka/do/twojego_logu.log
 ```
+
+*(Jeśli z jakiegoś powodu chcesz uruchomić sam moduł bez automatycznej kompilacji UI, nadal możesz to zrobić poprzez `python -m log_reader`, pamiętając uprzednio o ręcznej kompilacji poleceniem `python scripts/compile_ui.py`).*
