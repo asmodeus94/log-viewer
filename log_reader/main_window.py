@@ -371,6 +371,9 @@ class LogViewerWindow(QMainWindow):
                 border: 1px solid {t["border"]};
                 top: -1px;
             }}
+            QTabWidget::tab-bar {{
+                alignment: left;
+            }}
             QTabBar::tab {{
                 background-color: {t["bg_panel"]};
                 color: {t["fg_dim"]};
