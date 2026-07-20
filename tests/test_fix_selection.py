@@ -28,9 +28,9 @@ def test_highlight_and_scroll_does_not_select_text():
     tab.line_map = [0, 1, 2]
     tab._highlight_and_scroll(1)
 
-    # Cursor should not have selection
+    # Kursor główny widgetu nie powinien mieć zaznaczonego tekstu
     assert tab.text.textCursor().hasSelection() is False
 
-    # But an extra selection should exist and it should have selection
+    # Ale powinno istnieć podświetlenie (ExtraSelection), które posiada zaznaczenie
     assert tab._search_extra_sel is not None
     assert tab._search_extra_sel.cursor.hasSelection() is True

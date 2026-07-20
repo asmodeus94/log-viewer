@@ -1019,6 +1019,7 @@ class LogTab(QWidget):
         sel = QtWidgets.QTextEdit.ExtraSelection()
         sel.cursor = sel_cursor
         sel.format.setBackground(QColor(self.theme["highlight"]))
+        sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
         self._search_extra_sel = sel
 
         # Ustawiamy kursor bez fizycznego zaznaczenia tekstu w kontrolce,
@@ -1080,6 +1081,7 @@ class LogTab(QWidget):
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
                 sel.format.setBackground(QColor(t["highlight"]))
+                sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
                 sels.append(sel)
 
         # 3) Zakładki — zielone tło.
