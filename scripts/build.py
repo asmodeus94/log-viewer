@@ -76,7 +76,9 @@ def build_app():
     print(f">>> Wykonywanie budowania przez PyInstaller (System: {system_name})...")
 
     # 3. Argumenty PyInstaller
-    main_script = os.path.join(repo_root, "run.py")
+    # Używamy log_reader/main.py bezpośrednio jako wejście do zamrożonej wersji aplikacji.
+    # Użycie run.py powoduje problemy, ponieważ próbuje on rekursywnie kompilować środowisko dev (UI).
+    main_script = os.path.join(repo_root, "log_reader", "main.py")
 
     # Separator dla --add-data różni się w zależności od systemu
     path_separator = ";" if system_name == "Windows" else ":"
