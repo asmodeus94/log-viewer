@@ -1,0 +1,4 @@
+# Zależności deweloperskie i narzędzia do budowania aplikacji log-viewer
+
+pyinstaller>=6.0.0
+Pillow>=10.0.0

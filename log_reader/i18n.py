@@ -6,7 +6,7 @@ from typing import Dict
 
 I18N: Dict[str, Dict[str, str]] = {
     "pl": {
-        "app_title": "Czytnik Logów",
+        "app_title": "log-viewer",
         "menu_file": "Plik",
         "menu_edit": "Edycja",
         "menu_view": "Widok",
@@ -104,7 +104,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_no_bookmarks": "Brak zakładek.",
         "msg_no_selection": "Nic nie zaznaczono.",
         "btn_delete_sel": "Usuń zaznaczone",
-        "msg_about": "Czytnik Logów 1.0\n\ntkinter + biblioteka standardowa Pythona\nWielkie pliki logów — wirtualne okno, indeks 1MB, follow mode.\nDrag&drop plików na okno (wymagany tkinterdnd2).",
+        "msg_about": "log-viewer 1.0\n\ntkinter + biblioteka standardowa Pythona\nWielkie pliki logów — wirtualne okno, indeks 1MB, follow mode.\nDrag&drop plików na okno (wymagany tkinterdnd2).",
         "mi_format_selection": "Formatuj zaznaczenie…",
         "dlg_format_title": "Formatowanie logu",
         "lbl_formatter": "Narzędzie formattera:",

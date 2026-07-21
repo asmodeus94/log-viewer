@@ -1,4 +1,4 @@
-"""Wyjątki aplikacji Czytnik Logów."""
+"""Wyjątki aplikacji log-viewer."""
 
 from __future__ import annotations
 

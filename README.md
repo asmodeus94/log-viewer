@@ -58,3 +58,18 @@ python run.py /sciezka/do/twojego_logu.log
 ```
 
 *(Jeśli z jakiegoś powodu chcesz uruchomić sam moduł bez automatycznej kompilacji UI, nadal możesz to zrobić poprzez `python -m log_reader`, pamiętając uprzednio o ręcznej kompilacji poleceniem `python scripts/compile_ui.py`).*
+
+## Budowanie aplikacji (PyInstaller)
+
+Projekt posiada dedykowany skrypt automatyzujący proces budowania aplikacji w formie pojedynczego pakietu instalacyjnego lub wykonywalnego (np. `.app` dla macOS lub `.exe` dla Windows). Aplikacja zostanie skonfigurowana do działania bez wyświetlania zbędnej konsoli systemowej i z załączoną natywną ikonką systemu.
+
+1. Zainstaluj wymagane narzędzia deweloperskie i biblioteki:
+    ```bash
+    pip install -r requirements-dev.txt
+    ```
+2. Uruchom skrypt budujący w środowisku Twojego docelowego systemu operacyjnego:
+    ```bash
+    python scripts/build.py
+    ```
+
+Gotowa aplikacja okienkowa zostanie wygenerowana w folderze `dist/log-viewer/`. Folder `dist/`, `build/` oraz pliki z rozszerzeniami systemowych ikon są ignorowane w systemie kontroli wersji.

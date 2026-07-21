@@ -1,4 +1,4 @@
-# Zależności aplikacji Czytnik Logów (PySide6)
+# Zależności aplikacji log-viewer (PySide6)
 #
 # Instalacja:
 #   pip install -r requirements.txt
