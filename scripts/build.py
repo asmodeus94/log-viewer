@@ -16,26 +16,26 @@ def get_repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def compile_ui_files(repo_root):
-    print(">>> Kompilowanie plików UI...")
+    print(">>> Compiling UI files...")
     compile_script = os.path.join(repo_root, "scripts", "compile_ui.py")
     try:
         subprocess.run([sys.executable, compile_script], check=True)
     except subprocess.CalledProcessError as e:
-        print("Błąd kompilacji plików UI. Przerywam budowanie.")
+        print("Error compiling UI files. Aborting build.")
         sys.exit(1)
 
 def convert_icon(repo_root, target_format):
-    print(f">>> Konwertowanie ikony do formatu {target_format}...")
+    print(f">>> Converting icon to {target_format} format...")
     try:
         from PIL import Image
     except ImportError:
-        print("Błąd: Biblioteka Pillow nie jest zainstalowana. Konwersja ikony nie powiedzie się.")
-        print("Zainstaluj zależności dev: pip install -r requirements-dev.txt")
+        print("Error: Pillow library is not installed. Icon conversion will fail.")
+        print("Install dev dependencies: pip install -r requirements-dev.txt")
         sys.exit(1)
 
     icon_png_path = os.path.join(repo_root, "assets", "icon.png")
     if not os.path.exists(icon_png_path):
-        print(f"Błąd: Nie znaleziono pliku ikony pod ścieżką: {icon_png_path}")
+        print(f"Error: Icon file not found at: {icon_png_path}")
         sys.exit(1)
 
     icon_out_path = os.path.join(repo_root, "assets", f"icon{target_format}")
@@ -45,10 +45,10 @@ def convert_icon(repo_root, target_format):
             img.save(icon_out_path, format="ICNS")
         elif target_format == ".ico":
             img.save(icon_out_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-        print(f"Pomyślnie wygenerowano {icon_out_path}")
+        print(f"Successfully generated {icon_out_path}")
         return icon_out_path
     except Exception as e:
-        print(f"Błąd podczas konwersji ikony: {e}")
+        print(f"Error during icon conversion: {e}")
         if platform.system() == "Linux":
             return icon_png_path
         sys.exit(1)
@@ -73,7 +73,7 @@ def build_app():
     else:
         icon_path = os.path.join(repo_root, "assets", "icon.png")
 
-    print(f">>> Wykonywanie budowania przez PyInstaller (System: {system_name})...")
+    print(f">>> Executing PyInstaller build (System: {system_name})...")
 
     # 3. Argumenty PyInstaller
     # Generujemy w locie mały plik startowy, żeby uniknąć rzucania ImportError (relative import)
@@ -103,14 +103,14 @@ def build_app():
 
     try:
         subprocess.run(pyinstaller_args, check=True)
-        print("\n>>> Budowanie zakończone pomyślnie!")
-        print(f">>> Plik wykonywalny znajdziesz w folderze: {os.path.join(repo_root, 'dist')}")
+        print("\n>>> Build completed successfully!")
+        print(f">>> You can find the executable in the folder: {os.path.join(repo_root, 'dist')}")
     except subprocess.CalledProcessError as e:
-        print(f"\nBłąd podczas budowania: {e}")
+        print(f"\nError during build: {e}")
         sys.exit(1)
     except FileNotFoundError:
-        print("\nBłąd: Nie znaleziono polecenia 'pyinstaller'.")
-        print("Zainstaluj zależności dev: pip install -r requirements-dev.txt")
+        print("\nError: 'pyinstaller' command not found.")
+        print("Install dev dependencies: pip install -r requirements-dev.txt")
         sys.exit(1)
 
 if __name__ == "__main__":

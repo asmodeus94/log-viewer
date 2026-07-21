@@ -3,7 +3,8 @@ import os
 import time
 import gzip
 import pytest
-from log_reader.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk
+from unittest.mock import patch
+from log_reader.indexer import LineIndexer, IndexEntry, open_maybe_compressed
 
 
 class TestLineIndexerBasic:
@@ -197,24 +198,16 @@ class TestLineIndexerFileDescriptorCache:
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
 
-        # Policz FD przed
-        try:
-            fd_before = len(os.listdir(f"/proc/{os.getpid()}/fd"))
-        except Exception:
-            pytest.skip("Cannot count FDs on this platform")
+        with patch("log_reader.indexer.open_maybe_compressed", wraps=open_maybe_compressed) as mock_open:
+            # Wykonaj 100 operacji
+            for i in range(100):
+                idx.read_lines(i * 5, 3)
+                idx.offset_of_line(i * 5)
 
-        # Wykonaj 100 operacji
-        for i in range(100):
-            idx.read_lines(i * 5, 3)
-            idx.offset_of_line(i * 5)
+            # Deskryptor powinien zostać zbuforowany i ponownie użyty,
+            # więc open powinno zostać wywołane najwyżej raz
+            assert mock_open.call_count <= 1
 
-        try:
-            fd_after = len(os.listdir(f"/proc/{os.getpid()}/fd"))
-        except Exception:
-            pytest.skip("Cannot count FDs on this platform")
-
-        # Powinno być najwyżej +1 (cached deskryptor)
-        assert fd_after - fd_before <= 1
         idx.close()
 
     def test_close_releases_fd(self, temp_log_file):
