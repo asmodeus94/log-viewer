@@ -4,7 +4,7 @@ import time
 import gzip
 import pytest
 from unittest.mock import patch
-from log_reader.indexer import LineIndexer, IndexEntry, open_maybe_compressed
+from log_reader.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk, open_maybe_compressed
 
 
 class TestLineIndexerBasic:
