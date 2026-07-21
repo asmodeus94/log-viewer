@@ -62,3 +62,20 @@ class TestUserConfig:
         cfg = UserConfig(config_path=temp_config_path)
         assert cfg.get("language") == "pl"
         assert cfg.get("font_size") == 10
+
+    def test_config_load_logs_error(self, temp_config_path, capsys):
+        """Config._load loguje błędy do stderr."""
+        with open(temp_config_path, "w") as f:
+            f.write("{ invalid json")
+        UserConfig(config_path=temp_config_path)
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err or "could not load" in captured.err.lower()
+
+    def test_config_save_logs_error(self, temp_config_path, capsys):
+        """Config.save loguje błędy do stderr przy braku uprawnień."""
+        cfg = UserConfig(config_path=temp_config_path)
+        # Symuluj błąd zapisu — ustaw path na nieistniejący katalog
+        cfg.path = "/nonexistent_dir/config.json"
+        cfg.set("language", "en")
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err or "could not save" in captured.err.lower()

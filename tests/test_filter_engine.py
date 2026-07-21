@@ -181,3 +181,99 @@ class TestFilterEngineSessionIsolation:
         # Sesja 1 nie powinna mieć wyników (anulowana)
         assert len(results1) == 0, f"Old session leaked: {len(results1)}"
         idx.close()
+
+class TestRegexOnBytes:
+    """Testy optymalizacji regex na surowych bajtach."""
+
+    def test_regex_finds_matches(self, temp_log_file):
+        """Regex na bajtach znajduje te same wyniki co regex na str."""
+        path = temp_log_file(num_lines=1000)
+        import threading
+        from log_reader.indexer import LineIndexer
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+        results = []
+        done = threading.Event()
+        engine.start(r"ERROR", use_regex=True, case_sensitive=True, negate=False,
+                     on_progress=lambda p, h: None,
+                     on_done=lambda r, e: (results.extend(r), done.set()))
+        for _ in range(100):
+            if done.is_set():
+                break
+            time.sleep(0.05)
+        assert len(results) == 250  # 1/4 linii to ERROR
+        idx.close()
+
+    def test_regex_case_insensitive(self, temp_log_file):
+        """Regex case-insensitive na bajtach."""
+        path = temp_log_file(num_lines=1000)
+        import threading
+        from log_reader.indexer import LineIndexer
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+        results = []
+        done = threading.Event()
+        engine.start(r"error", use_regex=True, case_sensitive=False, negate=False,
+                     on_progress=lambda p, h: None,
+                     on_done=lambda r, e: (results.extend(r), done.set()))
+        for _ in range(100):
+            if done.is_set():
+                break
+            time.sleep(0.05)
+        assert len(results) == 250
+        idx.close()
+
+    def test_regex_with_pattern(self, temp_log_file):
+        """Regex z pattern \\d+ na bajtach."""
+        path = temp_log_file(num_lines=1000)
+        import threading
+        from log_reader.indexer import LineIndexer
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+        results = []
+        done = threading.Event()
+        engine.start(r"line\s*\d+", use_regex=True, case_sensitive=True, negate=False,
+                     on_progress=lambda p, h: None,
+                     on_done=lambda r, e: (results.extend(r), done.set()))
+        for _ in range(100):
+            if done.is_set():
+                break
+            time.sleep(0.05)
+        assert len(results) == 1000  # wszystkie linie mają line\\d+
+        idx.close()
+
+    def test_plain_text_and_regex_give_same_results(self, temp_log_file):
+        """Plain text i regex dają te same wyniki dla prostego wzorca."""
+        path = temp_log_file(num_lines=1000)
+        import threading
+        from log_reader.indexer import LineIndexer
+        idx = LineIndexer(path)
+
+        # Plain text
+        engine1 = FilterEngine(path, idx)
+        results1 = []
+        done1 = threading.Event()
+        engine1.start("ERROR", False, True, False, lambda p, h: None,
+                      lambda r, e: (results1.extend(r), done1.set()))
+        for _ in range(100):
+            if done1.is_set():
+                break
+            time.sleep(0.05)
+
+        # Regex
+        engine2 = FilterEngine(path, idx)
+        results2 = []
+        done2 = threading.Event()
+        engine2.start("ERROR", True, True, False, lambda p, h: None,
+                      lambda r, e: (results2.extend(r), done2.set()))
+        for _ in range(100):
+            if done2.is_set():
+                break
+            time.sleep(0.05)
+
+        assert len(results1) == len(results2) == 250
+        # Porównaj numery linii
+        lines1 = [r[0] for r in results1]
+        lines2 = [r[0] for r in results2]
+        assert lines1 == lines2
+        idx.close()

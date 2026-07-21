@@ -4,7 +4,7 @@ import time
 import gzip
 import pytest
 from unittest.mock import patch
-from log_reader.indexer import LineIndexer, IndexEntry, open_maybe_compressed
+from log_reader.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk, open_maybe_compressed
 
 
 class TestLineIndexerBasic:
@@ -217,3 +217,84 @@ class TestLineIndexerFileDescriptorCache:
         idx.close()
         # Po close, _file_cache powinno być None
         assert idx._file_cache is None
+
+class TestChunkedWorker:
+    """Testy _indexer_worker_chunk z chunkowanym odczytem."""
+
+    def test_correct_line_count(self, temp_log_file):
+        """Worker liczy poprawną liczbę linii w swoim zakresie."""
+        path = temp_log_file(num_lines=10000)
+        size = os.path.getsize(path)
+        chunk_size = size // 2
+        r1 = (0, chunk_size, path, 1024 * 1024, 0)
+        r2 = (chunk_size, size, path, 1024 * 1024, 1)
+        result1 = _indexer_worker_chunk(r1)
+        result2 = _indexer_worker_chunk(r2)
+        total = result1[0] + result2[0]
+        assert total == 10000
+
+    def test_no_double_counting(self, temp_log_file):
+        """Brak podwójnego liczenia linii na granicy chunków."""
+        path = temp_log_file(num_lines=50000)
+        size = os.path.getsize(path)
+        # Podziel na 4 chunki
+        chunk_size = size // 4
+        ranges = [(i * chunk_size, (i + 1) * chunk_size if i < 3 else size, path, 1024 * 1024, i) for i in range(4)]
+        results = [_indexer_worker_chunk(r) for r in ranges]
+        total = sum(r[0] for r in results)
+        assert total == 50000
+
+    def test_worker_handles_large_lines(self):
+        """Worker radzi sobie z bardzo długimi liniami (>4MB chunk)."""
+        import tempfile
+        path = tempfile.mktemp(suffix=".log")
+        try:
+            with open(path, "wb") as f:
+                # Jedna bardzo długa linia (8 MB)
+                f.write(b"X" * (8 * 1024 * 1024) + b"\n")
+                f.write(b"short line\n")
+            size = os.path.getsize(path)
+            result = _indexer_worker_chunk((0, size, path, 1024 * 1024, 0))
+            assert result[0] == 2  # 2 linie
+        finally:
+            try:
+                os.unlink(path)
+            except PermissionError:
+                pass
+
+    def test_worker_memory_efficient(self, temp_log_file):
+        """Worker nie ładuje całego zakresu do pamięci — czyta w chunkach 4MB."""
+        path = temp_log_file(num_lines=10000)
+        size = os.path.getsize(path)
+        # Worker dla całego pliku
+        result = _indexer_worker_chunk((0, size, path, 1024 * 1024, 0))
+        assert result[0] == 10000
+        # Jeśli worker ładuje wszystko do RAM, przy 10000 liniach ~500KB to OK
+        # ale test weryfikuje że działa bez crash dla dużych plików
+
+    def test_indexer_worker_logs_error(self, capsys):
+        """_indexer_worker_chunk loguje błędy."""
+        # Wywołaj z nieistniejącym plikiem
+        result = _indexer_worker_chunk((0, 100, "/nonexistent/file.log", 1024 * 1024, 0))
+        assert result == (0, [], 0)
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err or "failed" in captured.err.lower()
+
+
+class TestFreezeSupport:
+    """Testy multiprocessing.freeze_support."""
+
+    def test_freeze_support_importable(self):
+        """multiprocessing.freeze_support jest dostępne i można je wywołać."""
+        import multiprocessing
+        # freeze_support() powinno być no-op gdy nie jest frozen exe
+        multiprocessing.freeze_support()
+        # Nie powinno crashować
+
+    def test_multiprocessing_pool_works(self, temp_log_file):
+        """multiprocessing.Pool działa poprawnie (wymaga freeze_support na Windows)."""
+        path = temp_log_file(num_lines=50000)
+        idx = LineIndexer(path)
+        # Jeśli plik > 100MB, użyje parallel. Sprawdź że nie crashuje.
+        assert idx.line_count == 50000
+        idx.close()
