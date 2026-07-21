@@ -7,3 +7,5 @@ build/
 *.spec
 assets/*.icns
 assets/*.ico
+
+run_frozen.py

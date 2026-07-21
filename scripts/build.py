@@ -76,9 +76,13 @@ def build_app():
     print(f">>> Wykonywanie budowania przez PyInstaller (System: {system_name})...")
 
     # 3. Argumenty PyInstaller
-    # Używamy log_reader/main.py bezpośrednio jako wejście do zamrożonej wersji aplikacji.
-    # Użycie run.py powoduje problemy, ponieważ próbuje on rekursywnie kompilować środowisko dev (UI).
-    main_script = os.path.join(repo_root, "log_reader", "main.py")
+    # Generujemy w locie mały plik startowy, żeby uniknąć rzucania ImportError (relative import)
+    # gdy próbujemy odpalić paczkę używając log_reader/main.py jako bezpośredniego script-file'a.
+    frozen_main = os.path.join(repo_root, "run_frozen.py")
+    with open(frozen_main, "w") as f:
+        f.write("import multiprocessing\nfrom log_reader.main import main\n\nif __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n")
+
+    main_script = frozen_main
 
     # Separator dla --add-data różni się w zależności od systemu
     path_separator = ";" if system_name == "Windows" else ":"
