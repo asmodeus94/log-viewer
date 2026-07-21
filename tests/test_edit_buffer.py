@@ -240,3 +240,77 @@ class TestEditBufferCompressed:
                     os.unlink(path)
                 except PermissionError:
                     pass
+
+class TestMtimeNsTolerance:
+    """Testy tolerancji nanosekundowej dla st_mtime_ns."""
+
+    def test_allows_when_unchanged(self, temp_log_file):
+        """Zapis powinien przejść gdy plik nie zmienił się (st_mtime_ns)."""
+        path = temp_log_file(num_lines=1000)
+        st = os.stat(path)
+        original_mtime_ns = st.st_mtime_ns
+        original_size = st.st_size
+        buf = EditBuffer()
+        buf.set(5, "EDITED LINE 5")
+        backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_ns)
+        assert os.path.exists(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
+
+    def test_blocks_on_real_mtime_change(self, temp_log_file):
+        """Zapis zablokowany gdy mtime zmienił się o >1ms."""
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime_ns = os.stat(path).st_mtime_ns
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        # Zmień mtime o 2 sekundy (na pewno >1ms)
+        new_mtime = time.time() + 2.0
+        os.utime(path, (new_mtime, new_mtime))
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_ns)
+
+    def test_tolerates_sub_ms_ns_drift(self, temp_log_file):
+        """Tolerancja dla różnicy <1ms (filesystem zaokrągla ns)."""
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime_ns = os.stat(path).st_mtime_ns
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        # Symuluj drift 500_000 ns (0.5ms) — w tolerancji
+        fake_mtime_ns = original_mtime_ns + 500_000
+        backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=fake_mtime_ns)
+        assert os.path.exists(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
+
+    def test_blocks_on_2ms_drift(self, temp_log_file):
+        """Blokada przy różnicy 2ms (poza tolerancją)."""
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime_ns = os.stat(path).st_mtime_ns
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        # Symuluj drift 2_000_000 ns (2ms) — poza tolerancją
+        fake_mtime_ns = original_mtime_ns + 2_000_000
+        with pytest.raises(FileChangedError):
+            buf.save_to_file(path, expected_size=original_size, expected_mtime=fake_mtime_ns)
+
+    def test_accepts_float_mtime(self, temp_log_file):
+        """Kompatybilność wsteczna — expected_mtime jako float (stare wersje)."""
+        path = temp_log_file(num_lines=1000)
+        original_size = os.path.getsize(path)
+        original_mtime_float = os.stat(path).st_mtime  # float, nie ns
+        buf = EditBuffer()
+        buf.set(5, "EDITED")
+        # float → konwersja na ns w edit_buffer.py
+        backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_float)
+        assert os.path.exists(backup)
+        try:
+            os.unlink(backup)
+        except PermissionError:
+            pass
