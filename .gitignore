@@ -1,3 +1,9 @@
 __pycache__/
 log_reader/ui/ui_*.py
 .coverage
+
+dist/
+build/
+*.spec
+assets/*.icns
+assets/*.ico

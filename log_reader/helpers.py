@@ -221,3 +221,13 @@ def open_maybe_compressed(path: str, mode: str = "rb"):
     if p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
         return lzma.open(path, mode)
     return open(path, mode)
+
+def get_resource_path(relative_path: str) -> str:
+    """Zwraca bezwzględną ścieżkę do zasobu, działa zarówno w środowisku deweloperskim jak i po spakowaniu PyInstallerem."""
+    try:
+        # PyInstaller tworzy folder tymczasowy i zapisuje ścieżkę do niego w _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # Jeśli nie spakowane, root to folder nadrzędny wobec log_reader
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
