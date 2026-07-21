@@ -1,5 +1,5 @@
 """
-log-viewer / Log Reader — wersja PySide6
+log-viewer / log-viewer — wersja PySide6
 ============================================
 
 Aplikacja okienkowa (PySide6/Qt6) do przeglądania bardzo dużych plików logów.
