@@ -128,7 +128,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "st_search_done": "Znaleziono {n} trafień",
     },
     "en": {
-        "app_title": "Log Reader",
+        "app_title": "log-viewer",
         "menu_file": "File",
         "menu_edit": "Edit",
         "menu_view": "View",
@@ -226,7 +226,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_no_bookmarks": "No bookmarks.",
         "msg_no_selection": "Nothing selected.",
         "btn_delete_sel": "Delete selected",
-        "msg_about": "Log Reader 1.0\n\ntkinter + Python standard library\nHuge log files — virtual window, 1MB index, follow mode.\nDrag&drop files onto window (requires tkinterdnd2).",
+        "msg_about": "log-viewer 1.0\n\ntkinter + Python standard library\nHuge log files — virtual window, 1MB index, follow mode.\nDrag&drop files onto window (requires tkinterdnd2).",
         "mi_format_selection": "Format selection…",
         "dlg_format_title": "Log formatter",
         "lbl_formatter": "Formatter tool:",
