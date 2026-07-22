@@ -96,10 +96,11 @@ def build_app():
         f"--add-data={add_data_arg}",
     ]
 
-    # Na systemie Windows generujemy pojedynczy plik .exe,
-    # aby uniknąć problemów z brakującymi bibliotekami (np. python311.dll),
-    # gdy użytkownik skopiuje sam plik .exe z folderu dist.
-    if system_name == "Windows":
+    # Na systemach innych niż macOS (czyli Windows, Linux) generujemy pojedynczy plik,
+    # aby uniknąć problemów z brakującymi bibliotekami (np. python311.dll na Windows),
+    # gdy użytkownik skopiuje sam plik wykonywalny z folderu dist.
+    # macOS natywnie używa paczek .app (traktowanych jako jeden plik).
+    if system_name != "Darwin":
         pyinstaller_args.append("--onefile")
 
     if os.path.exists(icon_path):

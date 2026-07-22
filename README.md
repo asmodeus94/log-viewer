@@ -75,4 +75,4 @@ Projekt posiada dedykowany skrypt automatyzujący proces budowania aplikacji w f
     python scripts/build.py
     ```
 
-Gotowa aplikacja okienkowa zostanie wygenerowana w folderze `dist/`. Na systemie Windows będzie to pojedynczy plik wykonywalny (`log-viewer.exe`), natomiast na systemie macOS pakiet aplikacji (`log-viewer.app`). Folder `dist/`, `build/` oraz pliki z rozszerzeniami systemowych ikon są ignorowane w systemie kontroli wersji.
+Gotowa aplikacja okienkowa zostanie wygenerowana w folderze `dist/`. Na systemach Windows oraz Linux będzie to pojedynczy plik wykonywalny (odpowiednio `log-viewer.exe` lub `log-viewer`), natomiast na systemie macOS pakiet aplikacji (`log-viewer.app`). Folder `dist/`, `build/` oraz pliki z rozszerzeniami systemowych ikon są ignorowane w systemie kontroli wersji.
