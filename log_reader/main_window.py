@@ -236,7 +236,7 @@ class LogViewerWindow(QMainWindow):
                 background-color: {t["bg_main"]};
                 color: {t["fg_main"]};
                 border: 1px solid {t["border"]};
-                font-family: monospace;
+
             }}
             QToolBar {{
                 background-color: {t["bg_panel"]};
