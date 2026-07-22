@@ -148,6 +148,7 @@ class LogPlainTextEdit(QPlainTextEdit):
             event.ignore()
 
 
+
     def contextMenuEvent(self, event):
         app = self.window() if hasattr(self, 'window') else None
         t = getattr(app, 't', lambda k: k)
@@ -170,7 +171,7 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         copy_line_action.triggered.connect(do_copy_line)
 
-        # Opcja: Formatuj zaznaczenie (emitujemy sygnał, lub używamy metody z main)
+        # Opcja: Formatuj zaznaczenie
         format_action = menu.addAction(t("mi_format_selection"))
         if not self.textCursor().hasSelection():
             format_action.setEnabled(False)
@@ -178,7 +179,33 @@ class LogPlainTextEdit(QPlainTextEdit):
             if hasattr(app, 'cmd_format_selection'):
                 format_action.triggered.connect(app.cmd_format_selection)
 
+        # Opcja: Formatuj linię
+        format_line_action = menu.addAction(t("mi_format_line"))
+        def do_format_line():
+            cursor = self.cursorForPosition(event.pos())
+            cursor.select(QTextCursor.LineUnderCursor)
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            if not selected_text.strip():
+                return
+
+            # Aby zachować powiązanie z tabulatorem (ostatnio wybrany formatter),
+            # pobieramy obiekt taba
+            tab = self.parent()
+            while tab and not hasattr(tab, "_last_formatter"):
+                tab = tab.parent()
+
+            last_formatter = getattr(tab, "_last_formatter", "JSON")
+
+            dialog = FormatDialog(self, selected_text, last_formatter)
+            dialog.exec()
+
+            if tab and hasattr(tab, "_last_formatter"):
+                tab._last_formatter = dialog.get_selected_formatter()
+
+        format_line_action.triggered.connect(do_format_line)
+
         menu.exec(event.globalPos())
+
 
 
 class SettingsDialog(QDialog):

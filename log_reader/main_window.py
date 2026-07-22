@@ -602,8 +602,6 @@ class LogViewerWindow(QMainWindow):
         self._follow_action = self._mkaction(self.t("mi_follow"), "Ctrl+T", self.cmd_toggle_follow)
         self._follow_action.setCheckable(True)
         view_menu.addAction(self._follow_action)
-        self._action_format_selection = self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection)
-        view_menu.addAction(self._action_format_selection)
         view_menu.addSeparator()
 
         enc_menu = view_menu.addMenu(self.t("mi_encoding"))
@@ -685,7 +683,7 @@ class LogViewerWindow(QMainWindow):
             self._action_save, self._action_save_as, self._action_export,
             self._action_find, self._action_find_next, self._action_find_prev, self._action_clear_search,
             self._action_filter, self._action_clear_filter,
-            self._action_edit_line, self._action_format_selection, self._action_save_edits, self._action_clear_edits,
+            self._action_edit_line, self._action_save_edits, self._action_clear_edits,
             self._follow_action,
             self._action_toggle_bookmark, self._action_next_bookmark, self._action_prev_bookmark, self._action_clear_bookmarks,
             self._action_goto, self._action_goto_start, self._action_goto_end
