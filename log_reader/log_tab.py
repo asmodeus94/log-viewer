@@ -318,8 +318,9 @@ class LogTab(QWidget):
         if self.follow_active:
             self.cmd_toggle_follow()
         self.file_path = path
+        self._assigned_title = title or os.path.basename(path)
         self._status(self.t("st_opening"))
-        self.title_changed.emit(title or os.path.basename(path))
+        self.title_changed.emit(self._assigned_title)
         self.window_start = 0
         self.window_lines = []
         self.line_map = []
@@ -433,9 +434,9 @@ class LogTab(QWidget):
         self._load_window(at_line=0)
         self._refresh_bookmarks_tree()
         self._refresh_edits_tree()
-        # Zaktualizuj tytuł zakładki — nazwa pliku + liczba linii
+        # Zaktualizuj tytuł zakładki — przywróć właściwy tytuł z sufiksem
         if self.file_path:
-            self.title_changed.emit(os.path.basename(self.file_path))
+            self.title_changed.emit(getattr(self, "_assigned_title", os.path.basename(self.file_path)))
         # Zaktualizuj mini-mapę — natychmiast (dla małych plików) + debounced (dla dużych)
         self._update_minimap()
         self._minimap_update_timer.start()
