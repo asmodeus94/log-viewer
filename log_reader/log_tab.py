@@ -2012,7 +2012,12 @@ class LogTab(QWidget):
     def _reload_current_view(self) -> None:
         if not self.indexer:
             return
+        # Zapamiętujemy pozycję paska przewijania, żeby uniknąć przeskakiwania
+        # zawartości przy odświeżaniu okna (np. po dodaniu zakładki).
+        scrollbar = self.text.verticalScrollBar()
+        old_val = scrollbar.value()
         self._load_window(at_line=self.window_start)
+        scrollbar.setValue(old_val)
 
     def _refresh_status(self) -> None:
         if not self.indexer:
