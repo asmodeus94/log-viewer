@@ -586,6 +586,7 @@ class LogTab(QWidget):
         self.text.setTextCursor(cursor)
         self._refresh_status()
         self._is_loading = False
+        self._last_edge_load_time = 0.0  # Zresetuj blokadę ładowania (przydatne przy natychmiastowym przewijaniu po skoku)
         # Po odblokowaniu _is_loading przebuduj selekcje (kursor już na starcie).
         self._update_current_line_highlight()
 
@@ -1749,13 +1750,34 @@ class LogTab(QWidget):
         self._goto_file_line(ln)
 
     def _goto_file_line(self, ln: int) -> None:
+        # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
+        # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
+        offset = 50
         if self.filter_active:
             keys = [r[0] for r in self.filter_results]
             idx = bisect.bisect_left(keys, ln)
-            self._load_window(at_line=idx)
+            start_idx = max(0, idx - offset)
+            self._load_window(at_line=start_idx)
+            try:
+                # Szukamy gdzie wylądował oryginalny idx
+                target_ln = keys[idx] if idx < len(keys) else -1
+                if target_ln in self.line_map:
+                    self.text.verticalScrollBar().setValue(self.line_map.index(target_ln))
+                else:
+                    self.text.verticalScrollBar().setValue(0)
+            except Exception:
+                self.text.verticalScrollBar().setValue(0)
         else:
-            self._load_window(at_line=ln)
-        self.text.verticalScrollBar().setValue(0)
+            start_ln = max(0, ln - offset)
+            self._load_window(at_line=start_ln)
+            try:
+                if ln in self.line_map:
+                    self.text.verticalScrollBar().setValue(self.line_map.index(ln))
+                else:
+                    self.text.verticalScrollBar().setValue(0)
+            except ValueError:
+                self.text.verticalScrollBar().setValue(0)
+
 
     def _delete_selected_bookmarks(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Zakładki.
@@ -2004,7 +2026,12 @@ class LogTab(QWidget):
     def _reload_current_view(self) -> None:
         if not self.indexer:
             return
+        # Zapamiętujemy pozycję paska przewijania, żeby uniknąć przeskakiwania
+        # zawartości przy odświeżaniu okna (np. po dodaniu zakładki).
+        scrollbar = self.text.verticalScrollBar()
+        old_val = scrollbar.value()
         self._load_window(at_line=self.window_start)
+        scrollbar.setValue(old_val)
 
     def _refresh_status(self) -> None:
         if not self.indexer:
