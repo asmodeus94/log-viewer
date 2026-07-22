@@ -832,7 +832,15 @@ class LogTab(QWidget):
             total = max(1, len(self.filter_results))
         else:
             total = max(1, self.indexer.line_count)
-        pct = int(self.window_start / total * 1000)
+
+        # Gdy skrolujemy po ułamkowych wartościach
+        # a jesteśmy pod koniec widoku używając follow lub gdy widoczny koniec pliku
+        scrollbar = self.text.verticalScrollBar()
+        if scrollbar.value() >= scrollbar.maximum() - 5:
+            pct = 1000
+        else:
+            pct = int(self.window_start / total * 1000)
+
         self.pct_label.setText(f"{pct // 10}%")
 
     # -------------------------------------------------------------- find ----
