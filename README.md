@@ -12,6 +12,8 @@
 * Możliwość robienia **zakładek** (bookmarks) i nanoszenia i zapisywania **edycji** w pliku.
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
 * Interfejs wyposażony w funkcjonalność Drag&Drop.
+* Obsługa wielokrotnego otwierania tego samego pliku (w kartach oznaczonych sufiksami `[A]`, `[B]`, itd.).
+* Możliwość przeładowania zawartości i indeksu pliku (klawisz `F5` lub opcja `Przeładuj`).
 
 ## Wymagania systemowe
 

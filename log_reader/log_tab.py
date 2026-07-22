@@ -310,7 +310,7 @@ class LogTab(QWidget):
         self._update_current_line_highlight()
 
     # --------------------------------------------------------- file ops ---
-    def open_file(self, path: str) -> None:
+    def open_file(self, path: str, title: Optional[str] = None) -> None:
         if not os.path.isfile(path):
             QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_no_file"))
             return
@@ -319,7 +319,7 @@ class LogTab(QWidget):
             self.cmd_toggle_follow()
         self.file_path = path
         self._status(self.t("st_opening"))
-        self.title_changed.emit(os.path.basename(path))
+        self.title_changed.emit(title or os.path.basename(path))
         self.window_start = 0
         self.window_lines = []
         self.line_map = []
@@ -1287,6 +1287,57 @@ class LogTab(QWidget):
         if not self.indexer:
             return
         self._load_window(at_line=0)
+
+    def cmd_reload(self) -> None:
+        """Przeładowuje bieżący plik i jego indeks (kasuje edycje po ostrzeżeniu)."""
+        if not self.file_path:
+            return
+
+        if len(self.edit_buffer) > 0:
+            choice = QMessageBox.question(
+                self, self.t("app_title"),
+                self.t("msg_clear_edits").format(n=len(self.edit_buffer)),
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if choice != QMessageBox.Yes:
+                return
+
+        # Zatrzymujemy follow jeżeli działa
+        if self.follow_active:
+            self.cmd_toggle_follow()
+
+        # Zapiszmy aktualną pozycję (fizyczny wiersz przed przeładowaniem)
+        try:
+            cursor = self.text.textCursor()
+            saved_line = self.line_map[cursor.blockNumber()] if self.line_map else 0
+        except Exception:
+            saved_line = 0
+
+        # Pamiętaj oryginalny tytuł zakładki (z ew. literą w nawiasie)
+        main_tabs = getattr(self.window(), "tabs", None)
+        title = os.path.basename(self.file_path)
+        if main_tabs is not None:
+            idx = main_tabs.indexOf(self)
+            if idx >= 0:
+                title = main_tabs.tabText(idx)
+
+        # Zwolnij plik
+        try:
+            if self.indexer:
+                self.indexer.close()
+        except Exception:
+            pass
+
+        self.open_file(self.file_path, title=title)
+
+        # Wywołanie _start_reindex by ustawić scroll po zakończeniu indeksowania
+        # jeśli proces odczytu to reindex po reload. W open_file po reindeksie
+        # jest _load_window(0). Ponieważ jest on asynchroniczny, przekażemy go
+        # przez wymuszenie reindeksu i ominięcie _load_window na 0.
+        # By uniknąć komplikacji w async open_file, najprościej uzyć mechanizmu
+        # z zapisu (np. użyć tej samej logiki odzyskiwania pozycji po indeksie).
+        if hasattr(self, "_start_reindex"):
+            self._start_reindex(saved_line)
 
     def cmd_goto_end(self) -> None:
         if not self.indexer:
