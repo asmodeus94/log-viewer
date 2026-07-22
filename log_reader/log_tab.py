@@ -86,6 +86,9 @@ class LogTab(QWidget):
         # Filtr
         self.filter_active: bool = False
         self.filter_results: List[Tuple[int, int, str]] = []
+        self._filter_hit_text_map: Dict[int, str] = {}
+        self._filter_hit_lines: set = set()
+        self._filter_all_lines: List[int] = []
         # Linie kontekstu (N linii po każdym trafieniu) — zbiór numerów linii pliku.
         # Tła kontekstu są dodawane przez ExtraSelections (jak zakładki).
         self.filter_context_lines: set = set()
@@ -486,9 +489,8 @@ class LogTab(QWidget):
             # WYDAJNOŚĆ: tekst trafień jest już w filter_results (w pamięci).
             # Tylko linie kontekstu wymagają odczytu z pliku — i to batchowo
             # dla ciągłych zakresów (zamiast read_lines(ln, 1) per linia).
-            hit_text_map: Dict[int, str] = {ln: text for (ln, _off, text) in self.filter_results}
-            hit_lines = set(hit_text_map.keys())
-            all_lines = sorted(hit_lines | self.filter_context_lines)
+            hit_text_map = self._filter_hit_text_map
+            all_lines = self._filter_all_lines
             n = len(all_lines)
             start = max(0, min(at_line, n - 1))
             chunk_lines = all_lines[start:start + self.window_size_lines]
@@ -544,9 +546,7 @@ class LogTab(QWidget):
         context_widget_lines: List[int] = []
         filter_hit_widget_lines: List[int] = []  # trafienia filtra (żółte tło)
         # W trybie filtra: sprawdź które linie są trafieniami (nie kontekstem).
-        hit_line_set = set()
-        if self.filter_active:
-            hit_line_set = {ln for (ln, _off, _text) in self.filter_results}
+        hit_line_set = self._filter_hit_lines if self.filter_active else set()
         for i, (ln, text) in enumerate(lines):
             display_text, tags = self._prepare_line_for_display(ln, text)
             text_parts.append(display_text)
@@ -1212,6 +1212,7 @@ class LogTab(QWidget):
         # linii (z pominięciem duplikatów i samych trafień). Używane głównie
         # dla stack trace PHP/Python — przefiltrowany błąd + kontekst poniżej.
         self._build_filter_context()
+        self._update_filter_cache()
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
 
@@ -1241,6 +1242,16 @@ class LogTab(QWidget):
                 if ctx not in hit_lines:
                     self.filter_context_lines.add(ctx)
 
+    def _update_filter_cache(self) -> None:
+        if self.filter_active and self.filter_results:
+            self._filter_hit_text_map = {ln: text for (ln, _off, text) in self.filter_results}
+            self._filter_hit_lines = set(self._filter_hit_text_map.keys())
+            self._filter_all_lines = sorted(self._filter_hit_lines | self.filter_context_lines)
+        else:
+            self._filter_hit_text_map.clear()
+            self._filter_hit_lines.clear()
+            self._filter_all_lines.clear()
+
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.filter_active
         if self.filter_engine and self.filter_engine.is_running():
@@ -1248,6 +1259,9 @@ class LogTab(QWidget):
         self.filter_active = False
         self.filter_results = []
         self.filter_context_lines = set()
+        self._filter_hit_text_map.clear()
+        self._filter_hit_lines.clear()
+        self._filter_all_lines.clear()
         self._filter_context_after = 0
         if not silent:
             self._main.filter_entry.clear()
