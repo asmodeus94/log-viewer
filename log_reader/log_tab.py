@@ -1846,7 +1846,7 @@ class LogTab(QWidget):
             except OSError:
                 self._last_file_inode = 0
 
-            if self.indexer.line_count > 0:
+            if self.indexer and self.indexer.line_count > 0:
                 last_start = max(0, self.indexer.line_count - self.window_size_lines)
                 self._load_window(at_line=last_start)
                 self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
