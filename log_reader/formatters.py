@@ -2,7 +2,6 @@ import json
 import re
 from typing import Tuple, Optional
 import defusedxml.minidom
-from xml.parsers.expat import ExpatError
 
 def extract_json(text: str) -> Tuple[str, str, str, bool]:
     """
