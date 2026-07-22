@@ -102,24 +102,28 @@ class LogPlainTextEdit(QPlainTextEdit):
         self._action_copy = QAction(self)
         self._action_copy.setShortcut(QKeySequence("Ctrl+C"))
         self._action_copy.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy.setShortcutVisibleInContextMenu(True)
         self._action_copy.triggered.connect(self._do_copy)
         self.addAction(self._action_copy)
 
         self._action_copy_line = QAction(self)
         self._action_copy_line.setShortcut(QKeySequence("Ctrl+Shift+C"))
         self._action_copy_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy_line.setShortcutVisibleInContextMenu(True)
         self._action_copy_line.triggered.connect(self._do_copy_line)
         self.addAction(self._action_copy_line)
 
         self._action_format_sel = QAction(self)
         self._action_format_sel.setShortcut(QKeySequence("Ctrl+I"))
         self._action_format_sel.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_sel.setShortcutVisibleInContextMenu(True)
         self._action_format_sel.triggered.connect(self._do_format_selection)
         self.addAction(self._action_format_sel)
 
         self._action_format_line = QAction(self)
         self._action_format_line.setShortcut(QKeySequence("Ctrl+Shift+I"))
         self._action_format_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_line.setShortcutVisibleInContextMenu(True)
         self._action_format_line.triggered.connect(self._do_format_line)
         self.addAction(self._action_format_line)
 
