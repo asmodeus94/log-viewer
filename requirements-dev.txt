@@ -2,3 +2,6 @@
 
 pyinstaller>=6.0.0
 Pillow>=10.0.0
+
+# Testy
+pytest>=7.0.0
