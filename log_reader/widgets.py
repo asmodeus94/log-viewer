@@ -96,6 +96,79 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         self.setFont(font)
         self.setAcceptDrops(True)
+        self._setup_actions()
+
+    def _setup_actions(self):
+        self._action_copy = QAction(self)
+        self._action_copy.setShortcut(QKeySequence("Ctrl+C"))
+        self._action_copy.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy.setShortcutVisibleInContextMenu(True)
+        self._action_copy.triggered.connect(self._do_copy)
+        self.addAction(self._action_copy)
+
+        self._action_copy_line = QAction(self)
+        self._action_copy_line.setShortcut(QKeySequence("Ctrl+Shift+L"))
+        self._action_copy_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy_line.setShortcutVisibleInContextMenu(True)
+        self._action_copy_line.triggered.connect(self._do_copy_line)
+        self.addAction(self._action_copy_line)
+
+        self._action_format_sel = QAction(self)
+        self._action_format_sel.setShortcut(QKeySequence("Ctrl+I"))
+        self._action_format_sel.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_sel.setShortcutVisibleInContextMenu(True)
+        self._action_format_sel.triggered.connect(self._do_format_selection)
+        self.addAction(self._action_format_sel)
+
+        self._action_format_line = QAction(self)
+        self._action_format_line.setShortcut(QKeySequence("Ctrl+Shift+I"))
+        self._action_format_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_line.setShortcutVisibleInContextMenu(True)
+        self._action_format_line.triggered.connect(self._do_format_line)
+        self.addAction(self._action_format_line)
+
+        self.selectionChanged.connect(self._update_actions_state)
+
+    def _update_actions_state(self):
+        has_sel = self.textCursor().hasSelection()
+        self._action_copy.setEnabled(has_sel)
+        self._action_format_sel.setEnabled(has_sel)
+
+    def _do_copy(self):
+        if self.textCursor().hasSelection():
+            self.copy()
+
+    def _do_copy_line(self):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.LineUnderCursor)
+        selected_text = cursor.selectedText()
+        if selected_text:
+            QApplication.clipboard().setText(selected_text)
+
+    def _do_format_selection(self):
+        if not self.textCursor().hasSelection():
+            return
+        app = self.window() if hasattr(self, 'window') else None
+        if app and hasattr(app, 'cmd_format_selection'):
+            app.cmd_format_selection()
+
+    def _do_format_line(self):
+        cursor = self.textCursor()
+        cursor.select(QTextCursor.LineUnderCursor)
+        selected_text = cursor.selectedText().replace("\u2029", "\n")
+        if not selected_text.strip():
+            return
+
+        tab = self.parent()
+        while tab and not hasattr(tab, "_last_formatter"):
+            tab = tab.parent()
+
+        last_formatter = getattr(tab, "_last_formatter", "JSON")
+        dialog = FormatDialog(self, selected_text, last_formatter)
+        dialog.exec()
+
+        if tab and hasattr(tab, "_last_formatter"):
+            tab._last_formatter = dialog.get_selected_formatter()
 
     def set_line_map(self, line_map: List[int]) -> None:
         self._line_number_area.set_line_map(line_map)
@@ -155,54 +228,21 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         menu = QMenu(self)
 
-        # Opcja: Kopiuj
-        copy_action = menu.addAction(t("mi_copy"))
-        copy_action.triggered.connect(self.copy)
         if not self.textCursor().hasSelection():
-            copy_action.setEnabled(False)
-
-        # Opcja: Kopiuj linię (pobieramy pozycję kliknięcia, jeśli nie ma selekcji)
-        copy_line_action = menu.addAction(t("mi_copy_line"))
-        def do_copy_line():
             cursor = self.cursorForPosition(event.pos())
-            cursor.select(QTextCursor.LineUnderCursor)
-            selected_text = cursor.selectedText()
-            QApplication.clipboard().setText(selected_text)
+            self.setTextCursor(cursor)
 
-        copy_line_action.triggered.connect(do_copy_line)
+        self._action_copy.setText(t("mi_copy"))
+        self._action_copy_line.setText(t("mi_copy_line"))
+        self._action_format_sel.setText(t("mi_format_selection"))
+        self._action_format_line.setText(t("mi_format_line"))
 
-        # Opcja: Formatuj zaznaczenie
-        format_action = menu.addAction(t("mi_format_selection"))
-        if not self.textCursor().hasSelection():
-            format_action.setEnabled(False)
-        else:
-            if hasattr(app, 'cmd_format_selection'):
-                format_action.triggered.connect(app.cmd_format_selection)
+        self._update_actions_state()
 
-        # Opcja: Formatuj linię
-        format_line_action = menu.addAction(t("mi_format_line"))
-        def do_format_line():
-            cursor = self.cursorForPosition(event.pos())
-            cursor.select(QTextCursor.LineUnderCursor)
-            selected_text = cursor.selectedText().replace("\u2029", "\n")
-            if not selected_text.strip():
-                return
-
-            # Aby zachować powiązanie z tabulatorem (ostatnio wybrany formatter),
-            # pobieramy obiekt taba
-            tab = self.parent()
-            while tab and not hasattr(tab, "_last_formatter"):
-                tab = tab.parent()
-
-            last_formatter = getattr(tab, "_last_formatter", "JSON")
-
-            dialog = FormatDialog(self, selected_text, last_formatter)
-            dialog.exec()
-
-            if tab and hasattr(tab, "_last_formatter"):
-                tab._last_formatter = dialog.get_selected_formatter()
-
-        format_line_action.triggered.connect(do_format_line)
+        menu.addAction(self._action_copy)
+        menu.addAction(self._action_copy_line)
+        menu.addAction(self._action_format_sel)
+        menu.addAction(self._action_format_line)
 
         menu.exec(event.globalPos())
 
