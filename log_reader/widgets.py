@@ -433,6 +433,7 @@ class FormatDialog(QDialog):
         self.ui.lbl_formatter.setText(self.t("lbl_formatter"))
 
         self.formatter_combo = self.ui.formatter_combo
+        self.formatter_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.formatter_combo.addItems(list(FORMATTERS.keys()))
 
         # Ustaw początkowy formatter, jeśli istnieje
