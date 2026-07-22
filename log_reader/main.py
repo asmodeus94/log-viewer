@@ -21,6 +21,7 @@ def main() -> None:
 
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName("log-viewer")
+    app.setApplicationDisplayName("log-viewer")
     app.setApplicationVersion("1.0")
 
     # Ustawianie ikony okna aplikacji

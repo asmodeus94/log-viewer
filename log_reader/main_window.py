@@ -777,11 +777,14 @@ class LogViewerWindow(QMainWindow):
         index = self.tabs.indexOf(tab)
         if index >= 0:
             self.tabs.setTabText(index, title)
+            if index == self.tabs.currentIndex():
+                self.setWindowTitle(f"{title} - {self.t('app_title')}")
 
     def _on_tab_changed(self, index: int) -> None:
         """Aktualizuje status bar, slider, minimap i follow action po zmianie zakładki."""
         self._update_ui_state()
         if index < 0:
+            self.setWindowTitle(self.t("app_title"))
             self.statusBar().showMessage(self.t("st_ready"))
             if self._follow_action is not None:
                 self._follow_action.setChecked(False)
@@ -801,6 +804,7 @@ class LogViewerWindow(QMainWindow):
             return
         tab = self.tabs.widget(index)
         if isinstance(tab, LogTab):
+            self.setWindowTitle(f"{self.tabs.tabText(index)} - {self.t('app_title')}")
             self._load_toolbar_from_tab(tab)
             tab._refresh_status()
             tab._update_position_slider()
