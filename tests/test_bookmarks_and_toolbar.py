@@ -672,6 +672,7 @@ class TestFilterContext:
         ]
         tab._filter_context_after = 2
         tab._build_filter_context()
+        tab._update_filter_cache()
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
         tab._load_window(at_line=0)
@@ -697,6 +698,7 @@ class TestFilterContext:
         tab.filter_results = [(5, 0, "MARKER_FROM_MEMORY")]
         tab._filter_context_after = 0
         tab._build_filter_context()
+        tab._update_filter_cache()
         tab._load_window(at_line=0)
         app.processEvents()
 
@@ -715,6 +717,7 @@ class TestFilterContext:
         tab.filter_results = [(5, 0, "hit5")]
         tab._filter_context_after = 2
         tab._build_filter_context()
+        tab._update_filter_cache()
         tab._load_window(at_line=0)
         app.processEvents()
 

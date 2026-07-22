@@ -86,6 +86,9 @@ class LogTab(QWidget):
         # Filtr
         self.filter_active: bool = False
         self.filter_results: List[Tuple[int, int, str]] = []
+        self._filter_hit_text_map: Dict[int, str] = {}
+        self._filter_hit_lines: set = set()
+        self._filter_all_lines: List[int] = []
         # Linie kontekstu (N linii po każdym trafieniu) — zbiór numerów linii pliku.
         # Tła kontekstu są dodawane przez ExtraSelections (jak zakładki).
         self.filter_context_lines: set = set()
@@ -490,9 +493,8 @@ class LogTab(QWidget):
             # WYDAJNOŚĆ: tekst trafień jest już w filter_results (w pamięci).
             # Tylko linie kontekstu wymagają odczytu z pliku — i to batchowo
             # dla ciągłych zakresów (zamiast read_lines(ln, 1) per linia).
-            hit_text_map: Dict[int, str] = {ln: text for (ln, _off, text) in self.filter_results}
-            hit_lines = set(hit_text_map.keys())
-            all_lines = sorted(hit_lines | self.filter_context_lines)
+            hit_text_map = self._filter_hit_text_map
+            all_lines = self._filter_all_lines
             n = len(all_lines)
             start = max(0, min(at_line, n - 1))
             chunk_lines = all_lines[start:start + self.window_size_lines]
@@ -548,9 +550,7 @@ class LogTab(QWidget):
         context_widget_lines: List[int] = []
         filter_hit_widget_lines: List[int] = []  # trafienia filtra (żółte tło)
         # W trybie filtra: sprawdź które linie są trafieniami (nie kontekstem).
-        hit_line_set = set()
-        if self.filter_active:
-            hit_line_set = {ln for (ln, _off, _text) in self.filter_results}
+        hit_line_set = self._filter_hit_lines if self.filter_active else set()
         for i, (ln, text) in enumerate(lines):
             display_text, tags = self._prepare_line_for_display(ln, text)
             text_parts.append(display_text)
@@ -594,6 +594,7 @@ class LogTab(QWidget):
         self.text.setTextCursor(cursor)
         self._refresh_status()
         self._is_loading = False
+        self._last_edge_load_time = 0.0  # Zresetuj blokadę ładowania (przydatne przy natychmiastowym przewijaniu po skoku)
         # Po odblokowaniu _is_loading przebuduj selekcje (kursor już na starcie).
         self._update_current_line_highlight()
 
@@ -736,11 +737,9 @@ class LogTab(QWidget):
                 cursor.deletePreviousChar()
             self.line_map = self.line_map[:self.max_display_lines]
         self.text.set_line_map(self.line_map)
-        try:
-            new_index = self.line_map.index(old_first_file_line)
-            self.text.verticalScrollBar().setValue(new_index)
-        except ValueError:
-            pass
+        idx = bisect.bisect_left(self.line_map, old_first_file_line)
+        if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
+            self.text.verticalScrollBar().setValue(idx)
         self._update_position_slider()
 
     # ---------------------------------------------------- position slider ---
@@ -780,9 +779,18 @@ class LogTab(QWidget):
         try:
             cursor = self.text.cursorForPosition(QPoint(0, 5))
             first_line = self.line_map[cursor.blockNumber()] if cursor.blockNumber() < len(self.line_map) else 0
-            cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
-            last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else self.indexer.line_count - 1
+
+            # Jeśli jesteśmy w trybie follow i pasek jest na dole, zakładamy dolną krawędź jako 1.0 (100%)
             total = self.indexer.line_count
+
+            scrollbar = self.text.verticalScrollBar()
+            is_at_bottom = scrollbar.value() >= scrollbar.maximum() - 5
+
+            if self.follow_active and is_at_bottom:
+                last_line = total - 1
+            else:
+                cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
+                last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else total - 1
 
             new_start = first_line / total
             new_end = last_line / total
@@ -1235,6 +1243,7 @@ class LogTab(QWidget):
         # linii (z pominięciem duplikatów i samych trafień). Używane głównie
         # dla stack trace PHP/Python — przefiltrowany błąd + kontekst poniżej.
         self._build_filter_context()
+        self._update_filter_cache()
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
 
@@ -1264,6 +1273,16 @@ class LogTab(QWidget):
                 if ctx not in hit_lines:
                     self.filter_context_lines.add(ctx)
 
+    def _update_filter_cache(self) -> None:
+        if self.filter_active and self.filter_results:
+            self._filter_hit_text_map = {ln: text for (ln, _off, text) in self.filter_results}
+            self._filter_hit_lines = set(self._filter_hit_text_map.keys())
+            self._filter_all_lines = sorted(self._filter_hit_lines | self.filter_context_lines)
+        else:
+            self._filter_hit_text_map.clear()
+            self._filter_hit_lines.clear()
+            self._filter_all_lines.clear()
+
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.filter_active
         if self.filter_engine and self.filter_engine.is_running():
@@ -1271,6 +1290,9 @@ class LogTab(QWidget):
         self.filter_active = False
         self.filter_results = []
         self.filter_context_lines = set()
+        self._filter_hit_text_map.clear()
+        self._filter_hit_lines.clear()
+        self._filter_all_lines.clear()
         self._filter_context_after = 0
         if not silent:
             self._main.filter_entry.clear()
@@ -1758,13 +1780,34 @@ class LogTab(QWidget):
         self._goto_file_line(ln)
 
     def _goto_file_line(self, ln: int) -> None:
+        # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
+        # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
+        offset = 50
         if self.filter_active:
             keys = [r[0] for r in self.filter_results]
             idx = bisect.bisect_left(keys, ln)
-            self._load_window(at_line=idx)
+            start_idx = max(0, idx - offset)
+            self._load_window(at_line=start_idx)
+            try:
+                # Szukamy gdzie wylądował oryginalny idx
+                target_ln = keys[idx] if idx < len(keys) else -1
+                if target_ln in self.line_map:
+                    self.text.verticalScrollBar().setValue(self.line_map.index(target_ln))
+                else:
+                    self.text.verticalScrollBar().setValue(0)
+            except Exception:
+                self.text.verticalScrollBar().setValue(0)
         else:
-            self._load_window(at_line=ln)
-        self.text.verticalScrollBar().setValue(0)
+            start_ln = max(0, ln - offset)
+            self._load_window(at_line=start_ln)
+            try:
+                if ln in self.line_map:
+                    self.text.verticalScrollBar().setValue(self.line_map.index(ln))
+                else:
+                    self.text.verticalScrollBar().setValue(0)
+            except ValueError:
+                self.text.verticalScrollBar().setValue(0)
+
 
     def _delete_selected_bookmarks(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Zakładki.
@@ -1958,8 +2001,13 @@ class LogTab(QWidget):
             return
         if new_line_count > 0 or not self.line_map:
             last_start = max(0, self.indexer.line_count - self.window_size_lines)
-            self._load_window(at_line=last_start)
-            self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+            # Blokujemy aktualizacje scrollbara uzytkownika podczas tej operacji aby uniknąć false positivów
+            self.text.verticalScrollBar().blockSignals(True)
+            try:
+                self._load_window(at_line=last_start)
+                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+            finally:
+                self.text.verticalScrollBar().blockSignals(False)
         self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(object, int, int)
@@ -2011,7 +2059,12 @@ class LogTab(QWidget):
     def _reload_current_view(self) -> None:
         if not self.indexer:
             return
+        # Zapamiętujemy pozycję paska przewijania, żeby uniknąć przeskakiwania
+        # zawartości przy odświeżaniu okna (np. po dodaniu zakładki).
+        scrollbar = self.text.verticalScrollBar()
+        old_val = scrollbar.value()
         self._load_window(at_line=self.window_start)
+        scrollbar.setValue(old_val)
 
     def _refresh_status(self) -> None:
         if not self.indexer:

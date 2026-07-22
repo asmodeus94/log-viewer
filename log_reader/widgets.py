@@ -205,6 +205,9 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.user_scrolled.emit()
         super().wheelEvent(e)
 
+    def set_line_map(self, line_map: list) -> None:
+        self._line_map = line_map
+
     def dragMoveEvent(self, event):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()

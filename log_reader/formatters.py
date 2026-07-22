@@ -1,3 +1,4 @@
+import re
 import json
 from typing import Tuple, Optional
 import defusedxml.minidom
@@ -57,35 +58,25 @@ def extract_xml(text: str) -> Tuple[str, str, str, bool]:
     Próbuje znaleźć pierwszy prawidłowy blok XML w tekście.
     Zwraca krotkę: (prefix, xml_text, suffix, czy_znaleziono)
     """
-    # Szybka ścieżka za pomocą wyrażenia regularnego, aby znaleźć kandydatów
-    # Szukamy <tag ...> ... </tag> lub <tag .../>
-    # Wyrażenie nie jest perfekcyjne (nie radzi sobie z zagłębieniami tak samo nazwanych tagów,
-    # ale używamy minidom do walidacji)
+    # Szukamy pierwszego znacznika XML, może to być deklaracja <?xml... lub tag <nazwa...
+    for start_match in re.finditer(r'<(?:[a-zA-Z_][\w:.-]*|\?xml)', text):
+        i = start_match.start()
 
-    # Najpierw spróbujmy prościej - iterujemy po każdym potencjalnym początku '<'
-    # i próbujemy sparsować XML od tego miejsca używając defusedxml.
+        # XML musi zamykać się '>', więc szukamy od tyłu do przodu
+        j = text.rfind('>') + 1
 
-    for i, char in enumerate(text):
-        if char == '<':
-            # XML musi zamykać się '>', więc szukamy od tyłu do przodu dla tego samego początkowego indeksu
-            for j in range(len(text), i, -1):
-                if text[j-1] == '>':
-                    candidate = text[i:j]
+        while j > i + 4:  # minimalna długość to np. <a/>, len == 4
+            candidate = text[i:j]
+            try:
+                # Walidujemy kandydata parserem XML
+                defusedxml.minidom.parseString(candidate)
 
-                    # Ignorujemy błahe przypadki np. pojedynczy tag bez atrybutów jeśli szukamy struktury
-                    if len(candidate) < 5:
-                        continue
-
-                    try:
-                        # Walidujemy kandydata parserem XML
-                        defusedxml.minidom.parseString(candidate)
-
-                        prefix = text[:i]
-                        suffix = text[j:]
-                        return prefix, candidate, suffix, True
-                    except Exception:
-                        # Może jest źle sformułowany, zmniejszamy j (odrzucamy końcówkę)
-                        continue
+                prefix = text[:i]
+                suffix = text[j:]
+                return prefix, candidate, suffix, True
+            except Exception:
+                # Szukamy poprzedniego '>'
+                j = text.rfind('>', i, j - 1) + 1
 
     return text, "", "", False
 
