@@ -729,11 +729,9 @@ class LogTab(QWidget):
                 cursor.deletePreviousChar()
             self.line_map = self.line_map[:self.max_display_lines]
         self.text.set_line_map(self.line_map)
-        try:
-            new_index = self.line_map.index(old_first_file_line)
-            self.text.verticalScrollBar().setValue(new_index)
-        except ValueError:
-            pass
+        idx = bisect.bisect_left(self.line_map, old_first_file_line)
+        if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
+            self.text.verticalScrollBar().setValue(idx)
         self._update_position_slider()
 
     # ---------------------------------------------------- position slider ---
