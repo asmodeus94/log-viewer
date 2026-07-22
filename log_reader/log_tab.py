@@ -248,6 +248,10 @@ class LogTab(QWidget):
 
         self.text.files_dropped.connect(self._main._on_files_dropped)
         self.text.verticalScrollBar().valueChanged.connect(self._on_scroll_changed)
+        # Podłączamy detekcję user_scrolled aby wyłączyć follow
+        self.text.user_scrolled.connect(self._on_user_scrolled)
+        # Musimy również wyłączyć follow, jeśli użytkownik kliknie bezpośrednio na scrollbar
+        self.text.verticalScrollBar().sliderPressed.connect(self._on_user_scrolled)
         self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
         self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
 
@@ -581,7 +585,11 @@ class LogTab(QWidget):
         self._search_extra_sel = None
         self.text.set_line_map(self.line_map)
         self._update_position_slider()
-        self._update_minimap_viewport()
+
+        # Odsprzęgnięta aktualizacja minimapy (szczególnie przydatna dla Follow)
+        if not self._minimap_update_timer.isActive():
+            self._minimap_update_timer.start(100)
+
         cursor.movePosition(QtGui.QTextCursor.Start)
         self.text.setTextCursor(cursor)
         self._refresh_status()
@@ -736,6 +744,12 @@ class LogTab(QWidget):
         self._update_position_slider()
 
     # ---------------------------------------------------- position slider ---
+    def _on_user_scrolled(self) -> None:
+        """Wywoływane przy ręcznym zdarzeniu wheelEvent lub po naciśnięciu ScrollBara."""
+        if self.follow_active:
+            # Rozmyślnie przerywamy follow mode
+            self.cmd_toggle_follow()
+
     def _on_scroll_changed(self, value: int) -> None:
         if not self.indexer or not self.line_map or self._is_loading:
             return
@@ -755,7 +769,9 @@ class LogTab(QWidget):
         # Aby zapobiec zawieszaniu UI przy ładowaniu bardzo dużych plików (np. 25 GB)
         # rezygnujemy z pełnego skanowania pliku w poszukiwaniu tagów logów dla
         # kolorowania minimapy. Minimapa posłuży tylko jako żółty wskaźnik pozycji.
-        self.minimap.set_line_data([], total)
+        if self.minimap._total_lines != total:
+            self.minimap.set_line_data([], total)
+
         self._update_minimap_viewport()
 
     def _update_minimap_viewport(self) -> None:
@@ -767,7 +783,12 @@ class LogTab(QWidget):
             cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
             last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else self.indexer.line_count - 1
             total = self.indexer.line_count
-            self.minimap.set_viewport(first_line / total, last_line / total)
+
+            new_start = first_line / total
+            new_end = last_line / total
+
+            # W trybie follow aktualizujemy viewport płynniej
+            self.minimap.set_viewport(new_start, new_end)
         except Exception:
             pass
 
@@ -785,7 +806,9 @@ class LogTab(QWidget):
                     total = max(1, self.indexer.line_count)
                 pct = int(file_line / total * 1000)
                 self.pct_label.setText(f"{pct // 10}%")
-                self._update_minimap_viewport()
+                # Zamiast bezpośrednio wzywać _update_minimap_viewport opóźniamy/dławimy
+                if not self._minimap_update_timer.isActive():
+                    self._minimap_update_timer.start(100)
         except Exception:
             pass
 
