@@ -565,6 +565,8 @@ class LogViewerWindow(QMainWindow):
 
         file_menu = menubar.addMenu(self.t("menu_file"))
         file_menu.addAction(self._mkaction(self.t("mi_open"), QKeySequence.StandardKey.Open, self.cmd_open))
+        self._action_reload = self._mkaction(self.t("mi_reload"), QKeySequence.StandardKey.Refresh, self.cmd_reload)
+        file_menu.addAction(self._action_reload)
         self._action_save = self._mkaction(self.t("mi_save"), QKeySequence.StandardKey.Save, self.cmd_save_edits)
         file_menu.addAction(self._action_save)
         self._action_save_as = self._mkaction(self.t("mi_save_as"), QKeySequence.StandardKey.SaveAs, self.cmd_save_as)
@@ -680,7 +682,7 @@ class LogViewerWindow(QMainWindow):
         help_menu.addAction(self._mkaction(self.t("mi_about"), "", self.cmd_about))
 
         self._context_actions = [
-            self._action_save, self._action_save_as, self._action_export,
+            self._action_reload, self._action_save, self._action_save_as, self._action_export,
             self._action_find, self._action_find_next, self._action_find_prev, self._action_clear_search,
             self._action_filter, self._action_clear_filter,
             self._action_edit_line, self._action_save_edits, self._action_clear_edits,
@@ -724,13 +726,44 @@ class LogViewerWindow(QMainWindow):
         tab._apply_font_to_text()
         return tab
 
+    def _generate_tab_title(self, path: str) -> str:
+        """Generuje tytuł zakładki (z literką, np. [A], [B], [AA]) jeśli plik jest już otwarty."""
+        base_title = os.path.basename(path)
+
+        existing_titles = set()
+        for i in range(self.tabs.count()):
+            tab = self.tabs.widget(i)
+            if isinstance(tab, LogTab) and tab.file_path == path:
+                existing_titles.add(self.tabs.tabText(i))
+
+        if not existing_titles:
+            return base_title
+
+        # Generuj literkę, np. 1 -> A, 2 -> B, ..., 26 -> Z, 27 -> AA
+        def get_suffix(n: int) -> str:
+            res = ""
+            while n > 0:
+                n, rem = divmod(n - 1, 26)
+                res = chr(65 + rem) + res
+            return res
+
+        count = 1
+        while True:
+            suffix = get_suffix(count)
+            candidate = f"{base_title} [{suffix}]"
+            if candidate not in existing_titles:
+                return candidate
+            count += 1
+
     def open_file_in_tab(self, path: str) -> Optional[LogTab]:
         """Otwiera plik w nowej zakładce."""
         if not os.path.isfile(path):
             QMessageBox.critical(self, self.t("app_title"), self.t("msg_no_file"))
             return None
-        tab = self._new_tab(title=os.path.basename(path))
-        tab.open_file(path)
+
+        title = self._generate_tab_title(path)
+        tab = self._new_tab(title=title)
+        tab.open_file(path, title=title)
         self._update_ui_state()
         return tab
 
@@ -869,6 +902,9 @@ class LogViewerWindow(QMainWindow):
     # Te metody są definiowane na oknie aby toolbar/menubar mogły się do nich
     # podpiąć przy budowie UI (zanim istnieje jakakolwiek zakładka). Delegują
     # wywołanie do aktywnej zakładki (tabs.currentWidget()).
+
+    def cmd_reload(self):
+        return self._delegate_to_tab("cmd_reload")
 
     def cmd_find_dialog(self):
         return self._delegate_to_tab("cmd_find_dialog")
