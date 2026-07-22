@@ -1845,6 +1845,12 @@ class LogTab(QWidget):
                 self._last_file_inode = os.stat(self.file_path).st_ino
             except OSError:
                 self._last_file_inode = 0
+
+            if self.indexer.line_count > 0:
+                last_start = max(0, self.indexer.line_count - self.window_size_lines)
+                self._load_window(at_line=last_start)
+                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+
             self._follow_poll()
         else:
             self._refresh_status()
@@ -1927,15 +1933,7 @@ class LogTab(QWidget):
     def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
         if not self.indexer or self.indexer.line_count == 0:
             return
-        if new_line_count > 0 and self.line_map:
-            current_last = self.line_map[-1] if self.line_map else -1
-            if current_last >= 0 and current_last + 1 < self.indexer.line_count:
-                distance_to_end = self.indexer.line_count - current_last
-                if distance_to_end < self.window_size_lines:
-                    last_start = max(0, self.indexer.line_count - self.window_size_lines)
-                    self._load_window(at_line=last_start)
-                    self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-        elif not self.line_map:
+        if new_line_count > 0 or not self.line_map:
             last_start = max(0, self.indexer.line_count - self.window_size_lines)
             self._load_window(at_line=last_start)
             self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
