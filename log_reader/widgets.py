@@ -107,7 +107,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.addAction(self._action_copy)
 
         self._action_copy_line = QAction(self)
-        self._action_copy_line.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        self._action_copy_line.setShortcut(QKeySequence("Ctrl+Shift+L"))
         self._action_copy_line.setShortcutContext(Qt.WidgetShortcut)
         self._action_copy_line.setShortcutVisibleInContextMenu(True)
         self._action_copy_line.triggered.connect(self._do_copy_line)
