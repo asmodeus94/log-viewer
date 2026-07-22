@@ -93,7 +93,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.setReadOnly(True)
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
-        font.setStyleHint(QFont.Monospace)
+
         self.setFont(font)
         self.setAcceptDrops(True)
 
@@ -509,7 +509,7 @@ class FormatDialog(QDialog):
         # Zastosuj czcionkę stałej szerokości
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
-        font.setStyleHint(QFont.Monospace)
+
         self.text_edit.setFont(font)
 
         # Zastosuj formatowanie przy otwarciu

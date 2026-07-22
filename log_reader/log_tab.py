@@ -248,7 +248,7 @@ class LogTab(QWidget):
         self.search_results_view.setModel(self._search_model)
         mono_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         mono_font.setPointSize(9)
-        mono_font.setStyleHint(QFont.Monospace)
+
         self.search_results_view.setFont(mono_font)
         self.search_results_view.clicked.connect(self._on_search_result_clicked)
 
@@ -273,7 +273,7 @@ class LogTab(QWidget):
         else:
             font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
             font.setPointSize(self.font_size)
-        font.setStyleHint(QFont.Monospace)
+
         self.text.setFont(font)
         if hasattr(self.text, "_line_number_area"):
             self.text._line_number_area.update_width()
