@@ -43,6 +43,49 @@ def test_duplicate_file_tab_names(temp_log_file):
         assert window.tabs.count() == 3
         assert window.tabs.tabText(2) == f"{base_name} [B]"
 
+def test_window_title_updates_on_tab_change(temp_log_file):
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))
+    window = LogViewerWindow(config=cfg)
+
+    path1 = temp_log_file(num_lines=10)
+    base_name1 = os.path.basename(path1)
+
+    path2 = temp_log_file(num_lines=10)
+    base_name2 = os.path.basename(path2)
+
+    app_title = window.t("app_title")
+
+    # Powinno pokazywać domyślny tytuł jeśli nie ma zakładek
+    assert window.windowTitle() == app_title
+
+    # Otwarcie pierwszego pliku
+    with patch("log_reader.log_tab.LogTab.open_file"):
+        t1 = window.open_file_in_tab(path1)
+        t1.file_path = path1
+        # Musimy ręcznie zmienić tytuł, bo open_file jest zmockowane
+        window._on_tab_title_changed(t1, base_name1)
+        window.tabs.setCurrentWidget(t1)
+        assert window.windowTitle() == f"{base_name1} - {app_title}"
+
+    # Otwarcie drugiego pliku
+    with patch("log_reader.log_tab.LogTab.open_file"):
+        t2 = window.open_file_in_tab(path2)
+        t2.file_path = path2
+        window._on_tab_title_changed(t2, base_name2)
+        window.tabs.setCurrentWidget(t2)
+        assert window.windowTitle() == f"{base_name2} - {app_title}"
+
+    # Zamknięcie pierwszego pliku
+    window.cmd_close_tab() # Zamyka obecny czyli path2
+
+    assert window.windowTitle() == f"{base_name1} - {app_title}"
+
+    # Zamknięcie drugiego pliku
+    window.cmd_close_tab() # Zamyka obecny czyli path1
+
+    assert window.windowTitle() == app_title
+
 def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))

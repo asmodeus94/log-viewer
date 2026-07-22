@@ -13,6 +13,7 @@
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
 * Interfejs wyposażony w funkcjonalność Drag&Drop.
 * Obsługa wielokrotnego otwierania tego samego pliku (w kartach oznaczonych sufiksami `[A]`, `[B]`, itd.).
+* Dynamiczna aktualizacja nagłówka okna prezentująca nazwę przeglądanego pliku (zgodną z nazwą bieżącej karty).
 * Możliwość przeładowania zawartości i indeksu pliku (klawisz `F5` lub opcja `Przeładuj`).
 
 ## Wymagania systemowe
