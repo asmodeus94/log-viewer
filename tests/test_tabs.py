@@ -105,3 +105,46 @@ def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
             window.cmd_reload()
 
     assert len(tab.edit_buffer) == 0
+
+
+import gc
+import time
+from log_reader.log_tab import _running_tasks
+
+def test_qthread_survives_tab_closure(temp_log_file):
+    """Weryfikuje, że w czasie działania wątku usunięcie zakładki nie powoduje utraty referencji i błędu (GC)."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))
+    window = LogViewerWindow(config=cfg)
+
+    # Tworzymy duży plik by wymusić dłuższe działanie IndexerWorker
+    path = temp_log_file(num_lines=100000)
+
+    # Rejestrujemy stan działających wątków przed dodaniem
+    initial_tasks = len(_running_tasks)
+
+    # Dodajemy zakładkę (startuje indexer_thread)
+    tab = window.open_file_in_tab(path)
+
+    # Symulujemy zamknięcie zakładki po 10ms (podczas gdy wciąż działa)
+    # Wywołujemy manualnie zdarzenie tak by usunęło Tab, ale wątek może zostać
+    # przerwany poleceniem cancel (co robi close). W testach worker kończy od razu,
+    # ale upewnijmy się, że rejestr działa.
+
+    thread = tab._indexer_thread
+    assert thread is not None
+
+    # Upewniamy się, że został dodany do rejestru
+    found = any(t == thread for t, w in _running_tasks)
+    assert found is True
+
+    index = window.tabs.indexOf(tab)
+    window._on_tab_close_requested(index)
+
+    # Wymuszamy Garbage Collection aby sprawdzić czy wątek zginie zanim zostanie usunięty
+    del tab
+    gc.collect()
+
+    # Wątek mógł już zostać przerwany i zakończony przez Qt, co usunie go z _running_tasks
+    # Zatem pomyślne zakończenie testu polega na tym, że aplikacja nie zgłosiła błędu Abort (Crash).
+    # Proces w test-suite przechodzi dalej gładko.
