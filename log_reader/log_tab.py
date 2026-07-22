@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+_running_tasks = set()
 import re
 import sys
 import time
@@ -55,6 +56,12 @@ class LogTab(QWidget):
 
     status_changed = Signal(str)
     title_changed = Signal(str)
+
+    def _register_thread_worker(self, thread: QThread, worker: QObject) -> None:
+        """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
+        task_ref = (thread, worker)
+        _running_tasks.add(task_ref)
+        thread.finished.connect(lambda r=task_ref: _running_tasks.discard(r))
 
     def __init__(self, main_window: "LogViewerWindow", parent=None):
         super().__init__(parent)
@@ -359,6 +366,7 @@ class LogTab(QWidget):
         self._indexer_worker = IndexerWorker(path, encoding, self.index_interval_bytes)
         self._indexer_worker.moveToThread(self._indexer_thread)
         self._indexer_thread.started.connect(self._indexer_worker.run)
+        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
 
         # Używamy metod-slotów (nie closure) — Qt QueuedConnection wymaga
         # picklowalnych odbiorców, a closure nie jest picklowalne. To była
@@ -876,6 +884,7 @@ class LogTab(QWidget):
         )
         self._search_worker.moveToThread(self._search_thread)
         self._search_thread.started.connect(self._search_worker.run)
+        self._register_thread_worker(self._search_thread, self._search_worker)
         self._search_worker.progress.connect(self._on_search_progress, Qt.QueuedConnection)
         self._search_worker.finished.connect(self._on_search_finished, Qt.QueuedConnection)
         self._search_worker.finished.connect(self._search_thread.quit, Qt.QueuedConnection)
@@ -1171,6 +1180,7 @@ class LogTab(QWidget):
         self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate)
         self._filter_worker.moveToThread(self._filter_thread)
         self._filter_thread.started.connect(self._filter_worker.run)
+        self._register_thread_worker(self._filter_thread, self._filter_worker)
         self._filter_worker.progress.connect(self._on_filter_progress, Qt.QueuedConnection)
         self._filter_worker.finished.connect(self._on_filter_done, Qt.QueuedConnection)
         self._filter_worker.finished.connect(self._filter_thread.quit, Qt.QueuedConnection)
@@ -1465,6 +1475,7 @@ class LogTab(QWidget):
         )
         self._save_worker.moveToThread(self._save_thread)
         self._save_thread.started.connect(self._save_worker.run)
+        self._register_thread_worker(self._save_thread, self._save_worker)
         # QueuedConnection + metoda-slot (nie lambda) — cross-thread safe.
         self._save_worker.progress.connect(self._save_progress.setValue, Qt.QueuedConnection)
         self._save_worker.finished.connect(self._on_save_done, Qt.QueuedConnection)
@@ -1506,6 +1517,7 @@ class LogTab(QWidget):
         self._indexer_worker = IndexerWorker(self.file_path, self.encoding, self.index_interval_bytes)
         self._indexer_worker.moveToThread(self._indexer_thread)
         self._indexer_thread.started.connect(self._indexer_worker.run)
+        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
         # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
         # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
         self._indexer_worker.progress.connect(self._on_index_progress, Qt.QueuedConnection)
@@ -1885,6 +1897,7 @@ class LogTab(QWidget):
         self._indexer_worker = IndexerWorker(self.file_path, self.encoding, self.index_interval_bytes)
         self._indexer_worker.moveToThread(self._indexer_thread)
         self._indexer_thread.started.connect(self._indexer_worker.run)
+        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
         # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
         # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
         self._indexer_worker.finished.connect(self._on_follow_reindex_slot, Qt.QueuedConnection)
@@ -2026,3 +2039,20 @@ class LogTab(QWidget):
                 self.indexer.close()
             except Exception:
                 pass
+
+
+import atexit
+
+def _cleanup_running_tasks():
+    for task_ref in list(_running_tasks):
+        try:
+            thread, worker = task_ref
+            if hasattr(worker, 'cancel'):
+                worker.cancel()
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(2000)
+        except Exception:
+            pass
+
+atexit.register(_cleanup_running_tasks)

@@ -56,7 +56,7 @@ class IndexerWorker(QObject):
                 self.error.emit("cancelled")
                 return
             self.finished.emit(idx)
-        except Exception as e:
+        except BaseException as e:
             self.error.emit(str(e))
 
 
@@ -119,7 +119,7 @@ class SaveWorker(QObject):
                 encoding=self._encoding,
             )
             self.finished.emit(backup_path)
-        except Exception as e:
+        except BaseException as e:
             from .exceptions import FileChangedError, CompressedSaveError
             if isinstance(e, FileChangedError):
                 self.file_changed.emit(str(e))
