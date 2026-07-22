@@ -590,7 +590,11 @@ class LogTab(QWidget):
         if not self._minimap_update_timer.isActive():
             self._minimap_update_timer.start(100)
 
-        cursor.movePosition(QtGui.QTextCursor.Start)
+        if self.follow_active:
+            cursor.movePosition(QtGui.QTextCursor.End)
+        else:
+            cursor.movePosition(QtGui.QTextCursor.Start)
+
         self.text.setTextCursor(cursor)
         self._refresh_status()
         self._is_loading = False
