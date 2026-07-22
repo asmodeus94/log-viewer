@@ -236,7 +236,7 @@ class LogViewerWindow(QMainWindow):
                 background-color: {t["bg_main"]};
                 color: {t["fg_main"]};
                 border: 1px solid {t["border"]};
-                font-family: "Menlo", "DejaVu Sans Mono", "Consolas", "Courier New", monospace;
+
             }}
             QToolBar {{
                 background-color: {t["bg_panel"]};
@@ -592,8 +592,6 @@ class LogViewerWindow(QMainWindow):
         edit_menu.addSeparator()
         self._action_edit_line = self._mkaction(self.t("mi_edit_line"), "Ctrl+D", self.cmd_edit_line)
         edit_menu.addAction(self._action_edit_line)
-        self._action_format_selection = self._mkaction(self.t("mi_format_selection"), "Ctrl+K", self.cmd_format_selection)
-        edit_menu.addAction(self._action_format_selection)
         edit_menu.addSeparator()
         self._action_save_edits = self._mkaction(self.t("mi_save_edits"), "", self.cmd_save_edits)
         edit_menu.addAction(self._action_save_edits)
@@ -685,7 +683,7 @@ class LogViewerWindow(QMainWindow):
             self._action_save, self._action_save_as, self._action_export,
             self._action_find, self._action_find_next, self._action_find_prev, self._action_clear_search,
             self._action_filter, self._action_clear_filter,
-            self._action_edit_line, self._action_format_selection, self._action_save_edits, self._action_clear_edits,
+            self._action_edit_line, self._action_save_edits, self._action_clear_edits,
             self._follow_action,
             self._action_toggle_bookmark, self._action_next_bookmark, self._action_prev_bookmark, self._action_clear_bookmarks,
             self._action_goto, self._action_goto_start, self._action_goto_end

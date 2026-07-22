@@ -21,7 +21,7 @@ class UserConfig:
     Pola (z domyślnymi wartościami):
       language: "pl" lub "en"
       encoding: kodowanie znaków (domyślnie "utf-8")
-      font_family: rodzina fontu (domyślnie Consolas/DejaVu Sans Mono)
+      font_family: rodzina fontu (domyślnie None, co zależy od systemu)
       font_size: rozmiar fontu (domyślnie 10)
       window_size_lines: ile linii ładować do Text widgeta
       max_display_lines: górny limit linii w Text widgeta

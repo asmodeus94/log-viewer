@@ -7,10 +7,11 @@ from typing import List, Optional, Tuple
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Signal, QSize, QAbstractListModel, QModelIndex, QPoint, QRectF
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase,
+    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase, QTextCursor,
     QPainter, QFontMetrics, QDragEnterEvent, QDropEvent,
 )
 from PySide6.QtWidgets import (
+    QMenu, QApplication,
     QWidget, QPlainTextEdit, QTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
     QDialog, QDialogButtonBox, QSpinBox, QFontComboBox, QGridLayout,
     QFrame, QSizePolicy, QListView, QVBoxLayout, QHBoxLayout, QComboBox
@@ -92,7 +93,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.setReadOnly(True)
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
-        font.setStyleHint(QFont.Monospace)
+
         self.setFont(font)
         self.setAcceptDrops(True)
 
@@ -145,6 +146,67 @@ class LogPlainTextEdit(QPlainTextEdit):
             event.acceptProposedAction()
         else:
             event.ignore()
+
+
+
+    def contextMenuEvent(self, event):
+        app = self.window() if hasattr(self, 'window') else None
+        t = getattr(app, 't', lambda k: k)
+
+        menu = QMenu(self)
+
+        # Opcja: Kopiuj
+        copy_action = menu.addAction(t("mi_copy"))
+        copy_action.triggered.connect(self.copy)
+        if not self.textCursor().hasSelection():
+            copy_action.setEnabled(False)
+
+        # Opcja: Kopiuj linię (pobieramy pozycję kliknięcia, jeśli nie ma selekcji)
+        copy_line_action = menu.addAction(t("mi_copy_line"))
+        def do_copy_line():
+            cursor = self.cursorForPosition(event.pos())
+            cursor.select(QTextCursor.LineUnderCursor)
+            selected_text = cursor.selectedText()
+            QApplication.clipboard().setText(selected_text)
+
+        copy_line_action.triggered.connect(do_copy_line)
+
+        # Opcja: Formatuj zaznaczenie
+        format_action = menu.addAction(t("mi_format_selection"))
+        if not self.textCursor().hasSelection():
+            format_action.setEnabled(False)
+        else:
+            if hasattr(app, 'cmd_format_selection'):
+                format_action.triggered.connect(app.cmd_format_selection)
+
+        # Opcja: Formatuj linię
+        format_line_action = menu.addAction(t("mi_format_line"))
+        def do_format_line():
+            cursor = self.cursorForPosition(event.pos())
+            cursor.select(QTextCursor.LineUnderCursor)
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+            if not selected_text.strip():
+                return
+
+            # Aby zachować powiązanie z tabulatorem (ostatnio wybrany formatter),
+            # pobieramy obiekt taba
+            tab = self.parent()
+            while tab and not hasattr(tab, "_last_formatter"):
+                tab = tab.parent()
+
+            last_formatter = getattr(tab, "_last_formatter", "JSON")
+
+            dialog = FormatDialog(self, selected_text, last_formatter)
+            dialog.exec()
+
+            if tab and hasattr(tab, "_last_formatter"):
+                tab._last_formatter = dialog.get_selected_formatter()
+
+        format_line_action.triggered.connect(do_format_line)
+
+        menu.exec(event.globalPos())
+
+
 
 class SettingsDialog(QDialog):
     """Dialog zmiany fontu i parametrów wyświetlania."""
@@ -433,6 +495,7 @@ class FormatDialog(QDialog):
         self.ui.lbl_formatter.setText(self.t("lbl_formatter"))
 
         self.formatter_combo = self.ui.formatter_combo
+        self.formatter_combo.setMinimumWidth(100)
         self.formatter_combo.addItems(list(FORMATTERS.keys()))
 
         # Ustaw początkowy formatter, jeśli istnieje
@@ -446,7 +509,7 @@ class FormatDialog(QDialog):
         # Zastosuj czcionkę stałej szerokości
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         font.setPointSize(10)
-        font.setStyleHint(QFont.Monospace)
+
         self.text_edit.setFont(font)
 
         # Zastosuj formatowanie przy otwarciu

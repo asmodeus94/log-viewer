@@ -18,7 +18,7 @@ def test_highlight_and_scroll_does_not_select_text():
     main_window_mock.max_display_lines = 1000
     main_window_mock.max_display_line_length = 500
     main_window_mock.index_interval_bytes = 1024
-    main_window_mock.font_family = "Monospace"
+    main_window_mock.font_family = "Courier"
     main_window_mock.font_size = 10
     main_window_mock.theme = {"highlight": "#ffff00", "bg_main": "#ffffff", "minimap_error": "#ff0000", "minimap_warn": "#ffaa00", "minimap_info": "#00ff00", "minimap_debug": "#0000ff", "minimap_bg": "#ffffff", "minimap_viewport": "#000000", "context": "#aaaaaa", "bookmark": "#00ff00", "edited": "#ff8800", "current_line": "#f0f0f0"}
     main_window_mock.t.return_value = "Test"
