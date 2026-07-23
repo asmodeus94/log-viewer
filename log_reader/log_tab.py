@@ -251,6 +251,10 @@ class LogTab(QWidget):
 
         self.text.files_dropped.connect(self._main._on_files_dropped)
         self.text.verticalScrollBar().valueChanged.connect(self._on_scroll_changed)
+        # Podłączamy detekcję user_scrolled aby wyłączyć follow
+        self.text.user_scrolled.connect(self._on_user_scrolled)
+        # Musimy również wyłączyć follow, jeśli użytkownik kliknie bezpośrednio na scrollbar
+        self.text.verticalScrollBar().sliderPressed.connect(self._on_user_scrolled)
         self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
         self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
 
@@ -581,8 +585,16 @@ class LogTab(QWidget):
         self._search_extra_sel = None
         self.text.set_line_map(self.line_map)
         self._update_position_slider()
-        self._update_minimap_viewport()
-        cursor.movePosition(QtGui.QTextCursor.Start)
+
+        # Odsprzęgnięta aktualizacja minimapy (szczególnie przydatna dla Follow)
+        if not self._minimap_update_timer.isActive():
+            self._minimap_update_timer.start(100)
+
+        if self.follow_active:
+            cursor.movePosition(QtGui.QTextCursor.End)
+        else:
+            cursor.movePosition(QtGui.QTextCursor.Start)
+
         self.text.setTextCursor(cursor)
         self._refresh_status()
         self._is_loading = False
@@ -735,6 +747,12 @@ class LogTab(QWidget):
         self._update_position_slider()
 
     # ---------------------------------------------------- position slider ---
+    def _on_user_scrolled(self) -> None:
+        """Wywoływane przy ręcznym zdarzeniu wheelEvent lub po naciśnięciu ScrollBara."""
+        if self.follow_active:
+            # Rozmyślnie przerywamy follow mode
+            self.cmd_toggle_follow()
+
     def _on_scroll_changed(self, value: int) -> None:
         if not self.indexer or not self.line_map or self._is_loading:
             return
@@ -743,6 +761,7 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         if not self.indexer or line_no < 0:
             return
+        self._cancel_follow_if_active()
         line_no = min(line_no, self.indexer.line_count - 1)
         self._load_window(at_line=max(0, line_no - 10))
 
@@ -754,7 +773,9 @@ class LogTab(QWidget):
         # Aby zapobiec zawieszaniu UI przy ładowaniu bardzo dużych plików (np. 25 GB)
         # rezygnujemy z pełnego skanowania pliku w poszukiwaniu tagów logów dla
         # kolorowania minimapy. Minimapa posłuży tylko jako żółty wskaźnik pozycji.
-        self.minimap.set_line_data([], total)
+        if self.minimap._total_lines != total:
+            self.minimap.set_line_data([], total)
+
         self._update_minimap_viewport()
 
     def _update_minimap_viewport(self) -> None:
@@ -763,10 +784,24 @@ class LogTab(QWidget):
         try:
             cursor = self.text.cursorForPosition(QPoint(0, 5))
             first_line = self.line_map[cursor.blockNumber()] if cursor.blockNumber() < len(self.line_map) else 0
-            cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
-            last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else self.indexer.line_count - 1
+
+            # Jeśli jesteśmy w trybie follow i pasek jest na dole, zakładamy dolną krawędź jako 1.0 (100%)
             total = self.indexer.line_count
-            self.minimap.set_viewport(first_line / total, last_line / total)
+
+            scrollbar = self.text.verticalScrollBar()
+            is_at_bottom = scrollbar.value() >= scrollbar.maximum() - 5
+
+            if self.follow_active and is_at_bottom:
+                last_line = total - 1
+            else:
+                cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
+                last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else total - 1
+
+            new_start = first_line / total
+            new_end = last_line / total
+
+            # W trybie follow aktualizujemy viewport płynniej
+            self.minimap.set_viewport(new_start, new_end)
         except Exception:
             pass
 
@@ -784,7 +819,9 @@ class LogTab(QWidget):
                     total = max(1, self.indexer.line_count)
                 pct = int(file_line / total * 1000)
                 self.pct_label.setText(f"{pct // 10}%")
-                self._update_minimap_viewport()
+                # Zamiast bezpośrednio wzywać _update_minimap_viewport opóźniamy/dławimy
+                if not self._minimap_update_timer.isActive():
+                    self._minimap_update_timer.start(100)
         except Exception:
             pass
 
@@ -796,7 +833,15 @@ class LogTab(QWidget):
             total = max(1, len(self.filter_results))
         else:
             total = max(1, self.indexer.line_count)
-        pct = int(self.window_start / total * 1000)
+
+        # Gdy skrolujemy po ułamkowych wartościach
+        # a jesteśmy pod koniec widoku używając follow lub gdy widoczny koniec pliku
+        scrollbar = self.text.verticalScrollBar()
+        if scrollbar.value() >= scrollbar.maximum() - 5:
+            pct = 1000
+        else:
+            pct = int(self.window_start / total * 1000)
+
         self.pct_label.setText(f"{pct // 10}%")
 
     # -------------------------------------------------------------- find ----
@@ -936,6 +981,7 @@ class LogTab(QWidget):
     def _navigate_to_search_result(self, index: int) -> None:
         if not self._search_results_all or index < 0 or index >= len(self._search_results_all):
             return
+        self._cancel_follow_if_active()
         self._search_result_index = index
         line_no, _text = self._search_results_all[index]
         if self.filter_active:
@@ -1275,6 +1321,9 @@ class LogTab(QWidget):
         if not self.indexer:
             QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
             return
+
+        self._cancel_follow_if_active()
+
         answer, ok = QInputDialog.getText(
             self._main, self.t("dlg_goto_title"), self.t("dlg_goto_prompt"),
             QtWidgets.QLineEdit.Normal, "",
@@ -1310,6 +1359,7 @@ class LogTab(QWidget):
     def cmd_goto_start(self) -> None:
         if not self.indexer:
             return
+        self._cancel_follow_if_active()
         self._load_window(at_line=0)
 
     def cmd_reload(self) -> None:
@@ -1366,6 +1416,7 @@ class LogTab(QWidget):
     def cmd_goto_end(self) -> None:
         if not self.indexer:
             return
+        self._cancel_follow_if_active()
         if self.filter_active:
             total = max(1, len(self.filter_results))
             self._load_window(at_line=total - 1)
@@ -1748,6 +1799,7 @@ class LogTab(QWidget):
         self._goto_file_line(ln)
 
     def _goto_file_line(self, ln: int) -> None:
+        self._cancel_follow_if_active()
         # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
         offset = 50
@@ -1775,7 +1827,6 @@ class LogTab(QWidget):
                     self.text.verticalScrollBar().setValue(0)
             except ValueError:
                 self.text.verticalScrollBar().setValue(0)
-
 
     def _delete_selected_bookmarks(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Zakładki.
@@ -1867,6 +1918,11 @@ class LogTab(QWidget):
         self._reload_current_view()
 
     # ----------------------------------------------------------- follow ----
+    def _cancel_follow_if_active(self) -> None:
+        """Helper to cancel follow mode proactively when manual jumps happen."""
+        if self.follow_active:
+            self.cmd_toggle_follow()
+
     def cmd_toggle_follow(self) -> None:
         if not self.indexer:
             return
@@ -1879,6 +1935,12 @@ class LogTab(QWidget):
                 self._last_file_inode = os.stat(self.file_path).st_ino
             except OSError:
                 self._last_file_inode = 0
+
+            if self.indexer and self.indexer.line_count > 0:
+                last_start = max(0, self.indexer.line_count - self.window_size_lines)
+                self._load_window(at_line=last_start)
+                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+
             self._follow_poll()
         else:
             self._refresh_status()
@@ -1961,18 +2023,15 @@ class LogTab(QWidget):
     def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
         if not self.indexer or self.indexer.line_count == 0:
             return
-        if new_line_count > 0 and self.line_map:
-            current_last = self.line_map[-1] if self.line_map else -1
-            if current_last >= 0 and current_last + 1 < self.indexer.line_count:
-                distance_to_end = self.indexer.line_count - current_last
-                if distance_to_end < self.window_size_lines:
-                    last_start = max(0, self.indexer.line_count - self.window_size_lines)
-                    self._load_window(at_line=last_start)
-                    self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-        elif not self.line_map:
+        if new_line_count > 0 or not self.line_map:
             last_start = max(0, self.indexer.line_count - self.window_size_lines)
-            self._load_window(at_line=last_start)
-            self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+            # Blokujemy aktualizacje scrollbara uzytkownika podczas tej operacji aby uniknąć false positivów
+            self.text.verticalScrollBar().blockSignals(True)
+            try:
+                self._load_window(at_line=last_start)
+                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
+            finally:
+                self.text.verticalScrollBar().blockSignals(False)
         self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(object, int, int)

@@ -82,6 +82,7 @@ class LogPlainTextEdit(QPlainTextEdit):
     """QPlainTextEdit z wbudowanym LineNumberArea i obsługą drag&drop plików."""
 
     files_dropped = Signal(list)
+    user_scrolled = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -198,6 +199,11 @@ class LogPlainTextEdit(QPlainTextEdit):
             event.acceptProposedAction()
         else:
             event.ignore()
+
+    def wheelEvent(self, e):
+        # Wykrycie przewijania kółkiem myszy i zatrzymanie np. trybu follow
+        self.user_scrolled.emit()
+        super().wheelEvent(e)
 
     def dragMoveEvent(self, event):
         if event.mimeData().hasUrls():
@@ -460,9 +466,14 @@ class MiniMap(QWidget):
 
     def set_viewport(self, start: float, end: float) -> None:
         """Ustawia pozycję viewportu (0.0–1.0)."""
-        self._viewport_start = max(0.0, start)
-        self._viewport_end = min(1.0, end)
-        self.update()
+        new_start = max(0.0, start)
+        new_end = min(1.0, end)
+
+        # Ogranicz bezsensowne przerysowania jeśli zmiana jest niezauważalna (np. poniżej 0.1%)
+        if abs(self._viewport_start - new_start) > 0.001 or abs(self._viewport_end - new_end) > 0.001:
+            self._viewport_start = new_start
+            self._viewport_end = new_end
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
