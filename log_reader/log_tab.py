@@ -1619,7 +1619,11 @@ class LogTab(QWidget):
         except OSError:
             pass
         self._status(self._fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
-        self._load_window(at_line=saved_line)
+        try:
+            self._load_window(at_line=saved_line)
+        except OSError:
+            # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
+            pass
 
     @Slot(str)
     def _on_save_error(self, err: str) -> None:
