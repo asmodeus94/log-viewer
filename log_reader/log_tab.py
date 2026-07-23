@@ -958,8 +958,11 @@ class LogTab(QWidget):
         self._search_thread.finished.connect(self._search_thread.deleteLater, Qt.QueuedConnection)
         self._search_thread.start()
 
-    @Slot(float, int)
-    def _on_search_progress(self, pct: float, hits: int) -> None:
+    @Slot(float, int, str)
+    def _on_search_progress(self, pct: float, hits: int, state: str) -> None:
+        if state == "context":
+            self._status(self.t("st_context_building"))
+            return
         self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
         self._search_results_label.setText(
             f"{self.t('lbl_search_results_searching')} ({hits})"
@@ -1255,8 +1258,11 @@ class LogTab(QWidget):
         self._filter_thread.start()
         self._status(self._fmt("st_filtering", pct=0.0, hits=0))
 
-    @Slot(float, int)
-    def _on_filter_progress(self, pct: float, hits: int) -> None:
+    @Slot(float, int, str)
+    def _on_filter_progress(self, pct: float, hits: int, state: str) -> None:
+        if state == "context":
+            self._status(self.t("st_context_building"))
+            return
         self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
 
     @Slot(list, set, list, object)
