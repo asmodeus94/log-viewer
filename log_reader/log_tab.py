@@ -968,8 +968,8 @@ class LogTab(QWidget):
             f"{self.t('lbl_search_results_searching')} ({hits})"
         )
 
-    @Slot(list, set, list, object)
-    def _on_search_finished(self, results, context_lines, filter_all_lines, error) -> None:
+    @Slot(object, object, object, object, object, object)
+    def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
         if error:
             self._search_results_label.setText(self.t("lbl_search_results_empty"))
             return
@@ -1265,8 +1265,8 @@ class LogTab(QWidget):
             return
         self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
 
-    @Slot(list, set, list, object)
-    def _on_filter_done(self, results, context_lines, filter_all_lines, error) -> None:
+    @Slot(object, object, object, object, object, object)
+    def _on_filter_done(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
         if error:
             QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_filter_error").format(e=error))
             self.filter_active = False
@@ -1283,9 +1283,8 @@ class LogTab(QWidget):
         self.filter_results = results
         self.filter_context_lines = context_lines
         self._filter_all_lines = filter_all_lines
-
-        self._filter_hit_text_map = {ln: text for (ln, _off, text) in results}
-        self._filter_hit_lines = set(self._filter_hit_text_map.keys())
+        self._filter_hit_text_map = hit_text_map
+        self._filter_hit_lines = hit_lines_set
 
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))

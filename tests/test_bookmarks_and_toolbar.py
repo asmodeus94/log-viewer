@@ -610,7 +610,7 @@ class TestFilterContext:
             (30, 0, "line30"),
         ]
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], None)
+        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], {10: "line10", 20: "line20", 30: "line30"}, {10, 20, 30}, None)
 
         # Po każdym trafieniu 2 następujące linie (z pominięciem trafień).
         # Trafienia: 10, 20, 30.
@@ -625,7 +625,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = [(10, 0, "x")]
         tab._filter_context_after = 0
-        tab._on_filter_done(tab.filter_results, set(), [10], None)
+        tab._on_filter_done(tab.filter_results, set(), [10], {10: "x"}, {10}, None)
         assert tab.filter_context_lines == set()
 
     def test_build_filter_context_skips_hit_lines(self, app_instance):
@@ -637,7 +637,7 @@ class TestFilterContext:
         # więc tylko {12}. Kontekst dla 11 = {12, 13}.
         tab.filter_results = [(10, 0, "x"), (11, 0, "y")]
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {12, 13}, [10, 11, 12, 13], None)
+        tab._on_filter_done(tab.filter_results, {12, 13}, [10, 11, 12, 13], {10: "x", 11: "y"}, {10, 11}, None)
         # 12, 13 — 11 i 10 są trafieniami, więc pominęliśmy je.
         assert tab.filter_context_lines == {12, 13}
 
@@ -648,7 +648,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = [(10, 0, "x")]
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12}, [10, 11, 12], None)
+        tab._on_filter_done(tab.filter_results, {11, 12}, [10, 11, 12], {10: "x"}, {10}, None)
         assert len(tab.filter_context_lines) > 0
 
         tab.cmd_clear_filter(silent=True)
@@ -671,7 +671,7 @@ class TestFilterContext:
             (30, 0, "hit30"),
         ]
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], None)
+        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], {10: "hit10", 20: "hit20", 30: "hit30"}, {10, 20, 30}, None)
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
         tab._load_window(at_line=0)
@@ -696,7 +696,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = [(5, 0, "MARKER_FROM_MEMORY")]
         tab._filter_context_after = 0
-        tab._on_filter_done(tab.filter_results, set(), [5], None)
+        tab._on_filter_done(tab.filter_results, set(), [5], {5: "MARKER_FROM_MEMORY"}, {5}, None)
         tab._load_window(at_line=0)
         app.processEvents()
 
@@ -714,7 +714,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = [(5, 0, "hit5")]
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {6, 7}, [5, 6, 7], None)
+        tab._on_filter_done(tab.filter_results, {6, 7}, [5, 6, 7], {5: "hit5"}, {5}, None)
         tab._load_window(at_line=0)
         app.processEvents()
 
