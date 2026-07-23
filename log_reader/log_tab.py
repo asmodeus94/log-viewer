@@ -765,8 +765,13 @@ class LogTab(QWidget):
         if not self.indexer or line_no < 0:
             return
         self._cancel_follow_if_active()
-        line_no = min(line_no, self.indexer.line_count - 1)
-        self._load_window(at_line=max(0, line_no - 10))
+
+        if self.filter_active and self._filter_all_lines:
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
+            self._load_window(at_line=max(0, idx - 10))
+        else:
+            line_no = min(line_no, self.indexer.line_count - 1)
+            self._load_window(at_line=max(0, line_no - 10))
 
     def _update_minimap(self) -> None:
         if not self.indexer or self.indexer.line_count == 0:
@@ -1352,8 +1357,7 @@ class LogTab(QWidget):
             line_no = min(line_no, max(0, self.indexer.line_count - 1))
 
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, line_no)
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
             self._load_window(at_line=idx)
         else:
             self._load_window(at_line=line_no)
@@ -1421,7 +1425,7 @@ class LogTab(QWidget):
             return
         self._cancel_follow_if_active()
         if self.filter_active:
-            total = max(1, len(self.filter_results))
+            total = max(1, len(self._filter_all_lines))
             self._load_window(at_line=total - 1)
         else:
             total = max(1, self.indexer.line_count)
