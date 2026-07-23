@@ -761,6 +761,7 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         if not self.indexer or line_no < 0:
             return
+        self._cancel_follow_if_active()
         line_no = min(line_no, self.indexer.line_count - 1)
         self._load_window(at_line=max(0, line_no - 10))
 
@@ -980,6 +981,7 @@ class LogTab(QWidget):
     def _navigate_to_search_result(self, index: int) -> None:
         if not self._search_results_all or index < 0 or index >= len(self._search_results_all):
             return
+        self._cancel_follow_if_active()
         self._search_result_index = index
         line_no, _text = self._search_results_all[index]
         if self.filter_active:
@@ -1319,6 +1321,9 @@ class LogTab(QWidget):
         if not self.indexer:
             QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
             return
+
+        self._cancel_follow_if_active()
+
         answer, ok = QInputDialog.getText(
             self._main, self.t("dlg_goto_title"), self.t("dlg_goto_prompt"),
             QtWidgets.QLineEdit.Normal, "",
@@ -1354,6 +1359,7 @@ class LogTab(QWidget):
     def cmd_goto_start(self) -> None:
         if not self.indexer:
             return
+        self._cancel_follow_if_active()
         self._load_window(at_line=0)
 
     def cmd_reload(self) -> None:
@@ -1410,6 +1416,7 @@ class LogTab(QWidget):
     def cmd_goto_end(self) -> None:
         if not self.indexer:
             return
+        self._cancel_follow_if_active()
         if self.filter_active:
             total = max(1, len(self.filter_results))
             self._load_window(at_line=total - 1)
@@ -1792,6 +1799,7 @@ class LogTab(QWidget):
         self._goto_file_line(ln)
 
     def _goto_file_line(self, ln: int) -> None:
+        self._cancel_follow_if_active()
         # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
         offset = 50
@@ -1911,6 +1919,11 @@ class LogTab(QWidget):
         self._reload_current_view()
 
     # ----------------------------------------------------------- follow ----
+    def _cancel_follow_if_active(self) -> None:
+        """Helper to cancel follow mode proactively when manual jumps happen."""
+        if self.follow_active:
+            self.cmd_toggle_follow()
+
     def cmd_toggle_follow(self) -> None:
         if not self.indexer:
             return
