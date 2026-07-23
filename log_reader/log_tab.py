@@ -765,8 +765,13 @@ class LogTab(QWidget):
         if not self.indexer or line_no < 0:
             return
         self._cancel_follow_if_active()
-        line_no = min(line_no, self.indexer.line_count - 1)
-        self._load_window(at_line=max(0, line_no - 10))
+
+        if self.filter_active and self._filter_all_lines:
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
+            self._load_window(at_line=max(0, idx - 10))
+        else:
+            line_no = min(line_no, self.indexer.line_count - 1)
+            self._load_window(at_line=max(0, line_no - 10))
 
     def _update_minimap(self) -> None:
         if not self.indexer or self.indexer.line_count == 0:
@@ -800,8 +805,15 @@ class LogTab(QWidget):
                 cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
                 last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else total - 1
 
-            new_start = first_line / total
-            new_end = last_line / total
+            if self.filter_active and self._filter_all_lines:
+                flen = len(self._filter_all_lines)
+                start_idx = bisect.bisect_left(self._filter_all_lines, first_line)
+                end_idx = bisect.bisect_left(self._filter_all_lines, last_line)
+                new_start = start_idx / flen
+                new_end = end_idx / flen
+            else:
+                new_start = first_line / total
+                new_end = last_line / total
 
             # W trybie follow aktualizujemy viewport płynniej
             self.minimap.set_viewport(new_start, new_end)
@@ -816,11 +828,13 @@ class LogTab(QWidget):
             widget_line = cursor.blockNumber()
             if 0 <= widget_line < len(self.line_map):
                 file_line = self.line_map[widget_line]
-                if self.filter_active:
-                    total = max(1, len(self.filter_results))
+                if self.filter_active and self._filter_all_lines:
+                    total = max(1, len(self._filter_all_lines))
+                    idx = bisect.bisect_left(self._filter_all_lines, file_line)
+                    pct = int((idx / total) * 1000)
                 else:
                     total = max(1, self.indexer.line_count)
-                pct = int(file_line / total * 1000)
+                    pct = int((file_line / total) * 1000)
                 self.pct_label.setText(f"{pct // 10}%")
                 # Zamiast bezpośrednio wzywać _update_minimap_viewport opóźniamy/dławimy
                 if not self._minimap_update_timer.isActive():
@@ -833,7 +847,7 @@ class LogTab(QWidget):
             self.pct_label.setText("0%")
             return
         if self.filter_active:
-            total = max(1, len(self.filter_results))
+            total = max(1, len(self._filter_all_lines))
         else:
             total = max(1, self.indexer.line_count)
 
@@ -843,7 +857,11 @@ class LogTab(QWidget):
         if scrollbar.value() >= scrollbar.maximum() - 5:
             pct = 1000
         else:
-            pct = int(self.window_start / total * 1000)
+            # W _update_position_slider, window_start jest JUŻ indeksem w przefiltrowanej
+            # tabeli, jeśli aktywny jest filtr (tak to ustawia _load_window_impl).
+            # Nie używamy tu bisect na wartości window_start, bo to nie jest numer
+            # linii globalnej.
+            pct = int((self.window_start / total) * 1000)
 
         self.pct_label.setText(f"{pct // 10}%")
 
@@ -928,6 +946,7 @@ class LogTab(QWidget):
         self._search_worker = FilterWorker(
             self._search_engine, pattern,
             self._last_search_regex, self._last_search_case, self._last_search_negate,
+            context_after=0
         )
         self._search_worker.moveToThread(self._search_thread)
         self._search_thread.started.connect(self._search_worker.run)
@@ -939,15 +958,18 @@ class LogTab(QWidget):
         self._search_thread.finished.connect(self._search_thread.deleteLater, Qt.QueuedConnection)
         self._search_thread.start()
 
-    @Slot(float, int)
-    def _on_search_progress(self, pct: float, hits: int) -> None:
+    @Slot(float, int, str)
+    def _on_search_progress(self, pct: float, hits: int, state: str) -> None:
+        if state == "context":
+            self._status(self.t("st_context_building"))
+            return
         self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
         self._search_results_label.setText(
             f"{self.t('lbl_search_results_searching')} ({hits})"
         )
 
-    @Slot(list, object)
-    def _on_search_finished(self, results, error) -> None:
+    @Slot(object, object, object, object, object, object)
+    def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
         if error:
             self._search_results_label.setText(self.t("lbl_search_results_empty"))
             return
@@ -988,8 +1010,7 @@ class LogTab(QWidget):
         self._search_result_index = index
         line_no, _text = self._search_results_all[index]
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, line_no)
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
             self._load_window(at_line=max(0, idx - 10))
         else:
             start = max(0, line_no - 10)
@@ -1225,7 +1246,7 @@ class LogTab(QWidget):
         self.filter_results = []
 
         self._filter_thread = QThread()
-        self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate)
+        self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate, context_after=self._filter_context_after)
         self._filter_worker.moveToThread(self._filter_thread)
         self._filter_thread.started.connect(self._filter_worker.run)
         self._register_thread_worker(self._filter_thread, self._filter_worker)
@@ -1237,65 +1258,39 @@ class LogTab(QWidget):
         self._filter_thread.start()
         self._status(self._fmt("st_filtering", pct=0.0, hits=0))
 
-    @Slot(float, int)
-    def _on_filter_progress(self, pct: float, hits: int) -> None:
+    @Slot(float, int, str)
+    def _on_filter_progress(self, pct: float, hits: int, state: str) -> None:
+        if state == "context":
+            self._status(self.t("st_context_building"))
+            return
         self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
 
-    @Slot(list, object)
-    def _on_filter_done(self, results, error) -> None:
+    @Slot(object, object, object, object, object, object)
+    def _on_filter_done(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
         if error:
             QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_filter_error").format(e=error))
             self.filter_active = False
             self._refresh_status()
             self._update_position_slider()
             return
-        self.filter_results = results
         if not results:
             QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_matches"))
             self.filter_active = False
             self._refresh_status()
             self._update_position_slider()
             return
-        # Buduj linie kontekstu: dla każdego trafienia dokładaj N następujących
-        # linii (z pominięciem duplikatów i samych trafień). Używane głównie
-        # dla stack trace PHP/Python — przefiltrowany błąd + kontekst poniżej.
-        self._build_filter_context()
-        self._update_filter_cache()
+
+        self.filter_results = results
+        self.filter_context_lines = context_lines
+        self._filter_all_lines = filter_all_lines
+        self._filter_hit_text_map = hit_text_map
+        self._filter_hit_lines = hit_lines_set
+
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
 
-    def _build_filter_context(self) -> None:
-        """Generuje zbiór numerów linii pliku będących kontekstem filtru.
-
-        Dla każdego trafienia w filter_results dokładamy N następujących linii
-        (linie 1..N po trafieniu). Linie te są potem pokazywane w widoku
-        filtrowanym razem z trafieniami, z delikatnym tłem (TAG_CONTEXT).
-        Duplikaty są eliminowane przez set. Same trafienia NIE są kontekstem.
-
-        Wymaga filter_active + indexer + _filter_context_after > 0.
-        """
-        self.filter_context_lines = set()
-        if not self.filter_active or not self.indexer:
-            return
-        n = self._filter_context_after
-        if n <= 0:
-            return
-        hit_lines = {ln for (ln, _off, _text) in self.filter_results}
-        total = self.indexer.line_count
-        for ln in hit_lines:
-            for offset in range(1, n + 1):
-                ctx = ln + offset
-                if ctx >= total:
-                    break
-                if ctx not in hit_lines:
-                    self.filter_context_lines.add(ctx)
-
     def _update_filter_cache(self) -> None:
-        if self.filter_active and self.filter_results:
-            self._filter_hit_text_map = {ln: text for (ln, _off, text) in self.filter_results}
-            self._filter_hit_lines = set(self._filter_hit_text_map.keys())
-            self._filter_all_lines = sorted(self._filter_hit_lines | self.filter_context_lines)
-        else:
+        if not self.filter_active or not self.filter_results:
             self._filter_hit_text_map.clear()
             self._filter_hit_lines.clear()
             self._filter_all_lines.clear()
@@ -1352,8 +1347,7 @@ class LogTab(QWidget):
             line_no = min(line_no, max(0, self.indexer.line_count - 1))
 
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, line_no)
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
             self._load_window(at_line=idx)
         else:
             self._load_window(at_line=line_no)
@@ -1421,7 +1415,7 @@ class LogTab(QWidget):
             return
         self._cancel_follow_if_active()
         if self.filter_active:
-            total = max(1, len(self.filter_results))
+            total = max(1, len(self._filter_all_lines))
             self._load_window(at_line=total - 1)
         else:
             total = max(1, self.indexer.line_count)
@@ -1811,13 +1805,12 @@ class LogTab(QWidget):
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
         offset = 50
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, ln)
+            idx = bisect.bisect_left(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
             try:
                 # Szukamy gdzie wylądował oryginalny idx
-                target_ln = keys[idx] if idx < len(keys) else -1
+                target_ln = self._filter_all_lines[idx] if idx < len(self._filter_all_lines) else -1
                 idx_in_map = bisect.bisect_left(self.line_map, target_ln)
                 if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == target_ln:
                     self.text.verticalScrollBar().setValue(idx_in_map)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Optional
 
 from PySide6 import QtCore
@@ -62,25 +63,69 @@ class IndexerWorker(QObject):
 
 class FilterWorker(QObject):
     """Worker uruchamiający FilterEngine w tle."""
-    progress = Signal(float, int)
-    finished = Signal(list, object)  # results, error (None or str)
+    progress = Signal(float, int, str)
+    finished = Signal(object, object, object, object, object, object)  # results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
 
     def __init__(self, engine: FilterEngine, pattern: str, use_regex: bool,
-                 case_sensitive: bool, negate: bool):
+                 case_sensitive: bool, negate: bool,
+                 context_after: int = 0):
         super().__init__()
         self._engine = engine
         self._pattern = pattern
         self._use_regex = use_regex
         self._case_sensitive = case_sensitive
         self._negate = negate
+        self._context_after = context_after
 
     @Slot()
     def run(self):
-        def on_progress(pct: float, hits: int):
-            self.progress.emit(pct, hits)
+        def on_progress(pct: float, hits: int, state: str = "filtering"):
+            self.progress.emit(pct, hits, state)
 
         def on_done(results, error):
-            self.finished.emit(results, error)
+            if error or not results:
+                self.finished.emit(results, set(), [], {}, set(), error)
+                return
+
+            if self._context_after > 0:
+                self.progress.emit(100.0, len(results), "context")
+            else:
+                self.progress.emit(100.0, len(results), "filtering")
+
+            # Zbuduj kontekst filtru w tle
+            context_lines = set()
+            hit_lines = {ln for (ln, _off, _text) in results}
+            n = self._context_after
+            if n > 0 and self._engine.indexer:
+                counter = 0
+                total = self._engine.indexer.line_count
+                for ln in hit_lines:
+                    for offset in range(1, n + 1):
+                        ctx = ln + offset
+                        if ctx >= total:
+                            break
+                        if ctx not in hit_lines:
+                            context_lines.add(ctx)
+                    counter += 1
+                    if counter % 50000 == 0:
+                        time.sleep(0.01)
+                        self.progress.emit(100.0, len(results), "context")
+
+            # Zbuduj pełne mapowanie linii
+            filter_all_lines = []
+            hit_text_map = {}
+            if results:
+                combined = hit_lines.copy()
+                combined.update(context_lines)
+                filter_all_lines = sorted(combined)
+                # Przygotuj słownik, aby uniknąć blokowania wątku UI
+                hit_text_map = {}
+                for i, (ln, _off, text) in enumerate(results):
+                    hit_text_map[ln] = text
+                    if i % 100000 == 0:
+                        time.sleep(0.01)
+
+            self.finished.emit(results, context_lines, filter_all_lines, hit_text_map, hit_lines, error)
 
         self._engine.start(
             self._pattern, self._use_regex, self._case_sensitive, self._negate,
