@@ -63,16 +63,18 @@ class IndexerWorker(QObject):
 class FilterWorker(QObject):
     """Worker uruchamiający FilterEngine w tle."""
     progress = Signal(float, int)
-    finished = Signal(list, object)  # results, error (None or str)
+    finished = Signal(list, set, list, object)  # results, context_lines, filter_all_lines, error
 
     def __init__(self, engine: FilterEngine, pattern: str, use_regex: bool,
-                 case_sensitive: bool, negate: bool):
+                 case_sensitive: bool, negate: bool,
+                 context_after: int = 0):
         super().__init__()
         self._engine = engine
         self._pattern = pattern
         self._use_regex = use_regex
         self._case_sensitive = case_sensitive
         self._negate = negate
+        self._context_after = context_after
 
     @Slot()
     def run(self):
@@ -80,7 +82,30 @@ class FilterWorker(QObject):
             self.progress.emit(pct, hits)
 
         def on_done(results, error):
-            self.finished.emit(results, error)
+            if error or not results:
+                self.finished.emit(results, set(), [], error)
+                return
+
+            # Build filter context in background thread
+            context_lines = set()
+            hit_lines = {ln for (ln, _off, _text) in results}
+            n = self._context_after
+            if n > 0 and self._engine.indexer:
+                total = self._engine.indexer.line_count
+                for ln in hit_lines:
+                    for offset in range(1, n + 1):
+                        ctx = ln + offset
+                        if ctx >= total:
+                            break
+                        if ctx not in hit_lines:
+                            context_lines.add(ctx)
+
+            # Build all lines mapping
+            filter_all_lines = []
+            if results:
+                filter_all_lines = sorted(hit_lines | context_lines)
+
+            self.finished.emit(results, context_lines, filter_all_lines, error)
 
         self._engine.start(
             self._pattern, self._use_regex, self._case_sensitive, self._negate,
