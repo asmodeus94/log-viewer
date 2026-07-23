@@ -741,9 +741,12 @@ class LogTab(QWidget):
                 cursor.deletePreviousChar()
             self.line_map = self.line_map[:self.max_display_lines]
         self.text.set_line_map(self.line_map)
-        idx = bisect.bisect_left(self.line_map, old_first_file_line)
-        if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
-            self.text.verticalScrollBar().setValue(idx)
+        try:
+            idx = bisect.bisect_left(self.line_map, old_first_file_line)
+            if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
+                self.text.verticalScrollBar().setValue(idx)
+        except Exception:
+            pass
         self._update_position_slider()
 
     # ---------------------------------------------------- position slider ---
@@ -1815,8 +1818,9 @@ class LogTab(QWidget):
             try:
                 # Szukamy gdzie wylądował oryginalny idx
                 target_ln = keys[idx] if idx < len(keys) else -1
-                if target_ln in self.line_map:
-                    self.text.verticalScrollBar().setValue(self.line_map.index(target_ln))
+                idx_in_map = bisect.bisect_left(self.line_map, target_ln)
+                if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == target_ln:
+                    self.text.verticalScrollBar().setValue(idx_in_map)
                 else:
                     self.text.verticalScrollBar().setValue(0)
             except Exception:
@@ -1825,11 +1829,12 @@ class LogTab(QWidget):
             start_ln = max(0, ln - offset)
             self._load_window(at_line=start_ln)
             try:
-                if ln in self.line_map:
-                    self.text.verticalScrollBar().setValue(self.line_map.index(ln))
+                idx_in_map = bisect.bisect_left(self.line_map, ln)
+                if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == ln:
+                    self.text.verticalScrollBar().setValue(idx_in_map)
                 else:
                     self.text.verticalScrollBar().setValue(0)
-            except ValueError:
+            except Exception:
                 self.text.verticalScrollBar().setValue(0)
 
     def _delete_selected_bookmarks(self) -> None:
