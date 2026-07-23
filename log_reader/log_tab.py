@@ -822,7 +822,7 @@ class LogTab(QWidget):
             if 0 <= widget_line < len(self.line_map):
                 file_line = self.line_map[widget_line]
                 if self.filter_active:
-                    total = max(1, len(self.filter_results))
+                    total = max(1, len(self._filter_all_lines))
                 else:
                     total = max(1, self.indexer.line_count)
                 pct = int(file_line / total * 1000)
@@ -838,7 +838,7 @@ class LogTab(QWidget):
             self.pct_label.setText("0%")
             return
         if self.filter_active:
-            total = max(1, len(self.filter_results))
+            total = max(1, len(self._filter_all_lines))
         else:
             total = max(1, self.indexer.line_count)
 
@@ -993,8 +993,7 @@ class LogTab(QWidget):
         self._search_result_index = index
         line_no, _text = self._search_results_all[index]
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, line_no)
+            idx = bisect.bisect_left(self._filter_all_lines, line_no)
             self._load_window(at_line=max(0, idx - 10))
         else:
             start = max(0, line_no - 10)
@@ -1815,13 +1814,12 @@ class LogTab(QWidget):
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
         offset = 50
         if self.filter_active:
-            keys = [r[0] for r in self.filter_results]
-            idx = bisect.bisect_left(keys, ln)
+            idx = bisect.bisect_left(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
             try:
                 # Szukamy gdzie wylądował oryginalny idx
-                target_ln = keys[idx] if idx < len(keys) else -1
+                target_ln = self._filter_all_lines[idx] if idx < len(self._filter_all_lines) else -1
                 idx_in_map = bisect.bisect_left(self.line_map, target_ln)
                 if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == target_ln:
                     self.text.verticalScrollBar().setValue(idx_in_map)
