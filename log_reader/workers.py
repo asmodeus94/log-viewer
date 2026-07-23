@@ -92,7 +92,7 @@ class FilterWorker(QObject):
             else:
                 self.progress.emit(100.0, len(results), "filtering")
 
-            # Build filter context in background thread
+            # Zbuduj kontekst filtru w tle
             context_lines = set()
             hit_lines = {ln for (ln, _off, _text) in results}
             n = self._context_after
@@ -111,14 +111,14 @@ class FilterWorker(QObject):
                         time.sleep(0.01)
                         self.progress.emit(100.0, len(results), "context")
 
-            # Build all lines mapping
+            # Zbuduj pełne mapowanie linii
             filter_all_lines = []
             hit_text_map = {}
             if results:
                 combined = hit_lines.copy()
                 combined.update(context_lines)
                 filter_all_lines = sorted(combined)
-                # Prepare dictionary to avoid locking UI thread
+                # Przygotuj słownik, aby uniknąć blokowania wątku UI
                 hit_text_map = {}
                 for i, (ln, _off, text) in enumerate(results):
                     hit_text_map[ln] = text
