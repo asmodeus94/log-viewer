@@ -719,66 +719,80 @@ class LogTab(QWidget):
     def _append_lines(self, new_lines: List[Tuple[int, str]]) -> None:
         if not new_lines:
             return
-        cursor = self.text.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        cursor.beginEditBlock()
-        for ln, text in new_lines:
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            cursor.insertText("\n" + display_text)
-            block = cursor.block()
-            for tag in tags:
-                self._apply_line_format(block, tag)
-            self.line_map.append(ln)
-        cursor.endEditBlock()
-        if len(self.line_map) > self.max_display_lines:
-            to_remove = len(self.line_map) - self.max_display_lines
+
+        # Zablokowanie sygnałów zapobiega pętli (tzw. samowzbudnemu ładowaniu), gdy
+        # zmieniamy tekst, a system Qt automatycznie dostosowuje i emituje zmianę scrollbara.
+        scrollbar = self.text.verticalScrollBar()
+        old_signals_blocked = scrollbar.blockSignals(True)
+        try:
+            cursor = self.text.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
             cursor.beginEditBlock()
-            cursor.movePosition(QtGui.QTextCursor.Start)
-            cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor, to_remove)
-            cursor.removeSelectedText()
+            for ln, text in new_lines:
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                cursor.insertText("\n" + display_text)
+                block = cursor.block()
+                for tag in tags:
+                    self._apply_line_format(block, tag)
+                self.line_map.append(ln)
             cursor.endEditBlock()
-            self.line_map = self.line_map[to_remove:]
-        self.text.set_line_map(self.line_map)
-        self._update_position_slider()
+            if len(self.line_map) > self.max_display_lines:
+                to_remove = len(self.line_map) - self.max_display_lines
+                cursor.beginEditBlock()
+                cursor.movePosition(QtGui.QTextCursor.Start)
+                cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor, to_remove)
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                self.line_map = self.line_map[to_remove:]
+            self.text.set_line_map(self.line_map)
+            self._update_position_slider()
+        finally:
+            scrollbar.blockSignals(old_signals_blocked)
 
     def _prepend_lines(self, new_lines: List[Tuple[int, str]]) -> None:
         if not new_lines:
             return
-        old_first_file_line = self.line_map[0] if self.line_map else 0
-        cursor = self.text.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.Start)
-        cursor.beginEditBlock()
-        for ln, text in reversed(new_lines):
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            cursor.insertText(display_text + "\n")
-        for i, (ln, text) in enumerate(new_lines):
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            block = cursor.document().findBlockByNumber(i)
-            if block.isValid():
-                for tag in tags:
-                    self._apply_line_format(block, tag)
-        cursor.endEditBlock()
-        self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
-        if len(self.line_map) > self.max_display_lines:
-            to_remove = len(self.line_map) - self.max_display_lines
-            cursor.beginEditBlock()
-            cursor.movePosition(QtGui.QTextCursor.End)
-            cursor.movePosition(QtGui.QTextCursor.StartOfBlock, QtGui.QTextCursor.MoveAnchor)
-            if to_remove > 1:
-                cursor.movePosition(QtGui.QTextCursor.PreviousBlock, QtGui.QTextCursor.MoveAnchor, to_remove - 1)
-            cursor.movePosition(QtGui.QTextCursor.PreviousCharacter, QtGui.QTextCursor.MoveAnchor)
-            cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
-            cursor.removeSelectedText()
-            cursor.endEditBlock()
-            self.line_map = self.line_map[:self.max_display_lines]
-        self.text.set_line_map(self.line_map)
+
+        scrollbar = self.text.verticalScrollBar()
+        old_signals_blocked = scrollbar.blockSignals(True)
         try:
-            idx = bisect.bisect_left(self.line_map, old_first_file_line)
-            if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
-                self.text.verticalScrollBar().setValue(idx)
-        except Exception:
-            pass
-        self._update_position_slider()
+            old_first_file_line = self.line_map[0] if self.line_map else 0
+            cursor = self.text.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.beginEditBlock()
+            for ln, text in reversed(new_lines):
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                cursor.insertText(display_text + "\n")
+            for i, (ln, text) in enumerate(new_lines):
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                block = cursor.document().findBlockByNumber(i)
+                if block.isValid():
+                    for tag in tags:
+                        self._apply_line_format(block, tag)
+            cursor.endEditBlock()
+            self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
+            if len(self.line_map) > self.max_display_lines:
+                to_remove = len(self.line_map) - self.max_display_lines
+                cursor.beginEditBlock()
+                cursor.movePosition(QtGui.QTextCursor.End)
+                cursor.movePosition(QtGui.QTextCursor.StartOfBlock, QtGui.QTextCursor.MoveAnchor)
+                if to_remove > 1:
+                    cursor.movePosition(QtGui.QTextCursor.PreviousBlock, QtGui.QTextCursor.MoveAnchor, to_remove - 1)
+                cursor.movePosition(QtGui.QTextCursor.PreviousCharacter, QtGui.QTextCursor.MoveAnchor)
+                cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                self.line_map = self.line_map[:self.max_display_lines]
+            self.text.set_line_map(self.line_map)
+            try:
+                idx = bisect.bisect_left(self.line_map, old_first_file_line)
+                if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
+                    self.text.verticalScrollBar().setValue(idx)
+            except Exception:
+                pass
+            self._update_position_slider()
+        finally:
+            scrollbar.blockSignals(old_signals_blocked)
 
     # ---------------------------------------------------- position slider ---
     def _on_user_scrolled(self) -> None:
