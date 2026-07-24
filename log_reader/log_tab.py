@@ -674,7 +674,8 @@ class LogTab(QWidget):
             scrollbar = self.text.verticalScrollBar()
             value = scrollbar.value()
             maximum = scrollbar.maximum()
-            if maximum > 0 and value >= maximum - 10 and self.line_map:
+            # Ładujemy z wyprzedzeniem (np. 1000 linii), by uniknąć czekania i "uderzania w ścianę"
+            if maximum > 0 and value >= maximum - 1000 and self.line_map:
                 current_last_line = self.line_map[-1] if self.line_map else 0
                 next_start = current_last_line + 1
                 if next_start < self.indexer.line_count:
@@ -684,7 +685,8 @@ class LogTab(QWidget):
                         self._is_loading = True
                         self._append_lines(new_lines)
                         self._is_loading = False
-            elif value <= 10 and self.line_map and self.line_map[0] > 0:
+            # Zwiększamy margines ładowania przy przewijaniu do góry dla zachowania płynności
+            elif value <= 1000 and self.line_map and self.line_map[0] > 0:
                 prev_start = max(0, self.line_map[0] - self.window_size_lines)
                 new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
                 if new_lines:
@@ -709,11 +711,11 @@ class LogTab(QWidget):
             self.line_map.append(ln)
         if len(self.line_map) > self.max_display_lines:
             to_remove = len(self.line_map) - self.max_display_lines
+            cursor.beginEditBlock()
             cursor.movePosition(QtGui.QTextCursor.Start)
-            for _ in range(to_remove):
-                cursor.select(QtGui.QTextCursor.LineUnderCursor)
-                cursor.removeSelectedText()
-                cursor.deleteChar()
+            cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor, to_remove)
+            cursor.removeSelectedText()
+            cursor.endEditBlock()
             self.line_map = self.line_map[to_remove:]
         self.text.set_line_map(self.line_map)
         self._update_position_slider()
@@ -736,9 +738,15 @@ class LogTab(QWidget):
         self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
         if len(self.line_map) > self.max_display_lines:
             to_remove = len(self.line_map) - self.max_display_lines
+            cursor.beginEditBlock()
             cursor.movePosition(QtGui.QTextCursor.End)
-            for _ in range(to_remove):
-                cursor.deletePreviousChar()
+            cursor.movePosition(QtGui.QTextCursor.StartOfBlock, QtGui.QTextCursor.MoveAnchor)
+            if to_remove > 1:
+                cursor.movePosition(QtGui.QTextCursor.PreviousBlock, QtGui.QTextCursor.MoveAnchor, to_remove - 1)
+            cursor.movePosition(QtGui.QTextCursor.PreviousCharacter, QtGui.QTextCursor.MoveAnchor)
+            cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+            cursor.endEditBlock()
             self.line_map = self.line_map[:self.max_display_lines]
         self.text.set_line_map(self.line_map)
         try:
