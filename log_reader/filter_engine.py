@@ -139,18 +139,10 @@ class FilterEngine:
                             for line_bytes in lines:
                                 if not case_sensitive:
                                     if needle_bytes_lower in line_bytes.lower():
-                                        try:
-                                            text = line_bytes.decode(encoding, errors="replace")
-                                        except Exception:
-                                            text = repr(line_bytes)
-                                        results.append((line_no, 0, text.rstrip("\r\n")))
+                                        results.append((line_no, 0, ""))
                                 else:
                                     if needle_bytes_lower in line_bytes:
-                                        try:
-                                            text = line_bytes.decode(encoding, errors="replace")
-                                        except Exception:
-                                            text = repr(line_bytes)
-                                        results.append((line_no, 0, text.rstrip("\r\n")))
+                                        results.append((line_no, 0, ""))
                                 line_no += 1
 
                         if self._is_current_session(session) and not self._cancel.is_set():
@@ -201,11 +193,7 @@ class FilterEngine:
                             matched = not matched
                         if matched:
                             # Dekoduj tylko pasujące linie
-                            try:
-                                text = raw.decode(encoding, errors="replace")
-                            except Exception:
-                                text = repr(raw)
-                            results.append((line_no, bytes_read - len(raw), text.rstrip("\r\n")))
+                            results.append((line_no, bytes_read - len(raw), ""))
                         line_no += 1
                         if line_no % 5000 == 0:
                             if self._is_current_session(session) and not self._cancel.is_set():

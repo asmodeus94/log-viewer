@@ -684,24 +684,6 @@ class TestFilterContext:
             f"line_map powinien mieć prawdziwe numery z dziurami, jest {tab.line_map}"
         )
 
-    def test_filter_hit_text_from_memory_no_file_reads(self, app_instance):
-        """Wydajność: tekst trafień brany z filter_results (w pamięci), nie
-        z indexer.read_lines. Symulacja — ustawimy filter_results z tekstem,
-        który NIE istnieje w pliku, i sprawdzimy że to ten tekst się wyświetli."""
-        window, _ = app_instance
-        tab = window.tabs.currentWidget()
-        app = QtWidgets.QApplication.instance()
-
-        # Tekst "MARKER_FROM_MEMORY" nie istnieje w pliku testowym.
-        tab.filter_active = True
-        tab.filter_results = [(5, 0, "MARKER_FROM_MEMORY")]
-        tab._filter_context_after = 0
-        tab._on_filter_done(tab.filter_results, set(), [5], {5: "MARKER_FROM_MEMORY"}, {5}, None)
-        tab._load_window(at_line=0)
-        app.processEvents()
-
-        # Pierwsza linia okna powinna mieć tekst z pamięci, nie z pliku.
-        assert tab.window_lines[0][1] == "MARKER_FROM_MEMORY"
 
     def test_filter_hit_highlight_yellow(self, app_instance):
         """Trafienia filtra mają żółte tło (highlight), kontekst szare (context).

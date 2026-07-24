@@ -489,17 +489,9 @@ class LogTab(QWidget):
                 progress.close()
 
     def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
-        hit_text_map = self._filter_hit_text_map
-        lines: List[Tuple[int, str]] = []
-        context_needed: List[int] = []  # linie kontekstu wymagające odczytu
-        for ln in chunk_lines:
-            if ln in hit_text_map:
-                lines.append((ln, hit_text_map[ln]))
-            else:
-                context_needed.append(ln)
-
+        context_needed = chunk_lines
+        context_text_map: Dict[int, str] = {}
         if context_needed:
-            context_text_map: Dict[int, str] = {}
             # Znajdź ciągłe zakresy w context_needed (posortowane).
             i = 0
             while i < len(context_needed):
@@ -514,13 +506,11 @@ class LogTab(QWidget):
                     for (rln, rtext) in read:
                         context_text_map[rln] = rtext
                 i = j + 1
-            # Teraz złóż lines w oryginalnej kolejności chunk_lines.
-            lines = []
-            for ln in chunk_lines:
-                if ln in hit_text_map:
-                    lines.append((ln, hit_text_map[ln]))
-                elif ln in context_text_map:
-                    lines.append((ln, context_text_map[ln]))
+
+        lines = []
+        for ln in chunk_lines:
+            if ln in context_text_map:
+                lines.append((ln, context_text_map[ln]))
         return lines
 
     def _load_window_impl(self, at_line: int) -> None:
