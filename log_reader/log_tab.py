@@ -255,6 +255,12 @@ class LogTab(QWidget):
         self.text.user_scrolled.connect(self._on_user_scrolled)
         # Musimy również wyłączyć follow, jeśli użytkownik kliknie bezpośrednio na scrollbar
         self.text.verticalScrollBar().sliderPressed.connect(self._on_user_scrolled)
+
+        # Debouncing dla ładowania krawędzi (przeciwdziała "zamrażaniu" aplikacji przy intensywnym przewijaniu)
+        self._edge_load_timer = QtCore.QTimer(self)
+        self._edge_load_timer.setSingleShot(True)
+        self._edge_load_timer.setInterval(150)
+        self._edge_load_timer.timeout.connect(self._do_check_edges)
         self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
         self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
 
@@ -667,33 +673,46 @@ class LogTab(QWidget):
     def _check_edges(self) -> None:
         if not self.indexer or self.filter_active or self._is_loading:
             return
-        now = time.time()
-        if (now - self._last_edge_load_time) < 0.5:
+        # Uruchamiamy/resetujemy timer po każdym zdarzeniu w rejonie krawędzi,
+        # zamiast wielokrotnie dławić główny wątek przy intensywnym kręceniu kółkiem myszy.
+        self._edge_load_timer.start()
+
+    def _do_check_edges(self) -> None:
+        if not self.indexer or self.filter_active or self._is_loading:
             return
+
+        # Odrzucamy wykonanie jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
+        # ale my jesteśmy w środku innego obciążającego zadania, albo gdy od ostatniego
+        # załadowania minęło niezwykle mało czasu
+        now = time.time()
+        if (now - self._last_edge_load_time) < 0.1:
+            return
+
         try:
             scrollbar = self.text.verticalScrollBar()
             value = scrollbar.value()
             maximum = scrollbar.maximum()
-            # Ładujemy z wyprzedzeniem (np. 1000 linii), by uniknąć czekania i "uderzania w ścianę"
+
+            # Flaga isLoading chroni nas przed re-entrancy (wejściem ponownie w trakcie modyfikacji)
             if maximum > 0 and value >= maximum - 1000 and self.line_map:
                 current_last_line = self.line_map[-1] if self.line_map else 0
                 next_start = current_last_line + 1
                 if next_start < self.indexer.line_count:
+                    self._is_loading = True
                     new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
                     if new_lines:
-                        self._last_edge_load_time = now
-                        self._is_loading = True
+                        self._last_edge_load_time = time.time()
                         self._append_lines(new_lines)
-                        self._is_loading = False
-            # Zwiększamy margines ładowania przy przewijaniu do góry dla zachowania płynności
+                    self._is_loading = False
+
             elif value <= 1000 and self.line_map and self.line_map[0] > 0:
                 prev_start = max(0, self.line_map[0] - self.window_size_lines)
+                self._is_loading = True
                 new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
                 if new_lines:
-                    self._last_edge_load_time = now
-                    self._is_loading = True
+                    self._last_edge_load_time = time.time()
                     self._prepend_lines(new_lines)
-                    self._is_loading = False
+                self._is_loading = False
         except Exception:
             self._is_loading = False
 
