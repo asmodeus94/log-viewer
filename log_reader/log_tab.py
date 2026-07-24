@@ -1872,6 +1872,9 @@ class LogTab(QWidget):
         # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
         offset = 50
+
+        target_idx_in_map = 0
+
         if self.filter_active:
             idx = bisect.bisect_left(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
@@ -1882,6 +1885,7 @@ class LogTab(QWidget):
                 idx_in_map = bisect.bisect_left(self.line_map, target_ln)
                 if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == target_ln:
                     self.text.verticalScrollBar().setValue(idx_in_map)
+                    target_idx_in_map = idx_in_map
                 else:
                     self.text.verticalScrollBar().setValue(0)
             except Exception:
@@ -1893,10 +1897,17 @@ class LogTab(QWidget):
                 idx_in_map = bisect.bisect_left(self.line_map, ln)
                 if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == ln:
                     self.text.verticalScrollBar().setValue(idx_in_map)
+                    target_idx_in_map = idx_in_map
                 else:
                     self.text.verticalScrollBar().setValue(0)
             except Exception:
                 self.text.verticalScrollBar().setValue(0)
+
+        # Zaznacz tę linię i ustaw jako bieżącą
+        block = self.text.document().findBlockByNumber(target_idx_in_map)
+        if block.isValid():
+            new_cur = QtGui.QTextCursor(block)
+            self.text.setTextCursor(new_cur)
 
     def _delete_selected_bookmarks(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Zakładki.
@@ -2157,7 +2168,21 @@ class LogTab(QWidget):
         # zawartości przy odświeżaniu okna (np. po dodaniu zakładki).
         scrollbar = self.text.verticalScrollBar()
         old_val = scrollbar.value()
-        self._load_window(at_line=self.window_start)
+
+        top_line = self.window_start
+        if self.line_map:
+            # W trybie infinite scroll self.window_start się nie aktualizuje,
+            # dlatego musimy wyznaczyć rzeczywistą linię początkową na podstawie line_map.
+            if self.filter_active and self._filter_all_lines:
+                try:
+                    idx = bisect.bisect_left(self._filter_all_lines, self.line_map[0])
+                    top_line = idx
+                except Exception:
+                    pass
+            else:
+                top_line = self.line_map[0]
+
+        self._load_window(at_line=top_line)
         scrollbar.setValue(old_val)
 
     def _refresh_status(self) -> None:
