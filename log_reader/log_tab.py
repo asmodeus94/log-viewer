@@ -735,6 +735,9 @@ class LogTab(QWidget):
         # zmieniamy tekst, a system Qt automatycznie dostosowuje i emituje zmianę scrollbara.
         scrollbar = self.text.verticalScrollBar()
         old_signals_blocked = scrollbar.blockSignals(True)
+
+        # Zapisujemy widoczną linię u góry ekranu
+        old_value = scrollbar.value()
         try:
             cursor = self.text.textCursor()
             cursor.movePosition(QtGui.QTextCursor.End)
@@ -755,7 +758,15 @@ class LogTab(QWidget):
                 cursor.removeSelectedText()
                 cursor.endEditBlock()
                 self.line_map = self.line_map[to_remove:]
+
+                # Jeśli obcięliśmy linie z góry, stary scrollbar value musimy "przesunąć" w dół o tę liczbę linii,
+                # aby nie "skoczyć" nagle na sam dół. To wyrzuca nas również z marginesu ładującego na krawędzi.
+                old_value -= to_remove
+
             self.text.set_line_map(self.line_map)
+            # Ustawiamy suwak na skorygowanej pozycji.
+            # Wyłącza to zjawisko, w którym dodanie tekstu zostawiało scrollbar na maksymalnej wartości.
+            scrollbar.setValue(max(0, old_value))
             self._update_position_slider()
         finally:
             scrollbar.blockSignals(old_signals_blocked)
