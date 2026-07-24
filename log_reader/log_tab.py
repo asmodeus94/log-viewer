@@ -488,58 +488,48 @@ class LogTab(QWidget):
             if show_progress:
                 progress.close()
 
+    def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
+        hit_text_map = self._filter_hit_text_map
+        lines: List[Tuple[int, str]] = []
+        context_needed: List[int] = []  # linie kontekstu wymagające odczytu
+        for ln in chunk_lines:
+            if ln in hit_text_map:
+                lines.append((ln, hit_text_map[ln]))
+            else:
+                context_needed.append(ln)
+
+        if context_needed:
+            context_text_map: Dict[int, str] = {}
+            # Znajdź ciągłe zakresy w context_needed (posortowane).
+            i = 0
+            while i < len(context_needed):
+                j = i
+                while (j + 1 < len(context_needed)
+                       and context_needed[j + 1] == context_needed[j] + 1):
+                    j += 1
+                range_start = context_needed[i]
+                range_count = j - i + 1
+                read = self.indexer.read_lines(range_start, range_count)
+                if read:
+                    for (rln, rtext) in read:
+                        context_text_map[rln] = rtext
+                i = j + 1
+            # Teraz złóż lines w oryginalnej kolejności chunk_lines.
+            lines = []
+            for ln in chunk_lines:
+                if ln in hit_text_map:
+                    lines.append((ln, hit_text_map[ln]))
+                elif ln in context_text_map:
+                    lines.append((ln, context_text_map[ln]))
+        return lines
+
     def _load_window_impl(self, at_line: int) -> None:
         if self.filter_active and self.filter_results:
-            # W trybie filtra łączymy trafienia + linie kontekstu w jedną
-            # posortowaną listę numerów linii pliku. Trafienia i kontekst
-            # są pokazywane razem, z różnym tłem (żółte = trafienie,
-            # delikatne szaro-zielone = kontekst). Bez tego stack trace poniżej
-            # błędu byłby niewidoczny w widoku filtrowanym.
-            #
-            # WYDAJNOŚĆ: tekst trafień jest już w filter_results (w pamięci).
-            # Tylko linie kontekstu wymagają odczytu z pliku — i to batchowo
-            # dla ciągłych zakresów (zamiast read_lines(ln, 1) per linia).
-            hit_text_map = self._filter_hit_text_map
             all_lines = self._filter_all_lines
             n = len(all_lines)
             start = max(0, min(at_line, n - 1))
             chunk_lines = all_lines[start:start + self.window_size_lines]
-
-            # Krok 1: zbierz teksty trafień z pamięci (zero I/O).
-            lines: List[Tuple[int, str]] = []
-            context_needed: List[int] = []  # linie kontekstu wymagające odczytu
-            for ln in chunk_lines:
-                if ln in hit_text_map:
-                    lines.append((ln, hit_text_map[ln]))
-                else:
-                    context_needed.append(ln)
-
-            # Krok 2: batch-odczyt kontekstu — połącz ciągłe zakresy w jedno
-            # wywołanie read_lines(start, count). O(N_ranges) zamiast O(N_lines).
-            if context_needed:
-                context_text_map: Dict[int, str] = {}
-                # Znajdź ciągłe zakresy w context_needed (posortowane).
-                i = 0
-                while i < len(context_needed):
-                    j = i
-                    while (j + 1 < len(context_needed)
-                           and context_needed[j + 1] == context_needed[j] + 1):
-                        j += 1
-                    range_start = context_needed[i]
-                    range_count = j - i + 1
-                    read = self.indexer.read_lines(range_start, range_count)
-                    if read:
-                        for (rln, rtext) in read:
-                            context_text_map[rln] = rtext
-                    i = j + 1
-                # Teraz złóż lines w oryginalnej kolejności chunk_lines.
-                lines = []
-                for ln in chunk_lines:
-                    if ln in hit_text_map:
-                        lines.append((ln, hit_text_map[ln]))
-                    elif ln in context_text_map:
-                        lines.append((ln, context_text_map[ln]))
-                    # else: linia zniknęła z pliku (rotacja) — pomiń
+            lines = self._get_filtered_lines(chunk_lines)
         else:
             start = max(0, min(at_line, max(0, self.indexer.line_count - 1)))
             lines = self.indexer.read_lines(start, self.window_size_lines)
@@ -671,14 +661,14 @@ class LogTab(QWidget):
         cursor.setBlockCharFormat(fmt)
 
     def _check_edges(self) -> None:
-        if not self.indexer or self.filter_active or self._is_loading:
+        if not self.indexer or self._is_loading:
             return
         # Uruchamiamy/resetujemy timer po każdym zdarzeniu w rejonie krawędzi,
         # zamiast wielokrotnie dławić główny wątek przy intensywnym kręceniu kółkiem myszy.
         self._edge_load_timer.start()
 
     def _do_check_edges(self) -> None:
-        if not self.indexer or self.filter_active or self._is_loading:
+        if not self.indexer or self._is_loading:
             return
 
         # Odrzucamy wykonanie jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
@@ -696,33 +686,68 @@ class LogTab(QWidget):
             # Flaga isLoading chroni nas przed re-entrancy (wejściem ponownie w trakcie modyfikacji)
             if maximum > 0 and value >= maximum - 1000 and self.line_map:
                 current_last_line = self.line_map[-1] if self.line_map else 0
-                next_start = current_last_line + 1
-                if next_start < self.indexer.line_count:
-                    self._is_loading = True
-                    self._ignore_scroll_events = True
-                    try:
-                        new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
-                        if new_lines:
-                            self._last_edge_load_time = time.time()
-                            self._append_lines(new_lines)
-                    finally:
-                        self._is_loading = False
-                        # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
-                        # powstające w wyniku inercji na macOS / Wayland.
-                        QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
+
+                if self.filter_active and self._filter_all_lines:
+                    idx = bisect.bisect_right(self._filter_all_lines, current_last_line)
+                    if idx < len(self._filter_all_lines):
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            chunk_lines = self._filter_all_lines[idx:idx + self.window_size_lines]
+                            new_lines = self._get_filtered_lines(chunk_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._append_lines(new_lines)
+                        finally:
+                            self._is_loading = False
+                            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
+                else:
+                    next_start = current_last_line + 1
+                    if next_start < self.indexer.line_count:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._append_lines(new_lines)
+                        finally:
+                            self._is_loading = False
+                            # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
+                            # powstające w wyniku inercji na macOS / Wayland.
+                            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
 
             elif value <= 1000 and self.line_map and self.line_map[0] > 0:
-                prev_start = max(0, self.line_map[0] - self.window_size_lines)
-                self._is_loading = True
-                self._ignore_scroll_events = True
-                try:
-                    new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
-                    if new_lines:
-                        self._last_edge_load_time = time.time()
-                        self._prepend_lines(new_lines)
-                finally:
-                    self._ignore_scroll_events = False
-                    self._is_loading = False
+                current_first_line = self.line_map[0]
+
+                if self.filter_active and self._filter_all_lines:
+                    idx = bisect.bisect_left(self._filter_all_lines, current_first_line)
+                    if idx > 0:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            start_idx = max(0, idx - self.window_size_lines)
+                            chunk_lines = self._filter_all_lines[start_idx:idx]
+                            new_lines = self._get_filtered_lines(chunk_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._prepend_lines(new_lines)
+                        finally:
+                            self._ignore_scroll_events = False
+                            self._is_loading = False
+                else:
+                    prev_start = max(0, current_first_line - self.window_size_lines)
+                    if current_first_line > 0:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            new_lines = self.indexer.read_lines(prev_start, current_first_line - prev_start)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._prepend_lines(new_lines)
+                        finally:
+                            self._ignore_scroll_events = False
+                            self._is_loading = False
         except Exception:
             self._is_loading = False
             QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
