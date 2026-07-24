@@ -702,6 +702,7 @@ class LogTab(QWidget):
             return
         cursor = self.text.textCursor()
         cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.beginEditBlock()
         for ln, text in new_lines:
             display_text, tags = self._prepare_line_for_display(ln, text)
             cursor.insertText("\n" + display_text)
@@ -709,6 +710,7 @@ class LogTab(QWidget):
             for tag in tags:
                 self._apply_line_format(block, tag)
             self.line_map.append(ln)
+        cursor.endEditBlock()
         if len(self.line_map) > self.max_display_lines:
             to_remove = len(self.line_map) - self.max_display_lines
             cursor.beginEditBlock()
@@ -726,6 +728,7 @@ class LogTab(QWidget):
         old_first_file_line = self.line_map[0] if self.line_map else 0
         cursor = self.text.textCursor()
         cursor.movePosition(QtGui.QTextCursor.Start)
+        cursor.beginEditBlock()
         for ln, text in reversed(new_lines):
             display_text, tags = self._prepare_line_for_display(ln, text)
             cursor.insertText(display_text + "\n")
@@ -735,6 +738,7 @@ class LogTab(QWidget):
             if block.isValid():
                 for tag in tags:
                     self._apply_line_format(block, tag)
+        cursor.endEditBlock()
         self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
         if len(self.line_map) > self.max_display_lines:
             to_remove = len(self.line_map) - self.max_display_lines
