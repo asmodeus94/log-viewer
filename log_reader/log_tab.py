@@ -699,22 +699,33 @@ class LogTab(QWidget):
                 next_start = current_last_line + 1
                 if next_start < self.indexer.line_count:
                     self._is_loading = True
-                    new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
-                    if new_lines:
-                        self._last_edge_load_time = time.time()
-                        self._append_lines(new_lines)
-                    self._is_loading = False
+                    self._ignore_scroll_events = True
+                    try:
+                        new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
+                        if new_lines:
+                            self._last_edge_load_time = time.time()
+                            self._append_lines(new_lines)
+                    finally:
+                        self._is_loading = False
+                        # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
+                        # powstające w wyniku inercji na macOS / Wayland.
+                        QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
 
             elif value <= 1000 and self.line_map and self.line_map[0] > 0:
                 prev_start = max(0, self.line_map[0] - self.window_size_lines)
                 self._is_loading = True
-                new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
-                if new_lines:
-                    self._last_edge_load_time = time.time()
-                    self._prepend_lines(new_lines)
-                self._is_loading = False
+                self._ignore_scroll_events = True
+                try:
+                    new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
+                    if new_lines:
+                        self._last_edge_load_time = time.time()
+                        self._prepend_lines(new_lines)
+                finally:
+                    self._ignore_scroll_events = False
+                    self._is_loading = False
         except Exception:
             self._is_loading = False
+            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
 
     def _append_lines(self, new_lines: List[Tuple[int, str]]) -> None:
         if not new_lines:
@@ -802,7 +813,8 @@ class LogTab(QWidget):
             self.cmd_toggle_follow()
 
     def _on_scroll_changed(self, value: int) -> None:
-        if not self.indexer or not self.line_map or self._is_loading:
+        # Zatrzymanie kaskady zdarzeń na macOS/Linux po dodaniu nowych bloków tekstowych.
+        if not self.indexer or not self.line_map or getattr(self, "_is_loading", False) or getattr(self, "_ignore_scroll_events", False):
             return
         self._scroll_debounce_timer.start()
 
