@@ -779,6 +779,7 @@ class LogTab(QWidget):
         old_signals_blocked = scrollbar.blockSignals(True)
         try:
             old_first_file_line = self.line_map[0] if self.line_map else 0
+            old_val = scrollbar.value()
             cursor = self.text.textCursor()
             cursor.movePosition(QtGui.QTextCursor.Start)
             cursor.beginEditBlock()
@@ -809,7 +810,7 @@ class LogTab(QWidget):
             try:
                 idx = bisect.bisect_left(self.line_map, old_first_file_line)
                 if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
-                    self.text.verticalScrollBar().setValue(idx)
+                    self.text.verticalScrollBar().setValue(idx + old_val)
             except Exception:
                 pass
             self._update_position_slider()
@@ -832,14 +833,9 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         if not self.indexer or line_no < 0:
             return
-        self._cancel_follow_if_active()
-
-        if self.filter_active and self._filter_all_lines:
-            idx = bisect.bisect_left(self._filter_all_lines, line_no)
-            self._load_window(at_line=max(0, idx - 10))
-        else:
+        if not self.filter_active:
             line_no = min(line_no, self.indexer.line_count - 1)
-            self._load_window(at_line=max(0, line_no - 10))
+        self._goto_file_line(line_no)
 
     def _update_minimap(self) -> None:
         if not self.indexer or self.indexer.line_count == 0:
@@ -1077,12 +1073,10 @@ class LogTab(QWidget):
         self._cancel_follow_if_active()
         self._search_result_index = index
         line_no, _text = self._search_results_all[index]
-        if self.filter_active:
-            idx = bisect.bisect_left(self._filter_all_lines, line_no)
-            self._load_window(at_line=max(0, idx - 10))
-        else:
-            start = max(0, line_no - 10)
-            self._load_window(at_line=start)
+
+        # Używamy ujednoliconego goto, co od razu poprawia błędy nawigacji
+        self._goto_file_line(line_no)
+
         for i, fl in enumerate(self.line_map):
             if fl == line_no:
                 self._highlight_and_scroll(i)
@@ -1869,9 +1863,12 @@ class LogTab(QWidget):
 
     def _goto_file_line(self, ln: int) -> None:
         self._cancel_follow_if_active()
-        # Cofamy start o 50 linii (lub do 0), by zakładka nie była na samej ścianie (value=0 paska),
+        # Cofamy start by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
-        offset = 50
+        offset = self.window_size_lines // 2
+
+        # Resetujemy debouncer krawędzi żeby mozna bylo od razu ladowac
+        self._last_edge_load_time = 0.0
 
         target_idx_in_map = 0
 
