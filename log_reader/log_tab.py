@@ -858,14 +858,21 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         if not self.indexer or line_no < 0:
             return
-        if not self.filter_active:
+        if self.filter_active and self._filter_all_lines:
+            line_no = min(line_no, len(self._filter_all_lines) - 1)
+            self._goto_file_line(line_no, is_filtered_index=True)
+        else:
             line_no = min(line_no, self.indexer.line_count - 1)
-        self._goto_file_line(line_no)
+            self._goto_file_line(line_no)
 
     def _update_minimap(self) -> None:
         if not self.indexer or self.indexer.line_count == 0:
             return
-        total = self.indexer.line_count
+
+        if self.filter_active and self._filter_all_lines:
+            total = len(self._filter_all_lines)
+        else:
+            total = self.indexer.line_count
 
         # Aby zapobiec zawieszaniu UI przy ładowaniu bardzo dużych plików (np. 25 GB)
         # rezygnujemy z pełnego skanowania pliku w poszukiwaniu tagów logów dla
@@ -1886,7 +1893,7 @@ class LogTab(QWidget):
         ln = item.data(0, Qt.UserRole)
         self._goto_file_line(ln)
 
-    def _goto_file_line(self, ln: int) -> None:
+    def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
         self._cancel_follow_if_active()
         # Cofamy start by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
@@ -1898,7 +1905,10 @@ class LogTab(QWidget):
         target_idx_in_map = 0
 
         if self.filter_active:
-            idx = bisect.bisect_left(self._filter_all_lines, ln)
+            if is_filtered_index:
+                idx = ln
+            else:
+                idx = bisect.bisect_left(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
             try:
