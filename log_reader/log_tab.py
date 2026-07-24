@@ -255,6 +255,12 @@ class LogTab(QWidget):
         self.text.user_scrolled.connect(self._on_user_scrolled)
         # Musimy również wyłączyć follow, jeśli użytkownik kliknie bezpośrednio na scrollbar
         self.text.verticalScrollBar().sliderPressed.connect(self._on_user_scrolled)
+
+        # Debouncing dla ładowania krawędzi (przeciwdziała "zamrażaniu" aplikacji przy intensywnym przewijaniu)
+        self._edge_load_timer = QtCore.QTimer(self)
+        self._edge_load_timer.setSingleShot(True)
+        self._edge_load_timer.setInterval(150)
+        self._edge_load_timer.timeout.connect(self._do_check_edges)
         self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
         self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
 
@@ -667,87 +673,148 @@ class LogTab(QWidget):
     def _check_edges(self) -> None:
         if not self.indexer or self.filter_active or self._is_loading:
             return
-        now = time.time()
-        if (now - self._last_edge_load_time) < 0.5:
+        # Uruchamiamy/resetujemy timer po każdym zdarzeniu w rejonie krawędzi,
+        # zamiast wielokrotnie dławić główny wątek przy intensywnym kręceniu kółkiem myszy.
+        self._edge_load_timer.start()
+
+    def _do_check_edges(self) -> None:
+        if not self.indexer or self.filter_active or self._is_loading:
             return
+
+        # Odrzucamy wykonanie jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
+        # ale my jesteśmy w środku innego obciążającego zadania, albo gdy od ostatniego
+        # załadowania minęło niezwykle mało czasu
+        now = time.time()
+        if (now - self._last_edge_load_time) < 0.1:
+            return
+
         try:
             scrollbar = self.text.verticalScrollBar()
             value = scrollbar.value()
             maximum = scrollbar.maximum()
-            if maximum > 0 and value >= maximum - 10 and self.line_map:
+
+            # Flaga isLoading chroni nas przed re-entrancy (wejściem ponownie w trakcie modyfikacji)
+            if maximum > 0 and value >= maximum - 1000 and self.line_map:
                 current_last_line = self.line_map[-1] if self.line_map else 0
                 next_start = current_last_line + 1
                 if next_start < self.indexer.line_count:
-                    new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
-                    if new_lines:
-                        self._last_edge_load_time = now
-                        self._is_loading = True
-                        self._append_lines(new_lines)
-                        self._is_loading = False
-            elif value <= 10 and self.line_map and self.line_map[0] > 0:
-                prev_start = max(0, self.line_map[0] - self.window_size_lines)
-                new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
-                if new_lines:
-                    self._last_edge_load_time = now
                     self._is_loading = True
-                    self._prepend_lines(new_lines)
+                    self._ignore_scroll_events = True
+                    try:
+                        new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
+                        if new_lines:
+                            self._last_edge_load_time = time.time()
+                            self._append_lines(new_lines)
+                    finally:
+                        self._is_loading = False
+                        # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
+                        # powstające w wyniku inercji na macOS / Wayland.
+                        QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
+
+            elif value <= 1000 and self.line_map and self.line_map[0] > 0:
+                prev_start = max(0, self.line_map[0] - self.window_size_lines)
+                self._is_loading = True
+                self._ignore_scroll_events = True
+                try:
+                    new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
+                    if new_lines:
+                        self._last_edge_load_time = time.time()
+                        self._prepend_lines(new_lines)
+                finally:
+                    self._ignore_scroll_events = False
                     self._is_loading = False
         except Exception:
             self._is_loading = False
+            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
 
     def _append_lines(self, new_lines: List[Tuple[int, str]]) -> None:
         if not new_lines:
             return
-        cursor = self.text.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.End)
-        for ln, text in new_lines:
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            cursor.insertText("\n" + display_text)
-            block = cursor.block()
-            for tag in tags:
-                self._apply_line_format(block, tag)
-            self.line_map.append(ln)
-        if len(self.line_map) > self.max_display_lines:
-            to_remove = len(self.line_map) - self.max_display_lines
-            cursor.movePosition(QtGui.QTextCursor.Start)
-            for _ in range(to_remove):
-                cursor.select(QtGui.QTextCursor.LineUnderCursor)
+
+        # Zablokowanie sygnałów zapobiega pętli (tzw. samowzbudnemu ładowaniu), gdy
+        # zmieniamy tekst, a system Qt automatycznie dostosowuje i emituje zmianę scrollbara.
+        scrollbar = self.text.verticalScrollBar()
+        old_signals_blocked = scrollbar.blockSignals(True)
+
+        # Zapisujemy widoczną linię u góry ekranu
+        old_value = scrollbar.value()
+        try:
+            cursor = self.text.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.beginEditBlock()
+            for ln, text in new_lines:
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                cursor.insertText("\n" + display_text)
+                block = cursor.block()
+                for tag in tags:
+                    self._apply_line_format(block, tag)
+                self.line_map.append(ln)
+            cursor.endEditBlock()
+            if len(self.line_map) > self.max_display_lines:
+                to_remove = len(self.line_map) - self.max_display_lines
+                cursor.beginEditBlock()
+                cursor.movePosition(QtGui.QTextCursor.Start)
+                cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor, to_remove)
                 cursor.removeSelectedText()
-                cursor.deleteChar()
-            self.line_map = self.line_map[to_remove:]
-        self.text.set_line_map(self.line_map)
-        self._update_position_slider()
+                cursor.endEditBlock()
+                self.line_map = self.line_map[to_remove:]
+
+                # Jeśli obcięliśmy linie z góry, stary scrollbar value musimy "przesunąć" w dół o tę liczbę linii,
+                # aby nie "skoczyć" nagle na sam dół. To wyrzuca nas również z marginesu ładującego na krawędzi.
+                old_value -= to_remove
+
+            self.text.set_line_map(self.line_map)
+            # Ustawiamy suwak na skorygowanej pozycji.
+            # Wyłącza to zjawisko, w którym dodanie tekstu zostawiało scrollbar na maksymalnej wartości.
+            scrollbar.setValue(max(0, old_value))
+            self._update_position_slider()
+        finally:
+            scrollbar.blockSignals(old_signals_blocked)
 
     def _prepend_lines(self, new_lines: List[Tuple[int, str]]) -> None:
         if not new_lines:
             return
-        old_first_file_line = self.line_map[0] if self.line_map else 0
-        cursor = self.text.textCursor()
-        cursor.movePosition(QtGui.QTextCursor.Start)
-        for ln, text in reversed(new_lines):
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            cursor.insertText(display_text + "\n")
-        for i, (ln, text) in enumerate(new_lines):
-            display_text, tags = self._prepare_line_for_display(ln, text)
-            block = cursor.document().findBlockByNumber(i)
-            if block.isValid():
-                for tag in tags:
-                    self._apply_line_format(block, tag)
-        self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
-        if len(self.line_map) > self.max_display_lines:
-            to_remove = len(self.line_map) - self.max_display_lines
-            cursor.movePosition(QtGui.QTextCursor.End)
-            for _ in range(to_remove):
-                cursor.deletePreviousChar()
-            self.line_map = self.line_map[:self.max_display_lines]
-        self.text.set_line_map(self.line_map)
+
+        scrollbar = self.text.verticalScrollBar()
+        old_signals_blocked = scrollbar.blockSignals(True)
         try:
-            idx = bisect.bisect_left(self.line_map, old_first_file_line)
-            if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
-                self.text.verticalScrollBar().setValue(idx)
-        except Exception:
-            pass
-        self._update_position_slider()
+            old_first_file_line = self.line_map[0] if self.line_map else 0
+            cursor = self.text.textCursor()
+            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.beginEditBlock()
+            for ln, text in reversed(new_lines):
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                cursor.insertText(display_text + "\n")
+            for i, (ln, text) in enumerate(new_lines):
+                display_text, tags = self._prepare_line_for_display(ln, text)
+                block = cursor.document().findBlockByNumber(i)
+                if block.isValid():
+                    for tag in tags:
+                        self._apply_line_format(block, tag)
+            cursor.endEditBlock()
+            self.line_map = [ln for (ln, _t) in new_lines] + self.line_map
+            if len(self.line_map) > self.max_display_lines:
+                to_remove = len(self.line_map) - self.max_display_lines
+                cursor.beginEditBlock()
+                cursor.movePosition(QtGui.QTextCursor.End)
+                cursor.movePosition(QtGui.QTextCursor.StartOfBlock, QtGui.QTextCursor.MoveAnchor)
+                if to_remove > 1:
+                    cursor.movePosition(QtGui.QTextCursor.PreviousBlock, QtGui.QTextCursor.MoveAnchor, to_remove - 1)
+                cursor.movePosition(QtGui.QTextCursor.PreviousCharacter, QtGui.QTextCursor.MoveAnchor)
+                cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+                cursor.removeSelectedText()
+                cursor.endEditBlock()
+                self.line_map = self.line_map[:self.max_display_lines]
+            self.text.set_line_map(self.line_map)
+            try:
+                idx = bisect.bisect_left(self.line_map, old_first_file_line)
+                if idx != len(self.line_map) and self.line_map[idx] == old_first_file_line:
+                    self.text.verticalScrollBar().setValue(idx)
+            except Exception:
+                pass
+            self._update_position_slider()
+        finally:
+            scrollbar.blockSignals(old_signals_blocked)
 
     # ---------------------------------------------------- position slider ---
     def _on_user_scrolled(self) -> None:
@@ -757,7 +824,8 @@ class LogTab(QWidget):
             self.cmd_toggle_follow()
 
     def _on_scroll_changed(self, value: int) -> None:
-        if not self.indexer or not self.line_map or self._is_loading:
+        # Zatrzymanie kaskady zdarzeń na macOS/Linux po dodaniu nowych bloków tekstowych.
+        if not self.indexer or not self.line_map or getattr(self, "_is_loading", False) or getattr(self, "_ignore_scroll_events", False):
             return
         self._scroll_debounce_timer.start()
 
