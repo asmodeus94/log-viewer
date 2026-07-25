@@ -118,12 +118,6 @@ class FilterWorker(QObject):
                 combined = hit_lines.copy()
                 combined.update(context_lines)
                 filter_all_lines = sorted(combined)
-                # Przygotuj słownik, aby uniknąć blokowania wątku UI
-                hit_text_map = {}
-                for i, (ln, _off, text) in enumerate(results):
-                    hit_text_map[ln] = text
-                    if i % 100000 == 0:
-                        time.sleep(0.01)
 
             self.finished.emit(results, context_lines, filter_all_lines, hit_text_map, hit_lines, error)
 
