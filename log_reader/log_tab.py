@@ -536,7 +536,6 @@ class LogTab(QWidget):
         context_widget_lines: List[int] = []
         filter_hit_widget_lines: List[int] = []  # trafienia filtra (żółte tło)
         # W trybie filtra: sprawdź które linie są trafieniami (nie kontekstem).
-        hit_line_set = self._filter_hit_lines if self.filter_active else set()
         for i, (ln, text) in enumerate(lines):
             display_text, tags = self._prepare_line_for_display(ln, text)
             text_parts.append(display_text)
@@ -548,10 +547,14 @@ class LogTab(QWidget):
                 bookmark_widget_lines.append(i)
             if self.edit_buffer.has(ln):
                 edited_widget_lines.append(i)
-            if ln in self.filter_context_lines:
-                context_widget_lines.append(i)
-            if ln in hit_line_set:
-                filter_hit_widget_lines.append(i)
+
+            if self.filter_active and self.filter_results:
+                hit_idx = bisect.bisect_left(self.filter_results, ln)
+                is_hit = hit_idx < len(self.filter_results) and self.filter_results[hit_idx] == ln
+                if is_hit:
+                    filter_hit_widget_lines.append(i)
+                else:
+                    context_widget_lines.append(i)
 
         self.text.setPlainText("\n".join(text_parts))
         cursor = self.text.textCursor()
@@ -1059,7 +1062,12 @@ class LogTab(QWidget):
         if error:
             self._search_results_label.setText(self.t("lbl_search_results_empty"))
             return
-        self._search_results_all = [(ln, text) for (ln, _off, text) in results]
+        search_res = []
+        for ln in results:
+            lines = self.indexer.read_lines(ln, 1)
+            if lines:
+                search_res.append((ln, lines[0][1]))
+        self._search_results_all = search_res
         total_hits = len(self._search_results_all)
 
         self._search_results = self._search_results_all
@@ -1327,7 +1335,8 @@ class LogTab(QWidget):
         if self.filter_engine is None or self.filter_engine.path != self.file_path:
             self.filter_engine = FilterEngine(self.file_path, self.indexer)
         self.filter_active = True
-        self.filter_results = []
+        import array
+        self.filter_results = array.array('Q')
 
         self._filter_thread = QThread()
         self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate, context_after=self._filter_context_after)
@@ -1365,10 +1374,10 @@ class LogTab(QWidget):
             return
 
         self.filter_results = results
-        self.filter_context_lines = context_lines
         self._filter_all_lines = filter_all_lines
-        self._filter_hit_text_map = hit_text_map
-        self._filter_hit_lines = hit_lines_set
+        self.filter_context_lines = set()
+        self._filter_hit_text_map = {}
+        self._filter_hit_lines = set()
 
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
@@ -1377,7 +1386,8 @@ class LogTab(QWidget):
         if not self.filter_active or not self.filter_results:
             self._filter_hit_text_map.clear()
             self._filter_hit_lines.clear()
-            self._filter_all_lines.clear()
+            import array
+            self._filter_all_lines = array.array('Q')
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.filter_active
@@ -1388,7 +1398,8 @@ class LogTab(QWidget):
         self.filter_context_lines = set()
         self._filter_hit_text_map.clear()
         self._filter_hit_lines.clear()
-        self._filter_all_lines.clear()
+        import array
+        self._filter_all_lines = array.array('Q')
         self._filter_context_after = 0
         if not silent:
             self._main.filter_entry.clear()

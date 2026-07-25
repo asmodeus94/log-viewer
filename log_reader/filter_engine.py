@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import array
 import threading
 from typing import Callable, List, Optional, Tuple
 
@@ -60,7 +61,7 @@ class FilterEngine:
             return session == self._session_id
 
     def _run(self, session, pattern, use_regex, case_sensitive, negate, on_progress, on_done):
-        results: List[Tuple[int, int, str]] = []
+        results = array.array('Q')
         error: Optional[str] = None
         matcher = None
         matcher_bytes = None  # regex na surowych bajtach (optymalizacja #10)
@@ -79,7 +80,7 @@ class FilterEngine:
         except re.error as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
-                    on_done([], str(e))
+                    on_done(array.array('Q'), str(e))
                 except Exception:
                     pass
             return
@@ -139,10 +140,10 @@ class FilterEngine:
                             for line_bytes in lines:
                                 if not case_sensitive:
                                     if needle_bytes_lower in line_bytes.lower():
-                                        results.append((line_no, 0, ""))
+                                        results.append(line_no)
                                 else:
                                     if needle_bytes_lower in line_bytes:
-                                        results.append((line_no, 0, ""))
+                                        results.append(line_no)
                                 line_no += 1
 
                         if self._is_current_session(session) and not self._cancel.is_set():
@@ -193,7 +194,7 @@ class FilterEngine:
                             matched = not matched
                         if matched:
                             # Dekoduj tylko pasujące linie
-                            results.append((line_no, bytes_read - len(raw), ""))
+                            results.append(line_no)
                         line_no += 1
                         if line_no % 5000 == 0:
                             if self._is_current_session(session) and not self._cancel.is_set():

@@ -273,7 +273,7 @@ class TestRegexOnBytes:
 
         assert len(results1) == len(results2) == 250
         # Porównaj numery linii
-        lines1 = [r[0] for r in results1]
-        lines2 = [r[0] for r in results2]
+        lines1 = list(results1)
+        lines2 = list(results2)
         assert lines1 == lines2
         idx.close()
