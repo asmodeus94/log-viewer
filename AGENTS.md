@@ -1,10 +1,13 @@
 # Wytyczne i instrukcje dla Agentów AI i programistów
 
-Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z repozytorium projektu **Log Viewer**. Przestrzeganie tych zasad jest niezbędne dla zapewnienia stabilności i spójności rozwijanego kodu.
+Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z repozytorium projektu **Log Viewer**. Przestrzeganie tych zasad jest niezbędne dla zapewnienia stabilności, wysokiej wydajności i spójności rozwijanego kodu.
 
-## 1. Wydajność i stabilność
+## 1. Wydajność i obsługa dużych plików (I/O)
 - Należy bezwzględnie unikać wprowadzania ciężkich elementów graficznych ("bells and whistles"), które mogłyby pogorszyć wydajność aplikacji, opóźniać ładowanie lub powodować awarie.
-- Najwyższym priorytetem jest zawsze wydajność i stabilność podczas przetwarzania ogromnych plików (wielogigabajtowych).
+- Najwyższym priorytetem jest zawsze wydajność i stabilność podczas przetwarzania ogromnych plików logów (wielogigabajtowych).
+- **Bezwzględny zakaz wczytywania całych plików do pamięci** (np. za pomocą `read()` lub `readlines()`).
+- Przy odczycie plików należy używać wyłącznie generatorów, iterowania linia po linii (lazy loading) lub bezpiecznego odczytu porcjowanego (chunking, np. `read(chunk_size)`).
+- **Uwaga dotycząca `mmap`:** Ze względu na naturę plików logów (które mogą być aktywnie dopisywane przez inne procesy) oraz różnice w blokowaniu plików w systemie Windows, **nie używaj modułu `mmap`**. Prowadzi to do nieprzewidywalnych błędów dostępu i problemów z cross-platformowością. Zamiast tego polegaj na standardowym I/O, generatorach lub chunkingu w wątkach pobocznych.
 
 ## 2. Planowanie
 - Przed wprowadzaniem jakichkolwiek zmian, agent powinien wejść w tryb "deep planning mode". Oznacza to m.in. zadawanie pytań wyjaśniających i upewnienie się co do celu, chyba że wątpliwości da się rozwiązać przez dogłębną analizę kodu.
@@ -21,7 +24,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 ## 5. UI Layout i Biznesowa Logika
 - Oddzielaj w całości wygląd (layout) od logiki biznesowej, używając do tego dedykowanych plików `.ui` przetrzymywanych w osobnym folderze.
 - Wspieraj użycie tzw. "Promoted Widgets" z Qt Designer dla niestandardowych (customowych) komponentów, np. umieszczając je w `log_reader/ui/`.
-- Zarządzaj zależnymi od kontekstu elementami UI, (np. stan filtrów lub wyszukiwarki), na poziomie pojedynczych kart. Kodowanie znaków jest zamierzonym wyjątkiem i musi ściśle pozostać globalnym ustawieniem aplikacji.
+- Zarządzaj zależnymi od kontekstu elementami UI (np. stan filtrów lub wyszukiwarki) na poziomie pojedynczych kart. Kodowanie znaków jest zamierzonym wyjątkiem i musi ściśle pozostać globalnym ustawieniem aplikacji.
 
 ## 6. Język Komunikacji
 - Językiem w którym należy komentować cały kod jest język **polski**. Dodatkowo cała komunikacja z klientem musi się również odbywać po polsku.
@@ -41,4 +44,15 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - Jeżeli pasek narzędzi lub inne elementy wymagają dynamicznych zmian wynikających np. z tłumaczeń to ich logika powinna rezydować bezpośrednio w kodzie Pythona, nie wewnątrz w `.ui`.
 
 ## 11. Zależności i Wymagania podczas Testów
-- Upewnij się, że odpowiednio zainsalowane są `pip install -r requirements.txt pytest xvfbwrapper` przed uruchomieniem jakichkolwiek testów graficznych. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów używaj polecenia: `xvfb-run -a python -m pytest tests/`.
+- Upewnij się, że odpowiednio zainstalowane są `pip install -r requirements.txt pytest xvfbwrapper` przed uruchomieniem jakichkolwiek testów graficznych. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów używaj polecenia: `xvfb-run -a python -m pytest tests/`.
+
+## 12. Responsywność Interfejsu (GUI) i Wątkowanie
+- **Złota zasada:** Główny wątek aplikacji (GUI thread) nie może być nigdy blokowany przez operacje wejścia/wyjścia (I/O) ani intensywne obliczenia (np. parsowanie logów, zaawansowane filtrowanie).
+- Wszelkie długotrwałe operacje muszą być oddelegowane do wątków pobocznych przy użyciu mechanizmów Qt, takich jak `QThread`, `QRunnable` lub `QThreadPool`.
+- Do wyświetlania dużych zbiorów danych używaj architektury Model/View w Qt (np. `QAbstractTableModel`, mechanizm `fetchMore()`). Unikaj widgetów uwarunkowanych elementowo (np. `QTableWidget`), ponieważ zniszczy to wydajność przy tysiącach wierszy.
+
+## 13. Standardy Jakości Kodu (Clean Code)
+- **Typowanie statyczne:** Każda nowa funkcja, metoda i klasa musi posiadać adnotacje typów (Type Hints wg PEP 484) dla argumentów i wartości zwracanych (np. `def parse_line(line: str) -> dict:`).
+- **Pythonic style:** Wykorzystuj wbudowane mechanizmy języka – używaj f-stringów do formatowania tekstu, list/dict comprehensions dla wydajności, oraz menedżerów kontekstu (`with`) do zarządzania zasobami i blokadami.
+- Preferuj nowoczesny moduł `pathlib` do operacji na ścieżkach nad tradycyjnym `os.path` (chyba że konwencja istniejącego kodu/testów wymaga inaczej).
+- Zmiany w kodzie nie mogą generować nowych ostrzeżeń linterów (utrzymuj kod zgodny ze standardami PEP 8).
