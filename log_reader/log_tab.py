@@ -418,6 +418,7 @@ class LogTab(QWidget):
     def _close_index_progress(self) -> None:
         """Zamyka dialog postępu indeksowania (sukces, błąd, anulowanie)."""
         if self._index_progress is not None:
+            self._index_progress.blockSignals(True)
             self._index_progress.close()
             self._index_progress = None
 
@@ -441,6 +442,20 @@ class LogTab(QWidget):
                 self.indexer.close()
             except Exception:
                 pass
+            self.indexer = None
+
+        self.line_map = None
+        self.filter_results = None
+        self._filter_all_lines = None
+        self._filter_context_lines = None
+        self._hit_text_map = None
+        self._hit_lines_set = None
+        self.filter_engine = None
+        self._search_engine = None
+        try:
+            self.text.clear()
+        except Exception:
+            pass
         self.indexer = idx
         self._last_file_size = idx.size
         try:
@@ -2265,6 +2280,20 @@ class LogTab(QWidget):
                 self.indexer.close()
             except Exception:
                 pass
+            self.indexer = None
+
+        self.line_map = None
+        self.filter_results = None
+        self._filter_all_lines = None
+        self._filter_context_lines = None
+        self._hit_text_map = None
+        self._hit_lines_set = None
+        self.filter_engine = None
+        self._search_engine = None
+        try:
+            self.text.clear()
+        except Exception:
+            pass
 
 
 import atexit
