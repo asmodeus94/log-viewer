@@ -1,14 +1,103 @@
-"""FilterEngine — skanowanie pliku w tle z możliwością anulowania."""
-
-from __future__ import annotations
-
 import re
 import array
 import threading
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Iterator
+from abc import ABC, abstractmethod
 
-from .helpers import open_maybe_compressed
-from .indexer import LineIndexer
+from log_reader.helpers import open_maybe_compressed
+from log_reader.indexer import LineIndexer
+
+class FilterStrategy(ABC):
+    """
+    Abstrakcyjna klasa bazowa dla strategii filtrowania (Wzorzec Strategii).
+    Definiuje wspólny interfejs sprawdzania czy dana linia pasuje do wzorca.
+    """
+    def __init__(self, negate: bool, encoding: str):
+        self.negate = negate
+        self.encoding = encoding
+
+    @abstractmethod
+    def match(self, line_bytes: bytes) -> bool:
+        """Sprawdza, czy przekazane bajty linii pasują do wzorca strategii."""
+        pass
+
+
+class PlainTextStrategy(FilterStrategy):
+    """Strategia dla zwykłego wyszukiwania tekstu (bez wyrażeń regularnych)."""
+    def __init__(self, needle: str, case_sensitive: bool, negate: bool, encoding: str):
+        super().__init__(negate, encoding)
+        self.case_sensitive = case_sensitive
+        self.needle_bytes = needle.encode(encoding, errors="replace")
+        if not case_sensitive:
+            self.needle_bytes = self.needle_bytes.lower()
+
+    def match(self, line_bytes: bytes) -> bool:
+        if not self.case_sensitive:
+            matched = self.needle_bytes in line_bytes.lower()
+        else:
+            matched = self.needle_bytes in line_bytes
+
+        return not matched if self.negate else matched
+
+
+class RegexStrategy(FilterStrategy):
+    """Strategia dla wyrażeń regularnych z optymalizacją pod surowe bajty."""
+    def __init__(self, pattern: str, case_sensitive: bool, negate: bool, encoding: str):
+        super().__init__(negate, encoding)
+        self.pattern = pattern
+        self.flags = 0 if case_sensitive else re.IGNORECASE
+        self.matcher_str = re.compile(pattern, self.flags)
+
+        self.matcher_bytes = None
+        try:
+            pattern_bytes = pattern.encode(encoding, errors="replace")
+            self.matcher_bytes = re.compile(pattern_bytes, self.flags)
+        except Exception:
+            pass  # Fallback na sprawdzanie łańcuchów znaków
+
+    def match(self, line_bytes: bytes) -> bool:
+        # Najpierw sprawdź na surowych bajtach (szybkie)
+        if self.matcher_bytes is not None:
+            matched = self.matcher_bytes.search(line_bytes) is not None
+        else:
+            # Fallback: dekoduj i sprawdź na str
+            try:
+                text = line_bytes.decode(self.encoding, errors="replace")
+            except Exception:
+                text = repr(line_bytes)
+            matched = self.matcher_str.search(text) is not None
+
+        return not matched if self.negate else matched
+
+def read_file_chunks(path: str, chunk_size: int = 4 * 1024 * 1024) -> Iterator[bytes]:
+    """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
+    with open_maybe_compressed(path, "rb") as f:
+        carry = b""
+        eof = False
+        while not eof:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                eof = True
+
+            data = carry + chunk
+            if not data:
+                break
+
+            if eof:
+                complete_data = data
+                carry = b""
+            else:
+                last_nl = data.rfind(b"\n")
+                if last_nl != -1:
+                    complete_data = data[:last_nl + 1]
+                    carry = data[last_nl + 1:]
+                else:
+                    # Cały chunk to jedna długa linia bez \n
+                    complete_data = b""
+                    carry = data
+
+            if complete_data:
+                yield complete_data
 
 
 class FilterEngine:
@@ -60,23 +149,18 @@ class FilterEngine:
         with self._session_lock:
             return session == self._session_id
 
+    def _create_strategy(self, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool) -> FilterStrategy:
+        """Fabryka do tworzenia odpowiedniej strategii wyszukiwania."""
+        if use_regex:
+            return RegexStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
+        return PlainTextStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
+
     def _run(self, session, pattern, use_regex, case_sensitive, negate, on_progress, on_done):
         results = array.array('Q')
         error: Optional[str] = None
-        matcher = None
-        matcher_bytes = None  # regex na surowych bajtach (optymalizacja #10)
+
         try:
-            if use_regex:
-                flags = 0 if case_sensitive else re.IGNORECASE
-                matcher = re.compile(pattern, flags)
-                # Skompiluj też na bajtach — ~2x szybsze (bez dekodowania)
-                try:
-                    pattern_bytes = pattern.encode(self.indexer.encoding, errors="replace")
-                    matcher_bytes = re.compile(pattern_bytes, flags)
-                except Exception:
-                    pass  # fallback na regex na str
-            else:
-                needle = pattern if case_sensitive else pattern.lower()
+            strategy = self._create_strategy(pattern, use_regex, case_sensitive, negate)
         except re.error as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
@@ -87,122 +171,33 @@ class FilterEngine:
 
         try:
             size = self.indexer.size
-            encoding = self.indexer.encoding
             bytes_read = 0
             line_no = 0
+            chunk_count = 0
 
-            # Optymalizacja: dla plain text (bez regex) przeszukujemy surowe bajty.
-            if matcher is None and not negate:
-                needle_bytes = needle.encode(encoding, errors="replace")
-                if not case_sensitive:
-                    needle_bytes_lower = needle_bytes.lower()
-                else:
-                    needle_bytes_lower = needle_bytes
+            for block in read_file_chunks(self.path):
+                if chunk_count % 10 == 0:
+                    if self._cancel.is_set() or not self._is_current_session(session):
+                        return
+                chunk_count += 1
+                bytes_read += len(block)
 
-                with open_maybe_compressed(self.path, "rb") as f:
-                    CHUNK = 4 * 1024 * 1024  # 4 MB
-                    carry = b""
-                    chunk_count = 0
-                    eof = False
-                    while not eof:
-                        if chunk_count % 10 == 0:
-                            if self._cancel.is_set() or not self._is_current_session(session):
-                                return
-                        chunk_count += 1
+                lines = block.split(b"\n")
+                if lines and lines[-1] == b"":
+                    lines.pop()
 
-                        chunk = f.read(CHUNK)
-                        if not chunk:
-                            eof = True
-                        data = carry + chunk
-                        if not data:
-                            break
-                        bytes_read += len(chunk)
+                for line_bytes in lines:
+                    if strategy.match(line_bytes):
+                        results.append(line_no)
+                    line_no += 1
 
-                        # Podziel na linie — ostatnia może być niekompletna
-                        if eof:
-                            # Ostatni chunk — wszystkie dane są kompletne
-                            complete_data = data
-                            carry = b""
-                        else:
-                            last_nl = data.rfind(b"\n")
-                            if last_nl != -1:
-                                complete_data = data[:last_nl + 1]
-                                carry = data[last_nl + 1:]
-                            else:
-                                # Cały chunk to jedna długa linia bez \n — zachowaj jako carry
-                                complete_data = b""
-                                carry = data
+                if self._is_current_session(session) and not self._cancel.is_set():
+                    pct = (bytes_read / size * 100.0) if size else 0.0
+                    try:
+                        on_progress(pct, len(results))
+                    except Exception:
+                        pass
 
-                        if complete_data:
-                            lines = complete_data.split(b"\n")
-                            if lines and lines[-1] == b"":
-                                lines.pop()
-                            for line_bytes in lines:
-                                if not case_sensitive:
-                                    if needle_bytes_lower in line_bytes.lower():
-                                        results.append(line_no)
-                                else:
-                                    if needle_bytes_lower in line_bytes:
-                                        results.append(line_no)
-                                line_no += 1
-
-                        if self._is_current_session(session) and not self._cancel.is_set():
-                            pct = (bytes_read / size * 100.0) if size else 0.0
-                            try:
-                                on_progress(pct, len(results))
-                            except Exception:
-                                pass
-            else:
-                # Tryb regex lub negacja — używaj regex na bajtach gdy możliwe
-                # (optymalizacja #10: ~2x szybsze bez dekodowania każdej linii)
-                use_bytes_regex = matcher_bytes is not None
-                needle_bytes = needle.encode(encoding, errors="replace") if matcher is None else None
-                if needle_bytes and not case_sensitive:
-                    needle_bytes_lower = needle_bytes.lower()
-                elif needle_bytes:
-                    needle_bytes_lower = needle_bytes
-                else:
-                    needle_bytes_lower = None
-
-                with open_maybe_compressed(self.path, "rb") as f:
-                    for raw in f:
-                        if line_no % 1000 == 0:
-                            if self._cancel.is_set() or not self._is_current_session(session):
-                                return
-                        bytes_read += len(raw)
-
-                        # Najpierw sprawdź na surowych bajtach (szybkie)
-                        if use_bytes_regex:
-                            matched = matcher_bytes.search(raw) is not None
-                        elif needle_bytes_lower is not None:
-                            if not case_sensitive:
-                                matched = needle_bytes_lower in raw.lower()
-                            else:
-                                matched = needle_bytes_lower in raw
-                        else:
-                            # Fallback: dekoduj i sprawdź na str
-                            try:
-                                text = raw.decode(encoding, errors="replace")
-                            except Exception:
-                                text = repr(raw)
-                            if matcher is not None:
-                                matched = matcher.search(text) is not None
-                            else:
-                                matched = (needle in text) if case_sensitive else (needle in text.lower())
-
-                        if negate:
-                            matched = not matched
-                        if matched:
-                            # Dekoduj tylko pasujące linie
-                            results.append(line_no)
-                        line_no += 1
-                        if line_no % 5000 == 0:
-                            if self._is_current_session(session) and not self._cancel.is_set():
-                                pct = (bytes_read / size * 100.0) if size else 0.0
-                                try:
-                                    on_progress(pct, len(results))
-                                except Exception:
-                                    pass
         except Exception as e:
             error = str(e)
 
