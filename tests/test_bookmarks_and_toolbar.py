@@ -1,3 +1,4 @@
+import array
 """Testy dla poprawek: zaznaczanie wielu zakładek (Cmd+B), usuwanie
 zaznaczonych zakładek z panelu bocznego oraz kolejność przycisków
 Następny/Poprzedni na pasku narzędzi."""
@@ -604,26 +605,23 @@ class TestFilterContext:
         # nie zapisuje). Pobieramy tab bezpośrednio.
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = [
-            (10, 0, "line10"),
-            (20, 0, "line20"),
-            (30, 0, "line30"),
-        ]
+        tab.filter_results = array.array('Q', [10, 20, 30])
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], {10: "line10", 20: "line20", 30: "line30"}, {10, 20, 30}, None)
+        filter_all = array.array('Q', [10, 11, 12, 20, 21, 22, 30, 31, 32])
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
 
         # Po każdym trafieniu 2 następujące linie (z pominięciem trafień).
         # Trafienia: 10, 20, 30.
         # Kontekst dla 10: 11, 12. Dla 20: 21, 22. Dla 30: 31, 32.
         # 11,12,21,22,31,32 — 6 linii kontekstu.
-        assert tab.filter_context_lines == {11, 12, 21, 22, 31, 32}
+        assert set(tab._filter_all_lines) - set(tab.filter_results) == {11, 12, 21, 22, 31, 32}
 
     def test_build_filter_context_zero_means_disabled(self, app_instance):
         """_filter_context_after=0 → brak linii kontekstu."""
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = [(10, 0, "x")]
+        tab.filter_results = array.array('Q', [10])
         tab._filter_context_after = 0
         tab._on_filter_done(tab.filter_results, set(), [10], {10: "x"}, {10}, None)
         assert tab.filter_context_lines == set()
@@ -635,21 +633,23 @@ class TestFilterContext:
         tab.filter_active = True
         # Trafienia w 10 i 11. Kontekst dla 10 = {11, 12}, ale 11 jest trafieniem,
         # więc tylko {12}. Kontekst dla 11 = {12, 13}.
-        tab.filter_results = [(10, 0, "x"), (11, 0, "y")]
+        tab.filter_results = array.array('Q', [10, 11])
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {12, 13}, [10, 11, 12, 13], {10: "x", 11: "y"}, {10, 11}, None)
+        filter_all = array.array('Q', [10, 11, 12, 13])
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
         # 12, 13 — 11 i 10 są trafieniami, więc pominęliśmy je.
-        assert tab.filter_context_lines == {12, 13}
+        assert set(tab._filter_all_lines) - set(tab.filter_results) == {12, 13}
 
     def test_clear_filter_clears_context(self, app_instance):
         """cmd_clear_filter czyści filter_context_lines."""
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = [(10, 0, "x")]
+        tab.filter_results = array.array('Q', [10])
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12}, [10, 11, 12], {10: "x"}, {10}, None)
-        assert len(tab.filter_context_lines) > 0
+        filter_all = array.array('Q', [10, 11, 12])
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        assert len(tab._filter_all_lines) > 1
 
         tab.cmd_clear_filter(silent=True)
         assert tab.filter_context_lines == set()
@@ -665,13 +665,10 @@ class TestFilterContext:
 
         # Symulacja: filtr z 3 trafieniami (linie 10, 20, 30), kontekst=2.
         tab.filter_active = True
-        tab.filter_results = [
-            (10, 0, "hit10"),
-            (20, 0, "hit20"),
-            (30, 0, "hit30"),
-        ]
+        tab.filter_results = array.array('Q', [10, 20, 30])
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {11, 12, 21, 22, 31, 32}, [10, 11, 12, 20, 21, 22, 30, 31, 32], {10: "hit10", 20: "hit20", 30: "hit30"}, {10, 20, 30}, None)
+        filter_all = array.array('Q', [10, 11, 12, 20, 21, 22, 30, 31, 32])
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
         tab._load_window(at_line=0)
@@ -684,24 +681,6 @@ class TestFilterContext:
             f"line_map powinien mieć prawdziwe numery z dziurami, jest {tab.line_map}"
         )
 
-    def test_filter_hit_text_from_memory_no_file_reads(self, app_instance):
-        """Wydajność: tekst trafień brany z filter_results (w pamięci), nie
-        z indexer.read_lines. Symulacja — ustawimy filter_results z tekstem,
-        który NIE istnieje w pliku, i sprawdzimy że to ten tekst się wyświetli."""
-        window, _ = app_instance
-        tab = window.tabs.currentWidget()
-        app = QtWidgets.QApplication.instance()
-
-        # Tekst "MARKER_FROM_MEMORY" nie istnieje w pliku testowym.
-        tab.filter_active = True
-        tab.filter_results = [(5, 0, "MARKER_FROM_MEMORY")]
-        tab._filter_context_after = 0
-        tab._on_filter_done(tab.filter_results, set(), [5], {5: "MARKER_FROM_MEMORY"}, {5}, None)
-        tab._load_window(at_line=0)
-        app.processEvents()
-
-        # Pierwsza linia okna powinna mieć tekst z pamięci, nie z pliku.
-        assert tab.window_lines[0][1] == "MARKER_FROM_MEMORY"
 
     def test_filter_hit_highlight_yellow(self, app_instance):
         """Trafienia filtra mają żółte tło (highlight), kontekst szare (context).
@@ -712,9 +691,10 @@ class TestFilterContext:
 
         # Trafienie w linii 5, kontekst=2 → linie 6, 7 to kontekst.
         tab.filter_active = True
-        tab.filter_results = [(5, 0, "hit5")]
+        tab.filter_results = array.array('Q', [5])
         tab._filter_context_after = 2
-        tab._on_filter_done(tab.filter_results, {6, 7}, [5, 6, 7], {5: "hit5"}, {5}, None)
+        filter_all = array.array('Q', [5, 6, 7])
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
         tab._load_window(at_line=0)
         app.processEvents()
 

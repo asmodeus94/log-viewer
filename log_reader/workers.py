@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import array
 from typing import Optional
 
 from PySide6 import QtCore
@@ -84,7 +85,7 @@ class FilterWorker(QObject):
 
         def on_done(results, error):
             if error or not results:
-                self.finished.emit(results, set(), [], {}, set(), error)
+                self.finished.emit(array.array('Q'), set(), array.array('Q'), {}, set(), error)
                 return
 
             if self._context_after > 0:
@@ -92,40 +93,27 @@ class FilterWorker(QObject):
             else:
                 self.progress.emit(100.0, len(results), "filtering")
 
-            # Zbuduj kontekst filtru w tle
-            context_lines = set()
-            hit_lines = {ln for (ln, _off, _text) in results}
+            filter_all_lines = array.array('Q')
+            total = self._engine.indexer.line_count if self._engine.indexer else 0
             n = self._context_after
-            if n > 0 and self._engine.indexer:
-                counter = 0
-                total = self._engine.indexer.line_count
-                for ln in hit_lines:
+
+            if n > 0:
+                last_added = -1
+                for hit in results:
+                    if hit > last_added:
+                        filter_all_lines.append(hit)
+                        last_added = hit
                     for offset in range(1, n + 1):
-                        ctx = ln + offset
+                        ctx = hit + offset
                         if ctx >= total:
                             break
-                        if ctx not in hit_lines:
-                            context_lines.add(ctx)
-                    counter += 1
-                    if counter % 50000 == 0:
-                        time.sleep(0.01)
-                        self.progress.emit(100.0, len(results), "context")
+                        if ctx > last_added:
+                            filter_all_lines.append(ctx)
+                            last_added = ctx
+            else:
+                filter_all_lines = results
 
-            # Zbuduj pełne mapowanie linii
-            filter_all_lines = []
-            hit_text_map = {}
-            if results:
-                combined = hit_lines.copy()
-                combined.update(context_lines)
-                filter_all_lines = sorted(combined)
-                # Przygotuj słownik, aby uniknąć blokowania wątku UI
-                hit_text_map = {}
-                for i, (ln, _off, text) in enumerate(results):
-                    hit_text_map[ln] = text
-                    if i % 100000 == 0:
-                        time.sleep(0.01)
-
-            self.finished.emit(results, context_lines, filter_all_lines, hit_text_map, hit_lines, error)
+            self.finished.emit(results, set(), filter_all_lines, {}, set(), error)
 
         self._engine.start(
             self._pattern, self._use_regex, self._case_sensitive, self._negate,

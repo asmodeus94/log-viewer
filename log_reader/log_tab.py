@@ -488,58 +488,38 @@ class LogTab(QWidget):
             if show_progress:
                 progress.close()
 
+    def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
+        context_needed = chunk_lines
+        context_text_map: Dict[int, str] = {}
+        if context_needed:
+            # Znajdź ciągłe zakresy w context_needed (posortowane).
+            i = 0
+            while i < len(context_needed):
+                j = i
+                while (j + 1 < len(context_needed)
+                       and context_needed[j + 1] == context_needed[j] + 1):
+                    j += 1
+                range_start = context_needed[i]
+                range_count = j - i + 1
+                read = self.indexer.read_lines(range_start, range_count)
+                if read:
+                    for (rln, rtext) in read:
+                        context_text_map[rln] = rtext
+                i = j + 1
+
+        lines = []
+        for ln in chunk_lines:
+            if ln in context_text_map:
+                lines.append((ln, context_text_map[ln]))
+        return lines
+
     def _load_window_impl(self, at_line: int) -> None:
         if self.filter_active and self.filter_results:
-            # W trybie filtra łączymy trafienia + linie kontekstu w jedną
-            # posortowaną listę numerów linii pliku. Trafienia i kontekst
-            # są pokazywane razem, z różnym tłem (żółte = trafienie,
-            # delikatne szaro-zielone = kontekst). Bez tego stack trace poniżej
-            # błędu byłby niewidoczny w widoku filtrowanym.
-            #
-            # WYDAJNOŚĆ: tekst trafień jest już w filter_results (w pamięci).
-            # Tylko linie kontekstu wymagają odczytu z pliku — i to batchowo
-            # dla ciągłych zakresów (zamiast read_lines(ln, 1) per linia).
-            hit_text_map = self._filter_hit_text_map
             all_lines = self._filter_all_lines
             n = len(all_lines)
             start = max(0, min(at_line, n - 1))
             chunk_lines = all_lines[start:start + self.window_size_lines]
-
-            # Krok 1: zbierz teksty trafień z pamięci (zero I/O).
-            lines: List[Tuple[int, str]] = []
-            context_needed: List[int] = []  # linie kontekstu wymagające odczytu
-            for ln in chunk_lines:
-                if ln in hit_text_map:
-                    lines.append((ln, hit_text_map[ln]))
-                else:
-                    context_needed.append(ln)
-
-            # Krok 2: batch-odczyt kontekstu — połącz ciągłe zakresy w jedno
-            # wywołanie read_lines(start, count). O(N_ranges) zamiast O(N_lines).
-            if context_needed:
-                context_text_map: Dict[int, str] = {}
-                # Znajdź ciągłe zakresy w context_needed (posortowane).
-                i = 0
-                while i < len(context_needed):
-                    j = i
-                    while (j + 1 < len(context_needed)
-                           and context_needed[j + 1] == context_needed[j] + 1):
-                        j += 1
-                    range_start = context_needed[i]
-                    range_count = j - i + 1
-                    read = self.indexer.read_lines(range_start, range_count)
-                    if read:
-                        for (rln, rtext) in read:
-                            context_text_map[rln] = rtext
-                    i = j + 1
-                # Teraz złóż lines w oryginalnej kolejności chunk_lines.
-                lines = []
-                for ln in chunk_lines:
-                    if ln in hit_text_map:
-                        lines.append((ln, hit_text_map[ln]))
-                    elif ln in context_text_map:
-                        lines.append((ln, context_text_map[ln]))
-                    # else: linia zniknęła z pliku (rotacja) — pomiń
+            lines = self._get_filtered_lines(chunk_lines)
         else:
             start = max(0, min(at_line, max(0, self.indexer.line_count - 1)))
             lines = self.indexer.read_lines(start, self.window_size_lines)
@@ -556,7 +536,6 @@ class LogTab(QWidget):
         context_widget_lines: List[int] = []
         filter_hit_widget_lines: List[int] = []  # trafienia filtra (żółte tło)
         # W trybie filtra: sprawdź które linie są trafieniami (nie kontekstem).
-        hit_line_set = self._filter_hit_lines if self.filter_active else set()
         for i, (ln, text) in enumerate(lines):
             display_text, tags = self._prepare_line_for_display(ln, text)
             text_parts.append(display_text)
@@ -568,10 +547,14 @@ class LogTab(QWidget):
                 bookmark_widget_lines.append(i)
             if self.edit_buffer.has(ln):
                 edited_widget_lines.append(i)
-            if ln in self.filter_context_lines:
-                context_widget_lines.append(i)
-            if ln in hit_line_set:
-                filter_hit_widget_lines.append(i)
+
+            if self.filter_active and self.filter_results:
+                hit_idx = bisect.bisect_left(self.filter_results, ln)
+                is_hit = hit_idx < len(self.filter_results) and self.filter_results[hit_idx] == ln
+                if is_hit:
+                    filter_hit_widget_lines.append(i)
+                else:
+                    context_widget_lines.append(i)
 
         self.text.setPlainText("\n".join(text_parts))
         cursor = self.text.textCursor()
@@ -671,14 +654,14 @@ class LogTab(QWidget):
         cursor.setBlockCharFormat(fmt)
 
     def _check_edges(self) -> None:
-        if not self.indexer or self.filter_active or self._is_loading:
+        if not self.indexer or self._is_loading:
             return
         # Uruchamiamy/resetujemy timer po każdym zdarzeniu w rejonie krawędzi,
         # zamiast wielokrotnie dławić główny wątek przy intensywnym kręceniu kółkiem myszy.
         self._edge_load_timer.start()
 
     def _do_check_edges(self) -> None:
-        if not self.indexer or self.filter_active or self._is_loading:
+        if not self.indexer or self._is_loading:
             return
 
         # Odrzucamy wykonanie jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
@@ -696,33 +679,68 @@ class LogTab(QWidget):
             # Flaga isLoading chroni nas przed re-entrancy (wejściem ponownie w trakcie modyfikacji)
             if maximum > 0 and value >= maximum - 1000 and self.line_map:
                 current_last_line = self.line_map[-1] if self.line_map else 0
-                next_start = current_last_line + 1
-                if next_start < self.indexer.line_count:
-                    self._is_loading = True
-                    self._ignore_scroll_events = True
-                    try:
-                        new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
-                        if new_lines:
-                            self._last_edge_load_time = time.time()
-                            self._append_lines(new_lines)
-                    finally:
-                        self._is_loading = False
-                        # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
-                        # powstające w wyniku inercji na macOS / Wayland.
-                        QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
+
+                if self.filter_active and self._filter_all_lines:
+                    idx = bisect.bisect_right(self._filter_all_lines, current_last_line)
+                    if idx < len(self._filter_all_lines):
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            chunk_lines = self._filter_all_lines[idx:idx + self.window_size_lines]
+                            new_lines = self._get_filtered_lines(chunk_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._append_lines(new_lines)
+                        finally:
+                            self._is_loading = False
+                            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
+                else:
+                    next_start = current_last_line + 1
+                    if next_start < self.indexer.line_count:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            new_lines = self.indexer.read_lines(next_start, self.window_size_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._append_lines(new_lines)
+                        finally:
+                            self._is_loading = False
+                            # Utrzymujemy ignorowanie na chwilę, aby zablokować fałszywe sygnały
+                            # powstające w wyniku inercji na macOS / Wayland.
+                            QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
 
             elif value <= 1000 and self.line_map and self.line_map[0] > 0:
-                prev_start = max(0, self.line_map[0] - self.window_size_lines)
-                self._is_loading = True
-                self._ignore_scroll_events = True
-                try:
-                    new_lines = self.indexer.read_lines(prev_start, self.line_map[0] - prev_start)
-                    if new_lines:
-                        self._last_edge_load_time = time.time()
-                        self._prepend_lines(new_lines)
-                finally:
-                    self._ignore_scroll_events = False
-                    self._is_loading = False
+                current_first_line = self.line_map[0]
+
+                if self.filter_active and self._filter_all_lines:
+                    idx = bisect.bisect_left(self._filter_all_lines, current_first_line)
+                    if idx > 0:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            start_idx = max(0, idx - self.window_size_lines)
+                            chunk_lines = self._filter_all_lines[start_idx:idx]
+                            new_lines = self._get_filtered_lines(chunk_lines)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._prepend_lines(new_lines)
+                        finally:
+                            self._ignore_scroll_events = False
+                            self._is_loading = False
+                else:
+                    prev_start = max(0, current_first_line - self.window_size_lines)
+                    if current_first_line > 0:
+                        self._is_loading = True
+                        self._ignore_scroll_events = True
+                        try:
+                            new_lines = self.indexer.read_lines(prev_start, current_first_line - prev_start)
+                            if new_lines:
+                                self._last_edge_load_time = time.time()
+                                self._prepend_lines(new_lines)
+                        finally:
+                            self._ignore_scroll_events = False
+                            self._is_loading = False
         except Exception:
             self._is_loading = False
             QtCore.QTimer.singleShot(150, lambda: setattr(self, "_ignore_scroll_events", False))
@@ -833,14 +851,21 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         if not self.indexer or line_no < 0:
             return
-        if not self.filter_active:
+        if self.filter_active and self._filter_all_lines:
+            line_no = min(line_no, len(self._filter_all_lines) - 1)
+            self._goto_file_line(line_no, is_filtered_index=True)
+        else:
             line_no = min(line_no, self.indexer.line_count - 1)
-        self._goto_file_line(line_no)
+            self._goto_file_line(line_no)
 
     def _update_minimap(self) -> None:
         if not self.indexer or self.indexer.line_count == 0:
             return
-        total = self.indexer.line_count
+
+        if self.filter_active and self._filter_all_lines:
+            total = len(self._filter_all_lines)
+        else:
+            total = self.indexer.line_count
 
         # Aby zapobiec zawieszaniu UI przy ładowaniu bardzo dużych plików (np. 25 GB)
         # rezygnujemy z pełnego skanowania pliku w poszukiwaniu tagów logów dla
@@ -1037,7 +1062,12 @@ class LogTab(QWidget):
         if error:
             self._search_results_label.setText(self.t("lbl_search_results_empty"))
             return
-        self._search_results_all = [(ln, text) for (ln, _off, text) in results]
+        search_res = []
+        for ln in results:
+            lines = self.indexer.read_lines(ln, 1)
+            if lines:
+                search_res.append((ln, lines[0][1]))
+        self._search_results_all = search_res
         total_hits = len(self._search_results_all)
 
         self._search_results = self._search_results_all
@@ -1305,7 +1335,8 @@ class LogTab(QWidget):
         if self.filter_engine is None or self.filter_engine.path != self.file_path:
             self.filter_engine = FilterEngine(self.file_path, self.indexer)
         self.filter_active = True
-        self.filter_results = []
+        import array
+        self.filter_results = array.array('Q')
 
         self._filter_thread = QThread()
         self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate, context_after=self._filter_context_after)
@@ -1343,10 +1374,10 @@ class LogTab(QWidget):
             return
 
         self.filter_results = results
-        self.filter_context_lines = context_lines
         self._filter_all_lines = filter_all_lines
-        self._filter_hit_text_map = hit_text_map
-        self._filter_hit_lines = hit_lines_set
+        self.filter_context_lines = set()
+        self._filter_hit_text_map = {}
+        self._filter_hit_lines = set()
 
         self._load_window(at_line=0)
         self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
@@ -1355,7 +1386,8 @@ class LogTab(QWidget):
         if not self.filter_active or not self.filter_results:
             self._filter_hit_text_map.clear()
             self._filter_hit_lines.clear()
-            self._filter_all_lines.clear()
+            import array
+            self._filter_all_lines = array.array('Q')
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.filter_active
@@ -1366,7 +1398,8 @@ class LogTab(QWidget):
         self.filter_context_lines = set()
         self._filter_hit_text_map.clear()
         self._filter_hit_lines.clear()
-        self._filter_all_lines.clear()
+        import array
+        self._filter_all_lines = array.array('Q')
         self._filter_context_after = 0
         if not silent:
             self._main.filter_entry.clear()
@@ -1861,7 +1894,7 @@ class LogTab(QWidget):
         ln = item.data(0, Qt.UserRole)
         self._goto_file_line(ln)
 
-    def _goto_file_line(self, ln: int) -> None:
+    def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
         self._cancel_follow_if_active()
         # Cofamy start by zakładka nie była na samej ścianie (value=0 paska),
         # co blokowałoby przewijanie w górę (brak zdarzeń scrolla).
@@ -1873,7 +1906,10 @@ class LogTab(QWidget):
         target_idx_in_map = 0
 
         if self.filter_active:
-            idx = bisect.bisect_left(self._filter_all_lines, ln)
+            if is_filtered_index:
+                idx = ln
+            else:
+                idx = bisect.bisect_left(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
             try:
