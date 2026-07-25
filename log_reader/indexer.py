@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import sys
+import bisect
 import threading
 import time
 import multiprocessing
+import typing
+from pathlib import Path
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 from .helpers import (
     INDEX_CHUNK_BYTES, INDEX_INTERVAL_BYTES, DEFAULT_ENCODING,
@@ -31,26 +33,20 @@ def _init_worker(progress_val):
     _shared_progress_bytes = progress_val
 
 
-def _indexer_worker_chunk(args):
+def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, List[Tuple[int, int]], int]:
     """
-    Worker function dla multiprocessing — indeksuje fragment pliku.
+    Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
 
-    Optymalizacje wydajności (vs stara wersja z pętlą find()):
-      1. **bytes.count(b"\\n")** do liczenia newline'ów — C-level, ~10-50x
-         szybsze niż pętla find() w Pythonie. Dla chunku 16 MB z liniami ~80B
-         = 200 000 newline'ów policzonych jednym wywołaniem C.
-      2. **READ_CHUNK = 16 MB** (było 4 MB) — lepsza lokalność cache'u CPU,
-         mniej overheadu na wywołania read(). Dla 25 GB = ~1600 chunków
-         zamiast 6250.
-      3. **find() tylko gdy minął interval** (1 MB) od ostatniego index entry.
-         Dla 16 MB chunku = ~16 wywołań find() zamiast ~200 000.
-      4. **buffering=1 MB** w open() — zmniejsza overhead syscalli read().
+    Optymalizacje wydajności:
+      1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
+      2. Wykorzystanie większych fragmentów odczytu (`READ_CHUNK` = 32 MB) dla lepszej lokalności pamięci podręcznej.
+      3. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
+      4. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
-    Liczy newline'e w swoim zakresie [start, end) — każdy worker liczy
-    newline'e które wpadają do jego bajtów. Łączna suma = wszystkie newline'e
-    w pliku (bez podwójnego liczenia, bo zakresy się nie nakładają).
+    Liczy znaki nowej linii w przydzielonym zakresie `[start, end)`. Każdy proces
+    przetwarza wyłącznie bajty zadeklarowane w swoim wycinku.
     """
-    start, end, path, interval, chunk_id = args
+    start, end, path_str, interval, chunk_id = args
     try:
         global _shared_progress_bytes
         line_count = 0
@@ -61,7 +57,7 @@ def _indexer_worker_chunk(args):
         carry = b""
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
-        with open(path, "rb", buffering=1024 * 1024) as f:
+        with open(path_str, "rb", buffering=1024 * 1024) as f:
             f.seek(start)
             while bytes_processed < (end - start):
                 to_read = min(READ_CHUNK, (end - start) - bytes_processed)
@@ -127,9 +123,36 @@ def _indexer_worker_chunk(args):
 
         return (line_count, index_entries, chunk_id)
     except Exception as e:
-        import sys
         print(f"Warning: indexer worker {chunk_id} failed: {e}", file=sys.stderr)
         return (0, [], chunk_id)
+
+
+class _IndexLineProxy:
+    """Klasa pomocnicza dla modułu bisect symulująca listę samych linii (Python 3.8+ kompatybilność)."""
+    __slots__ = ("_data",)
+
+    def __init__(self, data: List[IndexEntry]):
+        self._data = data
+
+    def __getitem__(self, idx: int) -> int:
+        return self._data[idx].line
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+class _IndexOffsetProxy:
+    """Klasa pomocnicza dla modułu bisect symulująca listę samych przesunięć (Python 3.8+ kompatybilność)."""
+    __slots__ = ("_data",)
+
+    def __init__(self, data: List[IndexEntry]):
+        self._data = data
+
+    def __getitem__(self, idx: int) -> int:
+        return self._data[idx].offset
+
+    def __len__(self) -> int:
+        return len(self._data)
 
 
 class LineIndexer:
@@ -142,13 +165,13 @@ class LineIndexer:
     Wspiera konfigurowalne kodowanie.
     """
 
-    def __init__(self, path: str, progress_cb: Optional[Callable[[float], None]] = None,
+    def __init__(self, path: Union[str, Path], progress_cb: Optional[Callable[[float], None]] = None,
                  encoding: str = DEFAULT_ENCODING,
                  index_interval_bytes: Optional[int] = None,
-                 cancel_event: Optional["threading.Event"] = None):
-        self.path = path
-        self.encoding = encoding
-        self.is_compressed = is_compressed(path)
+                 cancel_event: Optional["threading.Event"] = None) -> None:
+        self.path: Path = Path(path)
+        self.encoding: str = encoding
+        self.is_compressed: bool = is_compressed(str(self.path))
         self.index_interval_bytes = index_interval_bytes if index_interval_bytes is not None else INDEX_INTERVAL_BYTES
         self.size: int = 0
         self.line_count: int = 0
@@ -175,14 +198,14 @@ class LineIndexer:
                     pass
                 self._file_cache = None
 
-    def _get_file(self):
+    def _get_file(self) -> "typing.IO[bytes]":
         if self._file_cache is None:
-            self._file_cache = open_maybe_compressed(self.path, "rb")
+            self._file_cache = open_maybe_compressed(str(self.path), "rb")
         return self._file_cache
 
     def _build(self) -> None:
         try:
-            self.size = os.path.getsize(self.path)
+            self.size = self.path.stat().st_size
         except OSError:
             self.size = 0
         # Dla dużych plików użyj multiprocessing — znacznie szybsze na multicore.
@@ -213,7 +236,7 @@ class LineIndexer:
             start = i * chunk_size
             end = (i + 1) * chunk_size if i < n_chunks - 1 else self.size
             if end > start:  # zapobiega przekazaniu pustych przedziałów
-                ranges.append((start, end, self.path, self.index_interval_bytes, i))
+                ranges.append((start, end, str(self.path), self.index_interval_bytes, i))
 
         if not ranges:
             self._build_single()
@@ -280,7 +303,7 @@ class LineIndexer:
         last_indexed_offset = 0
         bytes_read = 0
         interval = self.index_interval_bytes
-        with open_maybe_compressed(self.path, "rb") as f:
+        with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
                 chunk = f.read(INDEX_CHUNK_BYTES)
                 if not chunk:
@@ -325,7 +348,7 @@ class LineIndexer:
         last_indexed_offset = self._last_indexed_offset
         bytes_read = 0
         interval = self.index_interval_bytes
-        with open(self.path, "rb") as f:
+        with open(str(self.path), "rb") as f:
             f.seek(old_size)
             while True:
                 chunk = f.read(INDEX_CHUNK_BYTES)
@@ -374,14 +397,10 @@ class LineIndexer:
             target_line = 0
         if target_line >= self.line_count:
             return None
-        lo, hi = 0, len(self.index) - 1
-        while lo < hi:
-            mid = (lo + hi + 1) // 2
-            if self.index[mid].line <= target_line:
-                lo = mid
-            else:
-                hi = mid - 1
-        start = self.index[lo]
+        proxy = _IndexLineProxy(self.index)
+        idx = bisect.bisect_right(proxy, target_line) - 1
+        start = self.index[max(0, idx)]
+
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
@@ -425,14 +444,10 @@ class LineIndexer:
             byte_offset = 0
         if byte_offset > self.size:
             byte_offset = self.size
-        lo, hi = 0, len(self.index) - 1
-        while lo < hi:
-            mid = (lo + hi + 1) // 2
-            if self.index[mid].offset <= byte_offset:
-                lo = mid
-            else:
-                hi = mid - 1
-        start = self.index[lo]
+        proxy = _IndexOffsetProxy(self.index)
+        idx = bisect.bisect_right(proxy, byte_offset) - 1
+        start = self.index[max(0, idx)]
+
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
