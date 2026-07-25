@@ -226,8 +226,8 @@ class TestChunkedWorker:
         path = temp_log_file(num_lines=10000)
         size = os.path.getsize(path)
         chunk_size = size // 2
-        r1 = (0, chunk_size, path, 1024 * 1024, 0)
-        r2 = (chunk_size, size, path, 1024 * 1024, 1)
+        r1 = (0, chunk_size, str(path), 1024 * 1024, 0)
+        r2 = (chunk_size, size, str(path), 1024 * 1024, 1)
         result1 = _indexer_worker_chunk(r1)
         result2 = _indexer_worker_chunk(r2)
         total = result1[0] + result2[0]
@@ -239,7 +239,7 @@ class TestChunkedWorker:
         size = os.path.getsize(path)
         # Podziel na 4 chunki
         chunk_size = size // 4
-        ranges = [(i * chunk_size, (i + 1) * chunk_size if i < 3 else size, path, 1024 * 1024, i) for i in range(4)]
+        ranges = [(i * chunk_size, (i + 1) * chunk_size if i < 3 else size, str(path), 1024 * 1024, i) for i in range(4)]
         results = [_indexer_worker_chunk(r) for r in ranges]
         total = sum(r[0] for r in results)
         assert total == 50000
@@ -254,7 +254,7 @@ class TestChunkedWorker:
                 f.write(b"X" * (8 * 1024 * 1024) + b"\n")
                 f.write(b"short line\n")
             size = os.path.getsize(path)
-            result = _indexer_worker_chunk((0, size, path, 1024 * 1024, 0))
+            result = _indexer_worker_chunk((0, size, str(path), 1024 * 1024, 0))
             assert result[0] == 2  # 2 linie
         finally:
             try:
@@ -267,7 +267,7 @@ class TestChunkedWorker:
         path = temp_log_file(num_lines=10000)
         size = os.path.getsize(path)
         # Worker dla całego pliku
-        result = _indexer_worker_chunk((0, size, path, 1024 * 1024, 0))
+        result = _indexer_worker_chunk((0, size, str(path), 1024 * 1024, 0))
         assert result[0] == 10000
         # Jeśli worker ładuje wszystko do RAM, przy 10000 liniach ~500KB to OK
         # ale test weryfikuje że działa bez crash dla dużych plików
