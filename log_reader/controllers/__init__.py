@@ -1,0 +1,5 @@
+from .tab_file_controller import FileController
+from .tab_edit_controller import EditController
+from .tab_search_controller import SearchController
+from .tab_filter_controller import FilterController
+from .tab_ui_controller import UIController
