@@ -75,7 +75,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "st_ready": "Gotowy",
         "st_opening": "Otwieranie pliku…",
         "st_indexing": "Budowanie indeksu… {pct}%",
-        "st_filtering": "Filtrowanie… {pct}% (trafienia: {hits})",
+        "st_filtering": "Wyszukiwanie/Filtrowanie… {pct}% (trafienia: {hits})",
         "st_context_building": "Generowanie kontekstu filtru…",
         "st_done": "Gotowy. Linii: {total:,}  |  Rozmiar: {size}",
         "st_filtered": "Filtr aktywny — trafienia: {hits:,} z {total:,}",

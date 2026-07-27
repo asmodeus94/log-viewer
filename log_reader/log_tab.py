@@ -38,6 +38,7 @@ from .helpers import (
 from .i18n import I18N
 from .config import UserConfig
 from .indexer import LineIndexer, IndexEntry
+from .controllers import FileController, EditController, SearchController, FilterController, UIController
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
@@ -66,6 +67,11 @@ class LogTab(QWidget):
     def __init__(self, main_window: "LogViewerWindow", parent=None):
         super().__init__(parent)
         self._main = main_window
+        self.file_controller = FileController(self)
+        self.edit_controller = EditController(self)
+        self.search_controller = SearchController(self)
+        self.filter_controller = FilterController(self)
+        self.ui_controller = UIController(self)
 
         # Stan pliku
         self.file_path: Optional[str] = None
@@ -215,267 +221,39 @@ class LogTab(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _setup_ui_elements(self) -> None:
-        self.splitter = self.ui.splitter
-        self.v_splitter = self.ui.v_splitter
-
-        self.splitter.setSizes([200, 900, 48])
-        self.v_splitter.setSizes([500, 150])
-
-        # Aliases for convenience
-        self._lbl_bookmarks = self.ui._lbl_bookmarks
-        self._lbl_edits = self.ui._lbl_edits
-        self.bm_tree = self.ui.bm_tree
-        self.ed_tree = self.ui.ed_tree
-        self.btn_del_bookmarks = self.ui.btn_del_bookmarks
-        self.btn_del_edits = self.ui.btn_del_edits
-        self.text = self.ui.text
-        self._search_results_label = self.ui._search_results_label
-        self.search_results_view = self.ui.search_results_view
-        self.minimap = self.ui.minimap
-        self.pct_label = self.ui.pct_label
-
-        # Set up signals
-        self.bm_tree.itemDoubleClicked.connect(self._goto_bookmark)
-        self.btn_del_bookmarks.clicked.connect(self._delete_selected_bookmarks)
-        QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.bm_tree,
-                        activated=self._delete_selected_bookmarks)
-        QtGui.QShortcut(QKeySequence("Backspace"), self.bm_tree,
-                        activated=self._delete_selected_bookmarks)
-
-        self.ed_tree.itemDoubleClicked.connect(self._goto_edit)
-        self.btn_del_edits.clicked.connect(self._delete_selected_edits)
-        QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.ed_tree,
-                        activated=self._delete_selected_edits)
-        QtGui.QShortcut(QKeySequence("Backspace"), self.ed_tree,
-                        activated=self._delete_selected_edits)
-
-        self.text.files_dropped.connect(self._main._on_files_dropped)
-        self.text.verticalScrollBar().valueChanged.connect(self._on_scroll_changed)
-        # Podłączamy detekcję user_scrolled aby wyłączyć follow
-        self.text.user_scrolled.connect(self._on_user_scrolled)
-        # Musimy również wyłączyć follow, jeśli użytkownik kliknie bezpośrednio na scrollbar
-        self.text.verticalScrollBar().sliderPressed.connect(self._on_user_scrolled)
-
-        # Debouncing dla ładowania krawędzi (przeciwdziała "zamrażaniu" aplikacji przy intensywnym przewijaniu)
-        self._edge_load_timer = QtCore.QTimer(self)
-        self._edge_load_timer.setSingleShot(True)
-        self._edge_load_timer.setInterval(150)
-        self._edge_load_timer.timeout.connect(self._do_check_edges)
-        self._search_extra_sel: Optional[QtWidgets.QTextEdit.ExtraSelection] = None
-        self.text.cursorPositionChanged.connect(self._update_current_line_highlight)
-
-        self._search_model = SearchResultsModel()
-        self.search_results_view.setModel(self._search_model)
-        mono_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
-        mono_font.setPointSize(9)
-
-        self.search_results_view.setFont(mono_font)
-        self.search_results_view.clicked.connect(self._on_search_result_clicked)
-
-        self.minimap.position_clicked.connect(self._on_minimap_click)
-        self.pct_label.setStyleSheet(f"color: {THEME_DARK['fg_dim']}; font-size: 10px; padding: 4px;")
-        if hasattr(self.ui, 'sep'):
-            self.ui.sep.setStyleSheet(f"background-color: {THEME_DARK['border']};")
-
-        # Set up translated labels that UI compiler wouldn't know
-        self._lbl_bookmarks.setText(self.t("lbl_bookmarks"))
-        self._lbl_edits.setText(self.t("lbl_edits"))
-        self.bm_tree.setHeaderLabels([self.t("col_line")])
-        self.ed_tree.setHeaderLabels([self.t("col_line")])
-        self.btn_del_bookmarks.setText(self.t("btn_delete_sel"))
-        self.btn_del_edits.setText(self.t("btn_delete_sel"))
-        self._search_results_label.setText(self.t("lbl_search_results_empty"))
+        return self.ui_controller._setup_ui_elements()
 
 
     def _apply_font_to_text(self) -> None:
-        if self.font_family:
-            font = QFont(self.font_family, self.font_size)
-        else:
-            font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
-            font.setPointSize(self.font_size)
-
-        self.text.setFont(font)
-        if hasattr(self.text, "_line_number_area"):
-            self.text._line_number_area.update_width()
-            self.text._line_number_area.update()
+        return self.ui_controller._apply_font_to_text()
 
     def _apply_theme(self) -> None:
-        """Aktualizuje kolory per-tab po zmianie motywu."""
-        t = self.theme
-        if hasattr(self.text, "_line_number_area"):
-            self.text._line_number_area.setStyleSheet(
-                f"background-color: {t['bg_main']};"
-            )
-        if hasattr(self, "minimap"):
-            self.minimap._colors = {
-                "error": QColor(t["minimap_error"]),
-                "warn": QColor(t["minimap_warn"]),
-                "info": QColor(t["minimap_info"]),
-                "debug": QColor(t["minimap_debug"]),
-                "": QColor(t["minimap_bg"]),
-            }
-            self.minimap._bg = QColor(t["minimap_bg"])
-            self.minimap._viewport_color = QColor(t["minimap_viewport"])
-            self.minimap.update()
-        self._update_text_colors()
+        return self.ui_controller._apply_theme()
 
     def _update_text_colors(self) -> None:
-        """Aktualizuje kolory tagów w Text widget po zmianie motywu."""
-        t = self.theme
-        self.text.setExtraSelections([])
-        self._search_extra_sel = None
-        if self.indexer and self.line_map:
-            self._reload_current_view()
-        # Po reload przebuduj podświetlenie bieżącej linii nowym kolorem.
-        self._update_current_line_highlight()
+        return self.ui_controller._update_text_colors()
 
     # --------------------------------------------------------- file ops ---
     def open_file(self, path: str, title: Optional[str] = None) -> None:
-        if not os.path.isfile(path):
-            QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        self.cmd_clear_filter(silent=True)
-        if self.follow_active:
-            self.cmd_toggle_follow()
-        self.file_path = path
-        self._assigned_title = title or os.path.basename(path)
-        self._status(self.t("st_opening"))
-        self.title_changed.emit(self._assigned_title)
-        self.window_start = 0
-        self.window_lines = []
-        self.line_map = []
-        self.edit_buffer.clear()
-        self.bookmarks.clear()
-        self._refresh_bookmarks_tree()
-        self._refresh_edits_tree()
-        self.pct_label.setText("0%")
-        self.text.setPlainText("")
-        self.text.set_line_map([])
-
-        encoding = self.encoding
-
-        # QProgressDialog — pokazuje postęp indeksowania z przyciskiem Anuluj.
-        # Dla małych plików (< 100 MB) dialog się nie pojawi (indeksowanie
-        # trwa < 1s, Qt automatycznie ukrywa dialog jeśli minDuration nie upłynął).
-        file_size = os.path.getsize(path)
-        # Pokaż dialog tylko dla plików > 50 MB — dla mniejszych indeksowanie
-        # jest błyskawiczne i dialog by tylko mig­nął.
-        show_dialog = file_size > 50 * 1024 * 1024
-        if show_dialog:
-            self._index_progress = QProgressDialog(
-                self._fmt("st_indexing", pct="0.0"),
-                self.t("btn_cancel"),
-                0, 100, self._main,
-            )
-            self._index_progress.setWindowTitle(self.t("dlg_index_title"))
-            self._index_progress.setMinimumDuration(500)  # pokaż po 500ms
-            self._index_progress.setAutoClose(True)
-            self._index_progress.setAutoReset(True)
-            self._index_progress.canceled.connect(self._cancel_indexing)
-        else:
-            self._index_progress = None
-
-        self._indexer_thread = QThread()
-        self._indexer_worker = IndexerWorker(path, encoding, self.index_interval_bytes)
-        self._indexer_worker.moveToThread(self._indexer_thread)
-        self._indexer_thread.started.connect(self._indexer_worker.run)
-        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
-
-        # Używamy metod-slotów (nie closure) — Qt QueuedConnection wymaga
-        # picklowalnych odbiorców, a closure nie jest picklowalne. To była
-        # przyczyna błędu „Timers cannot be stopped from another thread" —
-        #Qt nie mógł zakolejkować wywołania i wywoływał slot w worker thread.
-        self._indexer_worker.progress.connect(self._on_index_progress, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._on_index_done, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._on_index_error, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_thread.finished.connect(self._indexer_thread.deleteLater, Qt.QueuedConnection)
-        # Cleanup dialog przy zakończeniu (sukces lub błąd).
-        self._indexer_worker.finished.connect(self._close_index_progress, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._close_index_progress, Qt.QueuedConnection)
-        self._indexer_thread.start()
+        return self.file_controller.open_file(path, title)
 
     @Slot(float)
     def _on_index_progress(self, p: float) -> None:
-        """Slot dla sygnału progress z IndexerWorker. Aktualizuje status bar
-        i dialog postępu. MUSI być metodą (nie closure) żeby Qt QueuedConnection
-        działał poprawnie — closure nie jest picklowalne cross-thread."""
-        self._status(self._fmt("st_indexing", pct=f"{p:.1f}"))
-        if self._index_progress is not None:
-            self._index_progress.setValue(int(p))
-            self._index_progress.setLabelText(self._fmt("st_indexing", pct=f"{p:.1f}"))
+        return self.file_controller._on_index_progress(p)
 
     def _cancel_indexing(self) -> None:
-        """Anuluje indeksowanie — ustawia flagę w workerze. Pool zostanie
-        przerwany w _build_parallel."""
-        if self._indexer_worker is not None:
-            self._indexer_worker.cancel()
-        self._status(self.t("st_cancelling"))
+        return self.file_controller._cancel_indexing()
 
     def _close_index_progress(self) -> None:
-        """Zamyka dialog postępu indeksowania (sukces, błąd, anulowanie)."""
-        if self._index_progress is not None:
-            self._index_progress.blockSignals(True)
-            self._index_progress.close()
-            self._index_progress = None
+        return self.file_controller._close_index_progress()
 
     @Slot(object)
     def _on_index_error(self, err: str) -> None:
-        if err == "cancelled":
-            # Anulowane przez usera — nie pokazuj jako błąd, tylko status.
-            self._status(self.t("st_cancelled"))
-            if self.indexer is None:
-                idx = self._main.tabs.indexOf(self)
-                if idx >= 0:
-                    self._main._on_tab_close_requested(idx)
-            return
-        QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_index_error").format(e=err))
-        self._status(self.t("st_ready"))
+        return self.file_controller._on_index_error(err)
 
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
-        if self.indexer is not None:
-            try:
-                self.indexer.close()
-            except Exception:
-                pass
-            self.indexer = None
-
-        self.line_map = None
-        self.filter_results = None
-        self._filter_all_lines = None
-        self._filter_context_lines = None
-        self._hit_text_map = None
-        self._hit_lines_set = None
-        self.filter_engine = None
-        self._search_engine = None
-        try:
-            self.text.clear()
-        except Exception:
-            pass
-        self.indexer = idx
-        self._last_file_size = idx.size
-        try:
-            st = os.stat(self.file_path) if self.file_path else None
-            if st is not None:
-                self._file_mtime_at_open = st.st_mtime_ns
-                self._file_size_at_open = st.st_size
-                self._last_file_inode = st.st_ino
-        except OSError:
-            pass
-        self._status(self._fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
-        self._load_window(at_line=0)
-        self._refresh_bookmarks_tree()
-        self._refresh_edits_tree()
-        # Zaktualizuj tytuł zakładki — przywróć właściwy tytuł z sufiksem
-        if self.file_path:
-            self.title_changed.emit(getattr(self, "_assigned_title", os.path.basename(self.file_path)))
-        # Zaktualizuj mini-mapę — natychmiast (dla małych plików) + debounced (dla dużych)
-        self._update_minimap()
-        self._minimap_update_timer.start()
+        return self.file_controller._on_index_done(idx)
 
     # -------------------------------------------------- virtual window -----
     def _load_window(self, at_line: int) -> None:
@@ -874,55 +652,10 @@ class LogTab(QWidget):
             self._goto_file_line(line_no)
 
     def _update_minimap(self) -> None:
-        if not self.indexer or self.indexer.line_count == 0:
-            return
-
-        if self.filter_active and self._filter_all_lines:
-            total = len(self._filter_all_lines)
-        else:
-            total = self.indexer.line_count
-
-        # Aby zapobiec zawieszaniu UI przy ładowaniu bardzo dużych plików (np. 25 GB)
-        # rezygnujemy z pełnego skanowania pliku w poszukiwaniu tagów logów dla
-        # kolorowania minimapy. Minimapa posłuży tylko jako żółty wskaźnik pozycji.
-        if self.minimap._total_lines != total:
-            self.minimap.set_line_data([], total)
-
-        self._update_minimap_viewport()
+        return self.ui_controller._update_minimap()
 
     def _update_minimap_viewport(self) -> None:
-        if not self.indexer or self.indexer.line_count == 0 or not self.line_map:
-            return
-        try:
-            cursor = self.text.cursorForPosition(QPoint(0, 5))
-            first_line = self.line_map[cursor.blockNumber()] if cursor.blockNumber() < len(self.line_map) else 0
-
-            # Jeśli jesteśmy w trybie follow i pasek jest na dole, zakładamy dolną krawędź jako 1.0 (100%)
-            total = self.indexer.line_count
-
-            scrollbar = self.text.verticalScrollBar()
-            is_at_bottom = scrollbar.value() >= scrollbar.maximum() - 5
-
-            if self.follow_active and is_at_bottom:
-                last_line = total - 1
-            else:
-                cursor_bottom = self.text.cursorForPosition(QPoint(0, self.text.height() - 5))
-                last_line = self.line_map[cursor_bottom.blockNumber()] if cursor_bottom.blockNumber() < len(self.line_map) else total - 1
-
-            if self.filter_active and self._filter_all_lines:
-                flen = len(self._filter_all_lines)
-                start_idx = bisect.bisect_left(self._filter_all_lines, first_line)
-                end_idx = bisect.bisect_left(self._filter_all_lines, last_line)
-                new_start = start_idx / flen
-                new_end = end_idx / flen
-            else:
-                new_start = first_line / total
-                new_end = last_line / total
-
-            # W trybie follow aktualizujemy viewport płynniej
-            self.minimap.set_viewport(new_start, new_end)
-        except Exception:
-            pass
+        return self.ui_controller._update_minimap_viewport()
 
     def _update_slider_from_scroll(self) -> None:
         if not self.indexer or not self.line_map or self._is_loading:
@@ -971,153 +704,35 @@ class LogTab(QWidget):
 
     # -------------------------------------------------------------- find ----
     def cmd_find_dialog(self) -> None:
-        self._main.search_entry.setFocus()
-        self._main.search_entry.selectAll()
+        return self.search_controller.cmd_find_dialog()
 
     def _compile_search(self) -> Optional[str]:
-        pattern = self._main.search_entry.text().strip()
-        if not pattern:
-            return None
-        use_regex = self._main.search_regex_cb.isChecked()
-        case = self._main.search_case_cb.isChecked()
-        negate = self._main.search_negate_cb.isChecked()
-        if use_regex:
-            try:
-                flags = 0 if case else re.IGNORECASE
-                self._search_compiled = re.compile(pattern, flags)
-            except re.error as e:
-                QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_filter_error").format(e=e))
-                return None
-        else:
-            self._search_compiled = None
-        self.search_pattern = pattern
-        self._search_case = case
-        self._search_negate = negate
-        return pattern
+        return self.search_controller._compile_search()
 
     def _search_pattern_changed(self) -> bool:
-        pattern = self._main.search_entry.text().strip()
-        use_regex = self._main.search_regex_cb.isChecked()
-        case = self._main.search_case_cb.isChecked()
-        negate = self._main.search_negate_cb.isChecked()
-        if pattern != self.search_pattern:
-            return True
-        if use_regex != self._last_search_regex:
-            return True
-        if case != self._last_search_case:
-            return True
-        if negate != self._last_search_negate:
-            return True
-        return False
+        return self.search_controller._search_pattern_changed()
 
     def _start_background_search(self) -> None:
-        if not self.indexer or not self.file_path:
-            return
-        pattern = self._compile_search()
-        if pattern is None:
-            return
-        self.search_pattern = pattern
-        self._last_search_regex = self._main.search_regex_cb.isChecked()
-        self._last_search_case = self._main.search_case_cb.isChecked()
-        self._last_search_negate = self._main.search_negate_cb.isChecked()
-
-        # Anuluj poprzednie wyszukiwanie
-        if self._search_engine and self._search_engine.is_running():
-            self._search_engine.cancel()
-        # Sprawdź czy stary thread żyje — deleteLater może go już zwolnić
-        if self._search_thread is not None:
-            try:
-                if self._search_thread.isRunning():
-                    self._search_thread.quit()
-                    self._search_thread.wait(2000)
-            except RuntimeError:
-                pass
-        self._search_thread = None
-        self._search_worker = None
-
-        if self._search_engine is None or self._search_engine.path != self.file_path:
-            self._search_engine = FilterEngine(self.file_path, self.indexer)
-
-        self._search_results = []
-        self._search_results_all = []
-        self._search_result_index = -1
-        if self._search_model:
-            self._search_model.clear()
-        self._search_results_label.setText(self.t("lbl_search_results_searching"))
-        self._status(self._fmt("st_filtering", pct=0.0, hits=0))
-
-        self._search_thread = QThread()
-        self._search_worker = FilterWorker(
-            self._search_engine, pattern,
-            self._last_search_regex, self._last_search_case, self._last_search_negate,
-            context_after=0
-        )
-        self._search_worker.moveToThread(self._search_thread)
-        self._search_thread.started.connect(self._search_worker.run)
-        self._register_thread_worker(self._search_thread, self._search_worker)
-        self._search_worker.progress.connect(self._on_search_progress, Qt.QueuedConnection)
-        self._search_worker.finished.connect(self._on_search_finished, Qt.QueuedConnection)
-        self._search_worker.finished.connect(self._search_thread.quit, Qt.QueuedConnection)
-        self._search_worker.finished.connect(self._search_worker.deleteLater, Qt.QueuedConnection)
-        self._search_thread.finished.connect(self._search_thread.deleteLater, Qt.QueuedConnection)
-        self._search_thread.start()
+        return self.search_controller._start_background_search()
 
     @Slot(float, int, str)
     def _on_search_progress(self, pct: float, hits: int, state: str) -> None:
-        if state == "context":
-            self._status(self.t("st_context_building"))
-            return
-        self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
-        self._search_results_label.setText(
-            f"{self.t('lbl_search_results_searching')} ({hits})"
-        )
+        return self.search_controller._on_search_progress(pct, hits, state)
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
-        if error:
-            self._search_results_label.setText(self.t("lbl_search_results_empty"))
-            return
-        search_res = []
-        for ln in results:
-            lines = self.indexer.read_lines(ln, 1)
-            if lines:
-                search_res.append((ln, lines[0][1]))
-        self._search_results_all = search_res
-        total_hits = len(self._search_results_all)
-
-        self._search_results = self._search_results_all
-
-        if self._search_model:
-            self._search_model.set_results(self._search_results)
-
-        self._status(self.t("st_search_done").format(n=total_hits))
-
-        if total_hits == 0:
-            self._search_results_label.setText(self.t("lbl_search_results_empty"))
-            return
-
-        # Skocz do pierwszego wyniku — odroczone przez QTimer.singleShot
-        self._search_result_index = 0
-        QTimer.singleShot(0, lambda: self._navigate_to_search_result(0))
-
-        self._update_search_results_label()
+        return self.search_controller._on_search_finished(results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error)
 
     def _update_search_results_label(self) -> None:
-        total = len(self._search_results_all)
-        if total == 0:
-            self._search_results_label.setText(self.t("lbl_search_results_empty"))
-        else:
-            current = self._search_result_index + 1
-            self._search_results_label.setText(
-                self.t("lbl_search_results_count").format(n=total, current=current, total=total)
-            )
+        return self.search_controller._update_search_results_label()
 
     def _navigate_to_search_result(self, index: int) -> None:
         if not self._search_results_all or index < 0 or index >= len(self._search_results_all):
             return
         self._cancel_follow_if_active()
         self._search_result_index = index
-        line_no, _text = self._search_results_all[index]
+        item = self._search_results_all[index]
+        line_no = item[0] if isinstance(item, tuple) else item
 
         # Używamy ujednoliconego goto, co od razu poprawia błędy nawigacji
         self._goto_file_line(line_no)
@@ -1141,54 +756,13 @@ class LogTab(QWidget):
             self._navigate_to_search_result(row)
 
     def cmd_find_next(self) -> None:
-        if not self.indexer:
-            return
-        if self._search_pattern_changed() or not self._search_results_all:
-            self._start_background_search()
-            return
-        if self._search_result_index < len(self._search_results_all) - 1:
-            self._navigate_to_search_result(self._search_result_index + 1)
-        else:
-            self._navigate_to_search_result(0)
+        return self.search_controller.cmd_find_next()
 
     def cmd_find_prev(self) -> None:
-        if not self.indexer:
-            return
-        if self._search_pattern_changed() or not self._search_results_all:
-            self._start_background_search()
-            return
-        if self._search_result_index > 0:
-            self._navigate_to_search_result(self._search_result_index - 1)
-        else:
-            self._navigate_to_search_result(len(self._search_results_all) - 1)
+        return self.search_controller.cmd_find_prev()
 
     def cmd_clear_search(self) -> None:
-        if self._search_engine and self._search_engine.is_running():
-            self._search_engine.cancel()
-        if self._search_thread is not None:
-            try:
-                if self._search_thread.isRunning():
-                    self._search_thread.quit()
-                    self._search_thread.wait(2000)
-            except RuntimeError:
-                pass
-        self._search_thread = None
-        self._search_worker = None
-
-        self.search_pattern = ""
-        self._search_results = []
-        self._search_results_all = []
-        self._search_result_index = -1
-        self._search_extra_sel = None
-
-        if self._search_model:
-            self._search_model.clear()
-
-        self._search_results_label.setText(self.t("lbl_search_results_empty"))
-        self._main.search_entry.clear()
-
-        self._update_current_line_highlight()
-        self._refresh_status()
+        return self.search_controller.cmd_clear_search()
 
     def _get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
         if self.edit_buffer.has(file_line_no):
@@ -1316,113 +890,24 @@ class LogTab(QWidget):
 
     # ------------------------------------------------------------ filter ---
     def cmd_filter_dialog(self) -> None:
-        self._main.filter_entry.setFocus()
-        self._main.filter_entry.selectAll()
+        return self.filter_controller.cmd_filter_dialog()
 
     def cmd_apply_filter(self) -> None:
-        if not self.indexer:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        pattern = self._main.filter_entry.text().strip()
-        if not pattern:
-            self.cmd_clear_filter()
-            return
-        use_regex = self._main.filter_regex_cb.isChecked()
-        case = self._main.filter_case_cb.isChecked()
-        negate = self._main.filter_negate_cb.isChecked()
-        # Ile linii kontekstu po każdym trafieniu (0 = bez kontekstu).
-        # Przydatne dla stack trace PHP/Python — pokazuje błąd + N linii poniżej.
-        self._filter_context_after = 0
-        if hasattr(self._main, "filter_context_spin"):
-            self._filter_context_after = int(self._main.filter_context_spin.value())
-
-        if use_regex:
-            try:
-                flags = 0 if case else re.IGNORECASE
-                re.compile(pattern, flags)
-            except re.error as e:
-                QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_filter_error").format(e=e))
-                return
-
-        if self.filter_engine and self.filter_engine.is_running():
-            self.filter_engine.cancel()
-
-        if self.filter_engine is None or self.filter_engine.path != self.file_path:
-            self.filter_engine = FilterEngine(self.file_path, self.indexer)
-        self.filter_active = True
-        import array
-        self.filter_results = array.array('Q')
-
-        self._filter_thread = QThread()
-        self._filter_worker = FilterWorker(self.filter_engine, pattern, use_regex, case, negate, context_after=self._filter_context_after)
-        self._filter_worker.moveToThread(self._filter_thread)
-        self._filter_thread.started.connect(self._filter_worker.run)
-        self._register_thread_worker(self._filter_thread, self._filter_worker)
-        self._filter_worker.progress.connect(self._on_filter_progress, Qt.QueuedConnection)
-        self._filter_worker.finished.connect(self._on_filter_done, Qt.QueuedConnection)
-        self._filter_worker.finished.connect(self._filter_thread.quit, Qt.QueuedConnection)
-        self._filter_worker.finished.connect(self._filter_worker.deleteLater, Qt.QueuedConnection)
-        self._filter_thread.finished.connect(self._filter_thread.deleteLater, Qt.QueuedConnection)
-        self._filter_thread.start()
-        self._status(self._fmt("st_filtering", pct=0.0, hits=0))
+        return self.filter_controller.cmd_apply_filter()
 
     @Slot(float, int, str)
     def _on_filter_progress(self, pct: float, hits: int, state: str) -> None:
-        if state == "context":
-            self._status(self.t("st_context_building"))
-            return
-        self._status(self._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
+        return self.filter_controller._on_filter_progress(pct, hits, state)
 
     @Slot(object, object, object, object, object, object)
     def _on_filter_done(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
-        if error:
-            QMessageBox.critical(self._main, self.t("app_title"), self.t("msg_filter_error").format(e=error))
-            self.filter_active = False
-            self._refresh_status()
-            self._update_position_slider()
-            return
-        if not results:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_matches"))
-            self.filter_active = False
-            self._refresh_status()
-            self._update_position_slider()
-            return
-
-        self.filter_results = results
-        self._filter_all_lines = filter_all_lines
-        self.filter_context_lines = set()
-        self._filter_hit_text_map = {}
-        self._filter_hit_lines = set()
-
-        self._load_window(at_line=0)
-        self._status(self._fmt("st_filtered", hits=len(results), total=self.indexer.line_count))
+        return self.filter_controller._on_filter_done(results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error)
 
     def _update_filter_cache(self) -> None:
-        if not self.filter_active or not self.filter_results:
-            self._filter_hit_text_map.clear()
-            self._filter_hit_lines.clear()
-            import array
-            self._filter_all_lines = array.array('Q')
+        return self.filter_controller._update_filter_cache()
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
-        was_active = self.filter_active
-        if self.filter_engine and self.filter_engine.is_running():
-            self.filter_engine.cancel()
-        self.filter_active = False
-        self.filter_results = []
-        self.filter_context_lines = set()
-        self._filter_hit_text_map.clear()
-        self._filter_hit_lines.clear()
-        import array
-        self._filter_all_lines = array.array('Q')
-        self._filter_context_after = 0
-        if not silent:
-            self._main.filter_entry.clear()
-        if was_active and self.indexer:
-            self._load_window(at_line=0)
-        else:
-            self._update_position_slider()
-        self._refresh_status()
+        return self.filter_controller.cmd_clear_filter(silent)
 
     # ------------------------------------------------------------- goto ----
     def cmd_goto(self) -> None:
@@ -1537,310 +1022,53 @@ class LogTab(QWidget):
 
     # ------------------------------------------------------------ edit ----
     def cmd_format_selection(self) -> None:
-        """Pobiera zaznaczony tekst i wywołuje dialog do jego sformatowania."""
-        cursor = self.text.textCursor()
-        if not cursor.hasSelection():
-            # Jeżeli nie ma zaznaczenia, bierzemy całą bieżącą linię
-            cursor.select(QtGui.QTextCursor.LineUnderCursor)
-
-        selected_text = cursor.selectedText().replace("\u2029", "\n")
-
-        if not selected_text.strip():
-            return
-
-        dialog = FormatDialog(self, selected_text, self._last_formatter)
-        dialog.exec()
-
-        # Zapisz na przyszłość (tylko w sesji) wybór formattera
-        self._last_formatter = dialog.get_selected_formatter()
+        return self.edit_controller.cmd_format_selection()
 
     def cmd_edit_line(self) -> None:
-        if not self.indexer:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        cursor = self.text.textCursor()
-        # Jeśli kursor jest POZA widocznym obszarem (np. po przewinięciu
-        # widoku po wyniku wyszukiwania), użyj pierwszej widocznej linii.
-        # Bez tego user widzi jedną linię, ale edytuje inną (tę, na której
-        # pozostał kursor) — to było zgłoszone jako błąd „edytuje linię
-        # kilka pozycji niżej".
-        cursor_rect = self.text.cursorRect(cursor)
-        viewport_rect = self.text.viewport().rect()
-        if not viewport_rect.contains(cursor_rect.topLeft()):
-            fvb = self.text.firstVisibleBlock()
-            if fvb.isValid():
-                cursor = QtGui.QTextCursor(fvb)
-                self.text.setTextCursor(cursor)
-        widget_line = cursor.blockNumber()
-        if widget_line < 0 or widget_line >= len(self.line_map):
-            return
-        file_line = self.line_map[widget_line]
-        current_text = self._get_display_text(file_line, widget_line)
-
-        dialog = QDialog(self._main)
-        dialog.setWindowTitle(self.t("dlg_edit_title").format(n=file_line + 1))
-        dialog.setMinimumWidth(500)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(self.t("dlg_edit_title").format(n=file_line + 1)))
-        edit = QPlainTextEdit()
-        edit.setPlainText(current_text)
-        edit.setMinimumHeight(120)
-        layout.addWidget(edit)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        if self.edit_buffer.has(file_line):
-            revert_btn = QPushButton(self.t("mi_clear_edits"))
-            buttons.addButton(revert_btn, QDialogButtonBox.ActionRole)
-            revert_btn.clicked.connect(dialog.reject)
-            revert_btn.clicked.connect(lambda: self._revert_edit(file_line))
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        if dialog.exec() == QDialog.Accepted:
-            new_text = edit.toPlainText().rstrip("\n")
-            self.edit_buffer.set(file_line, new_text)
-            self._refresh_edits_tree()
-            self._reload_current_view()
-            self._refresh_status()
+        return self.edit_controller.cmd_edit_line()
 
     def _revert_edit(self, file_line: int) -> None:
-        if self.edit_buffer.has(file_line):
-            self.edit_buffer.discard(file_line)
-            self._refresh_edits_tree()
-            self._reload_current_view()
-            self._refresh_status()
+        return self.edit_controller._revert_edit(file_line)
 
     def cmd_save_edits(self) -> None:
-        if not self.file_path or not self.indexer:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        if len(self.edit_buffer) == 0:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_edits"))
-            return
-        size = fmt_size(self.indexer.size)
-        # Ostrzeżenie o czasie zapisu dla dużych plików
-        save_warning = ""
-        if self.indexer.size > 1 * 1024 * 1024 * 1024:  # > 1 GB
-            est_seconds = self.indexer.size / (500 * 1024 * 1024)  # ~500 MB/s
-            if est_seconds > 5:
-                save_warning = f"\n\n⚠️ Plik ma {size} — zapis potrwa ~{est_seconds:.0f}s."
-        if not QMessageBox.question(
-            self._main, self.t("app_title"),
-            self.t("msg_confirm_save").format(n=len(self.edit_buffer), size=size, path=self.file_path) + save_warning,
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        ) == QMessageBox.Yes:
-            return
-
-        if self.follow_active:
-            self.cmd_toggle_follow()
-
-        self._save_progress = QProgressDialog(self.t("mi_save"), self.t("btn_cancel"), 0, 100, self._main)
-        self._save_progress.setWindowTitle(self.t("mi_save"))
-        self._save_progress.setWindowModality(Qt.WindowModal)
-        self._save_progress.setValue(0)
-
-        self._save_thread = QThread()
-        self._save_worker = SaveWorker(
-            self.edit_buffer, self.file_path,
-            self._file_mtime_at_open, self._file_size_at_open,
-            self.encoding,
-        )
-        self._save_worker.moveToThread(self._save_thread)
-        self._save_thread.started.connect(self._save_worker.run)
-        self._register_thread_worker(self._save_thread, self._save_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — cross-thread safe.
-        self._save_worker.progress.connect(self._save_progress.setValue, Qt.QueuedConnection)
-        self._save_worker.finished.connect(self._on_save_done, Qt.QueuedConnection)
-        self._save_worker.error.connect(self._on_save_error, Qt.QueuedConnection)
-        self._save_worker.file_changed.connect(self._on_save_file_changed, Qt.QueuedConnection)
-        self._save_worker.compressed.connect(self._on_save_compressed, Qt.QueuedConnection)
-        self._save_worker.finished.connect(self._save_thread.quit, Qt.QueuedConnection)
-        self._save_worker.error.connect(self._save_thread.quit, Qt.QueuedConnection)
-        self._save_worker.file_changed.connect(self._save_thread.quit, Qt.QueuedConnection)
-        self._save_worker.compressed.connect(self._save_thread.quit, Qt.QueuedConnection)
-        # deleteLater — zwolnij pamięć C++ po zakończeniu
-        self._save_worker.finished.connect(self._save_worker.deleteLater, Qt.QueuedConnection)
-        self._save_worker.error.connect(self._save_worker.deleteLater, Qt.QueuedConnection)
-        self._save_worker.file_changed.connect(self._save_worker.deleteLater, Qt.QueuedConnection)
-        self._save_worker.compressed.connect(self._save_worker.deleteLater, Qt.QueuedConnection)
-        self._save_thread.finished.connect(self._save_thread.deleteLater)
-        self._save_thread.start()
+        return self.edit_controller.cmd_save_edits()
 
     @Slot(str)
     def _on_save_done(self, backup_path: str) -> None:
-        if self._save_progress:
-            self._save_progress.close()
-            self._save_progress = None
-        QMessageBox.information(self._main, self.t("app_title"),
-                                self.t("msg_save_ok").format(n=len(self.edit_buffer), path=self.file_path))
-        try:
-            cursor = self.text.textCursor()
-            saved_line = self.line_map[cursor.blockNumber()] if self.line_map else 0
-        except Exception:
-            saved_line = 0
-        self.edit_buffer.clear()
-        self._refresh_edits_tree()
-        self._start_reindex(saved_line)
+        return self.edit_controller._on_save_done(backup_path)
 
     def _start_reindex(self, saved_line: int) -> None:
-        self._status(self.t("st_opening"))
-        self._reindex_saved_line = saved_line
-        self._indexer_thread = QThread()
-        self._indexer_worker = IndexerWorker(self.file_path, self.encoding, self.index_interval_bytes)
-        self._indexer_worker.moveToThread(self._indexer_thread)
-        self._indexer_thread.started.connect(self._indexer_worker.run)
-        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
-        # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
-        self._indexer_worker.progress.connect(self._on_index_progress, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._on_reindex_finished, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._on_index_error, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_thread.finished.connect(self._indexer_thread.deleteLater, Qt.QueuedConnection)
-        self._indexer_thread.start()
+        return self.file_controller._start_reindex(saved_line)
 
     @Slot(object)
     def _on_reindex_finished(self, idx: LineIndexer) -> None:
-        """Slot dla sygnału finished z reindex workera — przekazuje do
-        _on_reindex_after_save z zapamiętanym saved_line."""
-        saved_line = getattr(self, "_reindex_saved_line", 0)
-        self._on_reindex_after_save(idx, saved_line)
+        return self.file_controller._on_reindex_finished(idx)
 
     @Slot(object, int)
     def _on_reindex_after_save(self, idx: LineIndexer, saved_line: int) -> None:
-        if self.indexer is not None:
-            try:
-                self.indexer.close()
-            except Exception:
-                pass
-        self.indexer = idx
-        self._last_file_size = idx.size
-        try:
-            st = os.stat(self.file_path) if self.file_path else None
-            if st is not None:
-                self._file_mtime_at_open = st.st_mtime_ns
-                self._file_size_at_open = st.st_size
-                self._last_file_inode = st.st_ino
-        except OSError:
-            pass
-        self._status(self._fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
-        try:
-            self._load_window(at_line=saved_line)
-        except OSError:
-            # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
-            pass
+        return self.file_controller._on_reindex_after_save(idx, saved_line)
 
     @Slot(str)
     def _on_save_error(self, err: str) -> None:
-        if self._save_progress:
-            self._save_progress.close()
-            self._save_progress = None
-        QMessageBox.critical(self._main, self.t("app_title"), f"Save error: {err}")
+        return self.edit_controller._on_save_error(err)
 
     @Slot(str)
     def _on_save_file_changed(self, err: str) -> None:
-        if self._save_progress:
-            self._save_progress.close()
-            self._save_progress = None
-        choice = QMessageBox.question(
-            self._main, self.t("app_title"),
-            self.t("msg_file_changed").format(error=err, n=len(self.edit_buffer)),
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel, QMessageBox.Cancel,
-        )
-        if choice == QMessageBox.Cancel:
-            self._refresh_status()
-            return
-        if choice == QMessageBox.Yes:
-            self.edit_buffer.clear()
-            self._refresh_edits_tree()
-            try:
-                cursor = self.text.textCursor()
-                saved_line = self.line_map[cursor.blockNumber()] if self.line_map else 0
-            except Exception:
-                saved_line = 0
-            self._start_reindex(saved_line)
-        else:
-            self._refresh_status()
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_save_as_suggested"))
+        return self.edit_controller._on_save_file_changed(err)
 
     @Slot(str)
     def _on_save_compressed(self, err: str) -> None:
-        if self._save_progress:
-            self._save_progress.close()
-            self._save_progress = None
-        QMessageBox.warning(self._main, self.t("app_title"), self.t("mi_compressed_warn"))
+        return self.edit_controller._on_save_compressed(err)
 
     def cmd_clear_edits(self) -> None:
-        if len(self.edit_buffer) == 0:
-            return
-        if not QMessageBox.question(
-            self._main, self.t("app_title"),
-            self.t("msg_clear_edits").format(n=len(self.edit_buffer)),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        ) == QMessageBox.Yes:
-            return
-        self.edit_buffer.clear()
-        self._refresh_edits_tree()
-        self._reload_current_view()
-        self._refresh_status()
+        return self.edit_controller.cmd_clear_edits()
 
     def cmd_save_as(self) -> None:
-        if not self.file_path or not self.indexer:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self._main, self.t("mi_save_as"), "", "Log files (*.log);;Text files (*.txt);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            with open_maybe_compressed(self.file_path, "rb") as src, \
-                 open_maybe_compressed(path, "wb") as dst:
-                line_no = 0
-                for raw in src:
-                    if line_no in self.edit_buffer._edits:
-                        new_text = self.edit_buffer._edits[line_no]
-                        dst.write(new_text.encode(self.encoding, errors="replace"))
-                        if not new_text.endswith("\n"):
-                            dst.write(b"\n")
-                    else:
-                        dst.write(raw)
-                    line_no += 1
-            QMessageBox.information(self._main, self.t("app_title"),
-                                    self.t("msg_save_ok").format(n=len(self.edit_buffer), path=path))
-        except Exception as e:
-            QMessageBox.critical(self._main, self.t("app_title"), f"Save error: {e}")
+        return self.edit_controller.cmd_save_as()
 
     # ----------------------------------------------------------- export ----
     def cmd_export(self) -> None:
-        if not self.indexer:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_file"))
-            return
-        path, _ = QFileDialog.getSaveFileName(
-            self._main, self.t("dlg_export_title"), "", "Log files (*.log);;Text files (*.txt);;All files (*)"
-        )
-        if not path:
-            return
-        try:
-            count = 0
-            if self.filter_active and self.filter_results:
-                with open_maybe_compressed(path, "wb") as out:
-                    for (ln, _off, text) in self.filter_results:
-                        out.write(text.encode(self.encoding, errors="replace"))
-                        out.write(b"\n")
-                        count += 1
-            else:
-                with open_maybe_compressed(self.file_path, "rb") as src, \
-                     open_maybe_compressed(path, "wb") as out:
-                    for raw in src:
-                        out.write(raw)
-                        count += 1
-            QMessageBox.information(self._main, self.t("app_title"),
-                                    self.t("msg_exported").format(n=count, path=path))
-        except Exception as e:
-            QMessageBox.critical(self._main, self.t("app_title"), f"Export error: {e}")
+        return self.edit_controller.cmd_export()
 
     # -------------------------------------------------------- bookmarks ----
     def cmd_toggle_bookmark(self) -> None:
@@ -2048,147 +1276,35 @@ class LogTab(QWidget):
 
     # ----------------------------------------------------------- follow ----
     def _cancel_follow_if_active(self) -> None:
-        """Helper to cancel follow mode proactively when manual jumps happen."""
-        if self.follow_active:
-            self.cmd_toggle_follow()
+        return self.file_controller._cancel_follow_if_active()
 
     def cmd_toggle_follow(self) -> None:
-        if not self.indexer:
-            return
-        self.follow_active = not self.follow_active
-        if self._main._follow_action is not None:
-            self._main._follow_action.setChecked(self.follow_active)
-        if self.follow_active:
-            self._last_file_size = self.indexer.size
-            try:
-                self._last_file_inode = os.stat(self.file_path).st_ino
-            except OSError:
-                self._last_file_inode = 0
-
-            if self.indexer and self.indexer.line_count > 0:
-                last_start = max(0, self.indexer.line_count - self.window_size_lines)
-                self._load_window(at_line=last_start)
-                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-
-            self._follow_poll()
-        else:
-            self._refresh_status()
+        return self.file_controller.cmd_toggle_follow()
 
     def _follow_poll(self) -> None:
-        if not self.follow_active or not self.file_path:
-            return
-        if self._follow_reindexing:
-            QTimer.singleShot(FOLLOW_POLL_MS, self._follow_poll)
-            return
-        try:
-            current_stat = os.stat(self.file_path)
-        except OSError:
-            QTimer.singleShot(FOLLOW_POLL_MS, self._follow_poll)
-            return
-        current_size = current_stat.st_size
-        current_inode = current_stat.st_ino
-
-        if current_inode != self._last_file_inode and self._last_file_inode != 0:
-            self._follow_reindexing = True
-            self._start_follow_reindex(current_size, current_inode)
-            QTimer.singleShot(FOLLOW_POLL_MS, self._follow_poll)
-            return
-
-        mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_stat.st_mtime))
-        ctime_str = time.strftime("%H:%M:%S")
-
-        if current_size > self._last_file_size:
-            next_poll = 200
-            try:
-                new_lines = self.indexer.update_from(current_size)
-                self._last_file_size = current_size
-                if new_lines > 0:
-                    self._on_follow_new_lines(new_lines, mtime_str, ctime_str)
-            except Exception:
-                pass
-        elif current_size < self._last_file_size:
-            next_poll = FOLLOW_POLL_MS
-            self._follow_reindexing = True
-            self._start_follow_reindex(current_size, current_inode)
-        else:
-            next_poll = 1000
-            self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
-        QTimer.singleShot(next_poll, self._follow_poll)
+        return self.file_controller._follow_poll()
 
     def _start_follow_reindex(self, current_size: int, current_inode: int) -> None:
-        self._follow_reindex_size = current_size
-        self._follow_reindex_inode = current_inode
-        self._indexer_thread = QThread()
-        self._indexer_worker = IndexerWorker(self.file_path, self.encoding, self.index_interval_bytes)
-        self._indexer_worker.moveToThread(self._indexer_thread)
-        self._indexer_thread.started.connect(self._indexer_worker.run)
-        self._register_thread_worker(self._indexer_thread, self._indexer_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
-        # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
-        self._indexer_worker.finished.connect(self._on_follow_reindex_slot, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._on_follow_reindex_failed, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_thread.quit, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._on_follow_reindex_clear_flag, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._on_follow_reindex_clear_flag, Qt.QueuedConnection)
-        self._indexer_worker.finished.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_worker.error.connect(self._indexer_worker.deleteLater, Qt.QueuedConnection)
-        self._indexer_thread.finished.connect(self._indexer_thread.deleteLater, Qt.QueuedConnection)
-        self._indexer_thread.start()
+        return self.file_controller._start_follow_reindex(current_size, current_inode)
 
     @Slot(object)
     def _on_follow_reindex_slot(self, idx: LineIndexer) -> None:
-        """Slot pośredniczący — odbiera idx z workera i woła _on_follow_reindex
-        z zapamiętanymi parametrami. Bez lambdy (cross-thread safe)."""
-        size = getattr(self, "_follow_reindex_size", 0)
-        inode = getattr(self, "_follow_reindex_inode", 0)
-        self._on_follow_reindex(idx, size, inode)
+        return self.file_controller._on_follow_reindex_slot(idx)
 
     @Slot()
     def _on_follow_reindex_clear_flag(self) -> None:
-        """Czyści flagę _follow_reindexing po zakończeniu reindex."""
-        self._follow_reindexing = False
+        return self.file_controller._on_follow_reindex_clear_flag()
 
     def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
-        if not self.indexer or self.indexer.line_count == 0:
-            return
-        if new_line_count > 0 or not self.line_map:
-            last_start = max(0, self.indexer.line_count - self.window_size_lines)
-            # Blokujemy aktualizacje scrollbara uzytkownika podczas tej operacji aby uniknąć false positivów
-            self.text.verticalScrollBar().blockSignals(True)
-            try:
-                self._load_window(at_line=last_start)
-                self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-            finally:
-                self.text.verticalScrollBar().blockSignals(False)
-        self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+        return self.file_controller._on_follow_new_lines(new_line_count, mtime_str, ctime_str)
 
     @Slot(object, int, int)
     def _on_follow_reindex(self, idx: LineIndexer, new_size: int, new_inode: int) -> None:
-        if self.indexer is not None:
-            try:
-                self.indexer.close()
-            except Exception:
-                pass
-        self.indexer = idx
-        self._last_file_size = new_size
-        if new_inode != 0:
-            self._last_file_inode = new_inode
-        last_start = max(0, idx.line_count - self.window_size_lines)
-        self._load_window(at_line=last_start)
-        self.text.verticalScrollBar().setValue(self.text.verticalScrollBar().maximum())
-        mtime_str = ""
-        try:
-            mtime = os.stat(self.file_path).st_mtime
-            mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
-        except OSError:
-            mtime_str = "?"
-        ctime_str = time.strftime("%H:%M:%S")
-        self._status(self.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+        return self.file_controller._on_follow_reindex(idx, new_size, new_inode)
 
     @Slot(str)
     def _on_follow_reindex_failed(self, err: str) -> None:
-        self._status(self.t("st_follow_reindex_failed"))
+        return self.file_controller._on_follow_reindex_failed(err)
 
     # ----------------------------------------------------------- encoding ---
     def cmd_set_encoding(self, encoding: str) -> None:

@@ -323,10 +323,11 @@ class SearchResultsModel(QAbstractListModel):
         self._color_info = QColor(THEME_DARK["info"])
         self._color_debug = QColor(THEME_DARK["debug"])
 
-    def set_results(self, results: List[Tuple[int, str]]) -> None:
+    def set_results(self, results: List[int], indexer=None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
         self._all_results = results
+        self._indexer = indexer
         self._visible_count = min(len(results), self._batch_size)
         self.endResetModel()
 
@@ -371,7 +372,17 @@ class SearchResultsModel(QAbstractListModel):
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         if not index.isValid() or index.row() >= self._visible_count:
             return None
-        line_no, text = self._all_results[index.row()]
+        item = self._all_results[index.row()]
+        if isinstance(item, tuple):
+            line_no, text = item
+        else:
+            line_no = item
+            if hasattr(self, '_indexer') and self._indexer:
+                lines = self._indexer.read_lines(line_no, 1)
+                text = lines[0][1] if lines else ""
+            else:
+                text = ""
+
         if role == Qt.DisplayRole:
             display = text[:200]
             if len(text) > 200:

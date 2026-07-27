@@ -1,0 +1,355 @@
+from typing import Optional
+from PySide6.QtCore import QObject, Qt, Slot, QThread, QTimer
+from PySide6.QtWidgets import QMessageBox, QProgressDialog
+import os
+import time
+import os
+from log_reader.helpers import fmt_size
+from log_reader.workers import IndexerWorker
+from log_reader.indexer import LineIndexer
+
+class FileController(QObject):
+    def __init__(self, tab):
+        super().__init__(tab)
+        self.tab = tab
+
+    def open_file(self, path: str, title: Optional[str] = None) -> None:
+        if not os.path.isfile(path):
+            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+            return
+        self.tab.cmd_clear_filter(silent=True)
+        if self.tab.follow_active:
+            self.tab.cmd_toggle_follow()
+        self.tab.file_path = path
+        self.tab._assigned_title = title or os.path.basename(path)
+        self.tab._status(self.tab.t("st_opening"))
+        self.tab.title_changed.emit(self.tab._assigned_title)
+        self.tab.window_start = 0
+        self.tab.window_lines = []
+        self.tab.line_map = []
+        self.tab.edit_buffer.clear()
+        self.tab.bookmarks.clear()
+        self.tab._refresh_bookmarks_tree()
+        self.tab._refresh_edits_tree()
+        self.tab.pct_label.setText("0%")
+        self.tab.text.setPlainText("")
+        self.tab.text.set_line_map([])
+
+        encoding = self.tab.encoding
+
+        # QProgressDialog — pokazuje postęp indeksowania z przyciskiem Anuluj.
+        # Dla małych plików (< 100 MB) dialog się nie pojawi (indeksowanie
+        # trwa < 1s, Qt automatycznie ukrywa dialog jeśli minDuration nie upłynął).
+        file_size = os.path.getsize(path)
+        # Pokaż dialog tylko dla plików > 50 MB — dla mniejszych indeksowanie
+        # jest błyskawiczne i dialog by tylko mig­nął.
+        show_dialog = file_size > 50 * 1024 * 1024
+        if show_dialog:
+            self.tab._index_progress = QProgressDialog(
+                self.tab._fmt("st_indexing", pct="0.0"),
+                self.tab.t("btn_cancel"),
+                0, 100, self.tab._main,
+            )
+            self.tab._index_progress.setWindowTitle(self.tab.t("dlg_index_title"))
+            self.tab._index_progress.setMinimumDuration(500)  # pokaż po 500ms
+            self.tab._index_progress.setAutoClose(True)
+            self.tab._index_progress.setAutoReset(True)
+            self.tab._index_progress.canceled.connect(self.tab._cancel_indexing)
+        else:
+            self.tab._index_progress = None
+
+        self.tab._indexer_thread = QThread()
+        self.tab._indexer_worker = IndexerWorker(path, encoding, self.tab.index_interval_bytes)
+        self.tab._indexer_worker.moveToThread(self.tab._indexer_thread)
+        self.tab._indexer_thread.started.connect(self.tab._indexer_worker.run)
+        self.tab._register_thread_worker(self.tab._indexer_thread, self.tab._indexer_worker)
+
+        # Używamy metod-slotów (nie closure) — Qt QueuedConnection wymaga
+        # picklowalnych odbiorców, a closure nie jest picklowalne. To była
+        # przyczyna błędu „Timers cannot be stopped from another thread" —
+        #Qt nie mógł zakolejkować wywołania i wywoływał slot w worker thread.
+        self.tab._indexer_worker.progress.connect(self.tab._on_index_progress, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._on_index_done, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._on_index_error, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_thread.finished.connect(self.tab._indexer_thread.deleteLater, Qt.QueuedConnection)
+        # Cleanup dialog przy zakończeniu (sukces lub błąd).
+        self.tab._indexer_worker.finished.connect(self.tab._close_index_progress, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._close_index_progress, Qt.QueuedConnection)
+        self.tab._indexer_thread.start()
+
+    @Slot(float)
+    def _on_index_progress(self, p: float) -> None:
+        """Slot dla sygnału progress z IndexerWorker. Aktualizuje status bar
+        i dialog postępu. MUSI być metodą (nie closure) żeby Qt QueuedConnection
+        działał poprawnie — closure nie jest picklowalne cross-thread."""
+        self.tab._status(self.tab._fmt("st_indexing", pct=f"{p:.1f}"))
+        if self.tab._index_progress is not None:
+            self.tab._index_progress.setValue(int(p))
+            self.tab._index_progress.setLabelText(self.tab._fmt("st_indexing", pct=f"{p:.1f}"))
+
+    def _cancel_indexing(self) -> None:
+        """Anuluje indeksowanie — ustawia flagę w workerze. Pool zostanie
+        przerwany w _build_parallel."""
+        if self.tab._indexer_worker is not None:
+            self.tab._indexer_worker.cancel()
+        self.tab._status(self.tab.t("st_cancelling"))
+
+    def _close_index_progress(self) -> None:
+        """Zamyka dialog postępu indeksowania (sukces, błąd, anulowanie)."""
+        if self.tab._index_progress is not None:
+            self.tab._index_progress.blockSignals(True)
+            self.tab._index_progress.close()
+            self.tab._index_progress = None
+
+    @Slot(object)
+    def _on_index_error(self, err: str) -> None:
+        if err == "cancelled":
+            # Anulowane przez usera — nie pokazuj jako błąd, tylko status.
+            self.tab._status(self.tab.t("st_cancelled"))
+            if self.tab.indexer is None:
+                idx = self.tab._main.tabs.indexOf(self.tab)
+                if idx >= 0:
+                    self.tab._main._on_tab_close_requested(idx)
+            return
+        QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_index_error").format(e=err))
+        self.tab._status(self.tab.t("st_ready"))
+
+    @Slot(object)
+    def _on_index_done(self, idx: LineIndexer) -> None:
+        if self.tab.indexer is not None:
+            try:
+                self.tab.indexer.close()
+            except Exception:
+                pass
+            self.tab.indexer = None
+
+        self.tab.line_map = None
+        self.tab.filter_results = None
+        self.tab._filter_all_lines = None
+        self.tab._filter_context_lines = None
+        self.tab._hit_text_map = None
+        self.tab._hit_lines_set = None
+        self.tab.filter_engine = None
+        self.tab._search_engine = None
+        try:
+            self.tab.text.clear()
+        except Exception:
+            pass
+        self.tab.indexer = idx
+        self.tab._last_file_size = idx.size
+        try:
+            st = os.stat(self.tab.file_path) if self.tab.file_path else None
+            if st is not None:
+                self.tab._file_mtime_at_open = st.st_mtime_ns
+                self.tab._file_size_at_open = st.st_size
+                self.tab._last_file_inode = st.st_ino
+        except OSError:
+            pass
+        self.tab._status(self.tab._fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
+        self.tab._load_window(at_line=0)
+        self.tab._refresh_bookmarks_tree()
+        self.tab._refresh_edits_tree()
+        # Zaktualizuj tytuł zakładki — przywróć właściwy tytuł z sufiksem
+        if self.tab.file_path:
+            self.tab.title_changed.emit(getattr(self.tab, "_assigned_title", os.path.basename(self.tab.file_path)))
+        # Zaktualizuj mini-mapę — natychmiast (dla małych plików) + debounced (dla dużych)
+        self.tab._update_minimap()
+        self.tab._minimap_update_timer.start()
+
+    def _start_reindex(self, saved_line: int) -> None:
+        self.tab._status(self.tab.t("st_opening"))
+        self.tab._reindex_saved_line = saved_line
+        self.tab._indexer_thread = QThread()
+        self.tab._indexer_worker = IndexerWorker(self.tab.file_path, self.tab.encoding, self.tab.index_interval_bytes)
+        self.tab._indexer_worker.moveToThread(self.tab._indexer_thread)
+        self.tab._indexer_thread.started.connect(self.tab._indexer_worker.run)
+        self.tab._register_thread_worker(self.tab._indexer_thread, self.tab._indexer_worker)
+        # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
+        # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
+        self.tab._indexer_worker.progress.connect(self.tab._on_index_progress, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._on_reindex_finished, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._on_index_error, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_thread.finished.connect(self.tab._indexer_thread.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_thread.start()
+
+    @Slot(object)
+    def _on_reindex_finished(self, idx: LineIndexer) -> None:
+        """Slot dla sygnału finished z reindex workera — przekazuje do
+        _on_reindex_after_save z zapamiętanym saved_line."""
+        saved_line = getattr(self.tab, "_reindex_saved_line", 0)
+        self.tab._on_reindex_after_save(idx, saved_line)
+
+    @Slot(object, int)
+    def _on_reindex_after_save(self, idx: LineIndexer, saved_line: int) -> None:
+        if self.tab.indexer is not None:
+            try:
+                self.tab.indexer.close()
+            except Exception:
+                pass
+        self.tab.indexer = idx
+        self.tab._last_file_size = idx.size
+        try:
+            st = os.stat(self.tab.file_path) if self.tab.file_path else None
+            if st is not None:
+                self.tab._file_mtime_at_open = st.st_mtime_ns
+                self.tab._file_size_at_open = st.st_size
+                self.tab._last_file_inode = st.st_ino
+        except OSError:
+            pass
+        self.tab._status(self.tab._fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
+        try:
+            self.tab._load_window(at_line=saved_line)
+        except OSError:
+            # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
+            pass
+
+    def _cancel_follow_if_active(self) -> None:
+        """Helper to cancel follow mode proactively when manual jumps happen."""
+        if self.tab.follow_active:
+            self.tab.cmd_toggle_follow()
+
+    def cmd_toggle_follow(self) -> None:
+        if not self.tab.indexer:
+            return
+        self.tab.follow_active = not self.tab.follow_active
+        if self.tab._main._follow_action is not None:
+            self.tab._main._follow_action.setChecked(self.tab.follow_active)
+        if self.tab.follow_active:
+            self.tab._last_file_size = self.tab.indexer.size
+            try:
+                self.tab._last_file_inode = os.stat(self.tab.file_path).st_ino
+            except OSError:
+                self.tab._last_file_inode = 0
+
+            if self.tab.indexer and self.tab.indexer.line_count > 0:
+                last_start = max(0, self.tab.indexer.line_count - self.tab.window_size_lines)
+                self.tab._load_window(at_line=last_start)
+                self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+
+            self.tab._follow_poll()
+        else:
+            self.tab._refresh_status()
+
+    def _follow_poll(self) -> None:
+        if not self.tab.follow_active or not self.tab.file_path:
+            return
+        if self.tab._follow_reindexing:
+            QTimer.singleShot(200, self.tab._follow_poll)
+            return
+        try:
+            current_stat = os.stat(self.tab.file_path)
+        except OSError:
+            QTimer.singleShot(200, self.tab._follow_poll)
+            return
+        current_size = current_stat.st_size
+        current_inode = current_stat.st_ino
+
+        if current_inode != self.tab._last_file_inode and self.tab._last_file_inode != 0:
+            self.tab._follow_reindexing = True
+            self.tab._start_follow_reindex(current_size, current_inode)
+            QTimer.singleShot(200, self.tab._follow_poll)
+            return
+
+        mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_stat.st_mtime))
+        ctime_str = time.strftime("%H:%M:%S")
+
+        if current_size > self.tab._last_file_size:
+            next_poll = 200
+            try:
+                new_lines = self.tab.indexer.update_from(current_size)
+                self.tab._last_file_size = current_size
+                if new_lines > 0:
+                    self.tab._on_follow_new_lines(new_lines, mtime_str, ctime_str)
+            except Exception:
+                pass
+        elif current_size < self.tab._last_file_size:
+            next_poll = 200
+            self.tab._follow_reindexing = True
+            self.tab._start_follow_reindex(current_size, current_inode)
+        else:
+            next_poll = 1000
+            self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+        QTimer.singleShot(next_poll, self.tab._follow_poll)
+
+    def _start_follow_reindex(self, current_size: int, current_inode: int) -> None:
+        self.tab._follow_reindex_size = current_size
+        self.tab._follow_reindex_inode = current_inode
+        self.tab._indexer_thread = QThread()
+        self.tab._indexer_worker = IndexerWorker(self.tab.file_path, self.tab.encoding, self.tab.index_interval_bytes)
+        self.tab._indexer_worker.moveToThread(self.tab._indexer_thread)
+        self.tab._indexer_thread.started.connect(self.tab._indexer_worker.run)
+        self.tab._register_thread_worker(self.tab._indexer_thread, self.tab._indexer_worker)
+        # QueuedConnection + metoda-slot (nie lambda) — closure nie jest
+        # picklowalne cross-thread, powoduje błędy QTimer w worker thread.
+        self.tab._indexer_worker.finished.connect(self.tab._on_follow_reindex_slot, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._on_follow_reindex_failed, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_thread.quit, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._on_follow_reindex_clear_flag, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._on_follow_reindex_clear_flag, Qt.QueuedConnection)
+        self.tab._indexer_worker.finished.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_worker.error.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_thread.finished.connect(self.tab._indexer_thread.deleteLater, Qt.QueuedConnection)
+        self.tab._indexer_thread.start()
+
+    @Slot(object)
+    def _on_follow_reindex_slot(self, idx: LineIndexer) -> None:
+        """Slot pośredniczący — odbiera idx z workera i woła _on_follow_reindex
+        z zapamiętanymi parametrami. Bez lambdy (cross-thread safe)."""
+        size = getattr(self.tab, "_follow_reindex_size", 0)
+        inode = getattr(self.tab, "_follow_reindex_inode", 0)
+        self.tab._on_follow_reindex(idx, size, inode)
+
+    @Slot()
+    def _on_follow_reindex_clear_flag(self) -> None:
+        """Czyści flagę _follow_reindexing po zakończeniu reindex."""
+        self.tab._follow_reindexing = False
+
+    def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
+        if not self.tab.indexer or self.tab.indexer.line_count == 0:
+            return
+        if new_line_count > 0 or not self.tab.line_map:
+            last_start = max(0, self.tab.indexer.line_count - self.tab.window_size_lines)
+            # Blokujemy aktualizacje scrollbara uzytkownika podczas tej operacji aby uniknąć false positivów
+            self.tab.text.verticalScrollBar().blockSignals(True)
+            try:
+                self.tab._load_window(at_line=last_start)
+                self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+            finally:
+                self.tab.text.verticalScrollBar().blockSignals(False)
+        self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+
+    @Slot(object, int, int)
+    def _on_follow_reindex(self, idx: LineIndexer, new_size: int, new_inode: int) -> None:
+        if self.tab.indexer is not None:
+            try:
+                self.tab.indexer.close()
+            except Exception:
+                pass
+        self.tab.indexer = idx
+        self.tab._last_file_size = new_size
+        if new_inode != 0:
+            self.tab._last_file_inode = new_inode
+        last_start = max(0, idx.line_count - self.tab.window_size_lines)
+        self.tab._load_window(at_line=last_start)
+        self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+        mtime_str = ""
+        try:
+            mtime = os.stat(self.tab.file_path).st_mtime
+            mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
+        except OSError:
+            mtime_str = "?"
+        ctime_str = time.strftime("%H:%M:%S")
+        self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+
+    @Slot(str)
+    def _on_follow_reindex_failed(self, err: str) -> None:
+        self.tab._status(self.tab.t("st_follow_reindex_failed"))
