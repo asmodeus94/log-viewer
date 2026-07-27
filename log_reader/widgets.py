@@ -399,6 +399,7 @@ class SearchResultsModel(QAbstractListModel):
         if role == Qt.UserRole:
             return line_no
         if role == Qt.ForegroundRole:
+            return None # Disable text coloring in search results per user request
             upper = text[:200].upper()
             if "[ERROR]" in upper or " ERROR " in upper:
                 return self._color_error

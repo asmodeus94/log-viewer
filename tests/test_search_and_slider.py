@@ -138,16 +138,14 @@ class TestSearchResultsModel:
         model = SearchResultsModel()
         model.set_results([(0, "[ERROR] something failed")])
         color = model.data(model.index(0, 0), QtCore.Qt.ForegroundRole)
-        assert color is not None
+        assert color is None
         # Kolor zależy od motywu — sprawdzamy tylko że jest niepusty
-        assert color.name() != ""
 
     def test_foreground_role_info(self):
         model = SearchResultsModel()
         model.set_results([(0, "[INFO] something happened")])
         color = model.data(model.index(0, 0), QtCore.Qt.ForegroundRole)
-        assert color is not None
-        assert color.name() != ""
+        assert color is None
 
     def test_long_text_truncated(self):
         model = SearchResultsModel()
