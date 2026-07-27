@@ -9,14 +9,16 @@ Poniższy diagram ilustruje, w jaki sposób komponenty wewnątrz pakietu współ
 ```mermaid
 flowchart TD
     A["main_window.py (LogViewerWindow)"] --> B["log_tab.py (LogTab)"]
-    B -->|"Zleca indeksację w tle"| C("workers.py: IndexerWorker")
+    B -->|"Deleguje logikę"| Z["controllers/ (File, Edit, Search, Filter, UI)"]
+    Z -->|"Zleca indeksację w tle"| C("workers.py: IndexerWorker")
     C -->|"Indeksuje plik partiami"| D["indexer.py: LineIndexer"]
-    D -->|"Zwraca indeksy linii do GUI"| B
-    B -->|"Pobiera potrzebne linie do wizualizacji"| D
-    B -->|"Aktualizuje i renderuje"| E["widgets.py: LogPlainTextEdit & MiniMap"]
-    B -->|"Żąda wyszukiwania / filtrowania"| F("workers.py: FilterWorker")
+    D -->|"Zwraca indeksy linii do GUI"| Z
+    Z -->|"Pobiera potrzebne linie do wizualizacji"| D
+    Z -->|"Aktualizuje i renderuje"| E["widgets.py: LogPlainTextEdit & MiniMap"]
+    Z -->|"Żąda wyszukiwania / filtrowania"| F("workers.py: FilterWorker")
     F -->|"Przeszukuje bajty asynchronicznie"| G["filter_engine.py: FilterEngine"]
-    G -->|"Zwraca trafienia regex/zwykłe"| B
+    G -->|"Zwraca trafienia regex/zwykłe"| Z
+    Z -.->|"Aktualizuje stan"| B
 
 ```
 
@@ -25,8 +27,15 @@ flowchart TD
 ### 1. `main_window.py`
 Pełni rolę kontrolera głównego okna aplikacji. Zawiera klasę `LogViewerWindow` (dziedziczącą z `QMainWindow`), która zawiaduje globalnymi konfiguracjami, wsparciem dla Drag & Drop, globalnymi skrótami klawiszowymi oraz zarządza menedżerem kart (tabs).
 
-### 2. `log_tab.py`
-Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą zakładkę pliku. Klasa ta łączy i spina komponenty z widoku, workerów asynchronicznych oraz silnik filtrowania. Odpowiada za bezpośrednią edycję tekstu i podtrzymanie wirtualnego widoku w UI (ładowanie jedynie widocznych bloków tekstu z pamięci).
+### 2. `log_tab.py` i podpakiet `controllers/`
+Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą zakładkę pliku. Komponent ten wykorzystuje architekturę kompozycji, oddelegowując swoje odpowiedzialności domenowe do wyspecjalizowanych kontrolerów znajdujących się w katalogu `log_reader/controllers/`:
+* `FileController` – zarządza wczytywaniem, indeksowaniem i przeładowywaniem plików.
+* `EditController` – nadzoruje edycję tekstu wewnątrz wirtualnego widoku oraz eksport zmian.
+* `SearchController` – koordynuje proces wyszukiwania fraz i wyrażeń w pliku.
+* `FilterController` – steruje filtrowaniem zawartości z uwzględnieniem dodatkowych opcji (jak linie kontekstu).
+* `UIController` – zarządza widokiem, podświetleniami linii i paskami nawigacyjnymi.
+
+Klasa główna `LogTab` spina ze sobą te kontrolery, zachowując zwięzłość kodu i spójność stanu w karcie.
 
 ### 3. `app.py`
 Plik zredukowany do roli fasady importującej klasy z `main_window.py` oraz `log_tab.py`, zachowując wsteczną kompatybilność importów w innych częściach aplikacji i testach.

@@ -19,7 +19,7 @@ Aby twój wkład został pomyślnie zaakceptowany, prosimy o stosowanie się do 
 * Piszemy zgodnie z wytycznymi **PEP 8** dla języka Python.
 * Używaj adnotacji typów (_Type Hints_) na zdefiniowanych przez Ciebie obiektach i parametrach funkcji (np. `def fn(a: int) -> bool:`). Poprawia to czytelność kodu.
 * Skrypt i funkcjonalności powinny zawierać zwięzłe i merytoryczne tzw. _Docstrings_ (szczególnie jeżeli dany moduł realizuje złożone wyliczenia matematyczne lub specyficzną logikę wątkową).
-* Projekt korzysta i promuje posługiwanie się językiem polskim w sekcjach takich jak komentarze w kodzie, komunikacja czy dokumentacja, aby utrzymać zbieżność merytoryczną w zespole.
+* **Komunikacja, Dokumentacja i Komentarze muszą być w języku polskim.** Projekt korzysta z języka polskiego jako głównego narzędzia do opisywania logiki. Oczekuje się, że wszystkie _docstringi_, komentarze bezpośrednio w kodzie, komunikaty o błędach (nie skierowane w świat), logi wewnętrzne oraz treści zapytań (prompty) będą sformułowane całkowicie w języku polskim, by utrzymać najwyższą zbieżność merytoryczną.
 * Dodając nowe teksty w interfejsie użytkownika, należy zaktualizować słowniki tłumaczeń (zarówno w języku polskim jak i angielskim) w pliku `log_reader/i18n.py`.
 
 ## Uruchamianie Testów Jednostkowych
