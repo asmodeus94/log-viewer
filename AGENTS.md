@@ -56,3 +56,13 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - **Pythonic style:** Wykorzystuj wbudowane mechanizmy języka – używaj f-stringów do formatowania tekstu, list/dict comprehensions dla wydajności, oraz menedżerów kontekstu (`with`) do zarządzania zasobami i blokadami.
 - Preferuj nowoczesny moduł `pathlib` do operacji na ścieżkach nad tradycyjnym `os.path` (chyba że konwencja istniejącego kodu/testów wymaga inaczej).
 - Zmiany w kodzie nie mogą generować nowych ostrzeżeń linterów (utrzymuj kod zgodny ze standardami PEP 8).
+
+## 14. Dobre praktyki Qt / PySide6 (Z zebranych doświadczeń)
+- **Wyjątki w QThread:** Zawsze przechwytuj `BaseException` (a nie tylko `Exception`) w głównych metodach wątków pracujących w tle. Pozwala to na poprawne złapanie `SystemExit` i zapobiega niekontrolowanym awariom pętli zdarzeń (np. podczas pakowania przez PyInstaller).
+- **Zarządzanie scrollbarem:** Edytując masowo zawartość tekstową (np. `QPlainTextEdit`), zawsze używaj blokowania modyfikacji layoutu (np. `cursor.beginEditBlock()` oraz `cursor.endEditBlock()`). Ponadto, jeśli wykonujesz programowe przewinięcie (np. przywrócenie stanu okna), tymczasowo blokuj sygnały paska przewijania (`blockSignals(True)` / `False`), by uniknąć wywołania logiki np. ciągłego (infinite) doładowywania zarezerwowanej dla użytkownika.
+- **Tłumienie awarii C++:** Pod żadnym pozorem nie otwieraj modalnych okien dialogowych (jak `QMessageBox`) bezpośrednio z poziomu zdarzeń/slotów odbierających dane z workerów, jeżeli w międzyczasie wątek został anulowany lub okno rodzicielskie jest właśnie niszczone. Często kończy się to natychmiastowym zrzutem pamięci (segfault).
+- **Przetwarzanie po wątkach (Dostęp do plików):** Jeśli slot powiązany z `finished()` z asynchronicznego workera z powrotem odwołuje się do fizycznego pliku na dysku, wykonuj te operacje w bloku `try...except OSError`. Plik mógł ulec usunięciu (np. w środowisku automatycznych testów `pytest` przy zamykaniu temp files) podczas trwania operacji w tle.
+- **Czcionki stałej szerokości (Monospace):** Jeśli aplikacja używa widoku kodu lub logów, nie używaj aliasów stringowych (jak "Monospace") z poziomu QSS. Używaj zawsze `QFontDatabase.systemFont(QFontDatabase.FixedFont)`, by uniknąć spadków wydajności aplikacji oraz błędów/spamu z systemu operacyjnego na temat brakującej czcionki.
+
+## 15. Optymalizacja operacji listowych
+- Do przeszukiwania posortowanych kolekcji i list (np. w mapowaniach numerów linii z fizycznymi bytami) zawsze używaj modułu **`bisect`** (`bisect_left` lub `bisect_right`) zamiast wbudowanego, liniowego `list.index()`.
