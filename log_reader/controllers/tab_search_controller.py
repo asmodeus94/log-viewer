@@ -121,18 +121,16 @@ class SearchController(QObject):
                 except RuntimeError:
                     pass
             return
-        search_res = []
-        for ln in results:
-            lines = self.tab.indexer.read_lines(ln, 1)
-            if lines:
-                search_res.append((ln, lines[0][1]))
-        self.tab._search_results_all = search_res
+
+        # Zapisujemy tylko listę numerów linii, teksty będą ładowane lazy (SearchResultsModel)
+        self.tab._search_results_all = results
         total_hits = len(self.tab._search_results_all)
 
         self.tab._search_results = self.tab._search_results_all
 
         if self.tab._search_model:
-            self.tab._search_model.set_results(self.tab._search_results)
+            # Używamy tylko numerów linii, model sam pobierze tekst za pomocą indexera
+            self.tab._search_model.set_results(self.tab._search_results, indexer=self.tab.indexer)
 
         self.tab._status(self.tab.t("st_search_done").format(n=total_hits))
 
