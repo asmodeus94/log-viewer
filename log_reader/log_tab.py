@@ -683,7 +683,7 @@ class LogTab(QWidget):
         if not self.indexer or self.indexer.line_count == 0:
             self.pct_label.setText("0%")
             return
-        if self.filter_active:
+        if self.filter_active and self._filter_all_lines:
             total = max(1, len(self._filter_all_lines))
         else:
             total = max(1, self.indexer.line_count)
@@ -1353,8 +1353,10 @@ class LogTab(QWidget):
         if not self.indexer:
             self._status(self.t("st_ready"))
             return
-        if self.filter_active:
+        if self.filter_active and self.filter_results is not None:
             left = self._fmt("st_filtered", hits=len(self.filter_results), total=self.indexer.line_count)
+        elif self.filter_active:
+            left = self._fmt("st_filtered", hits=0, total=self.indexer.line_count)
         else:
             left = self._fmt("st_done", total=self.indexer.line_count, size=fmt_size(self.indexer.size))
         if len(self.edit_buffer) > 0:

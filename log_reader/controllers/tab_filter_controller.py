@@ -102,7 +102,8 @@ class FilterController(QObject):
             self.tab._filter_hit_text_map.clear()
             self.tab._filter_hit_lines.clear()
             import array
-            self.tab._filter_all_lines = array.array('Q')
+            import array
+        self.tab._filter_all_lines = array.array('Q')
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.tab.filter_active
@@ -113,6 +114,7 @@ class FilterController(QObject):
         self.tab.filter_context_lines = set()
         self.tab._filter_hit_text_map.clear()
         self.tab._filter_hit_lines.clear()
+        import array
         import array
         self.tab._filter_all_lines = array.array('Q')
         self.tab._filter_context_after = 0

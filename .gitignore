@@ -9,3 +9,4 @@ assets/*.icns
 assets/*.ico
 
 run_frozen.py
+test_500mb.log
