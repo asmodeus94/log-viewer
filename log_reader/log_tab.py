@@ -780,6 +780,7 @@ class LogTab(QWidget):
         sel.cursor = sel_cursor
         sel.format.setBackground(QColor(self.theme["highlight"]))
         sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
+        sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
         self._search_extra_sel = sel
 
         # Ustawiamy kursor bez fizycznego zaznaczenia tekstu w kontrolce,
