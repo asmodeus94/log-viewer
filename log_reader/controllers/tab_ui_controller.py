@@ -117,6 +117,14 @@ class UIController(QObject):
             self.tab.minimap._bg = QColor(t["minimap_bg"])
             self.tab.minimap._viewport_color = QColor(t["minimap_viewport"])
             self.tab.minimap.update()
+                # Zadbaj o paletę przy zmianie motywu (utrzymanie aktywnych kolorów w nieaktywnym stanie)
+        pal = self.tab.text.palette()
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
+        self.tab.text.setPalette(pal)
+
         self.tab._update_text_colors()
 
     def _update_text_colors(self) -> None:

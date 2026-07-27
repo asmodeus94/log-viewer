@@ -98,6 +98,14 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.setFont(font)
         self.setAcceptDrops(True)
         self._setup_actions()
+        # Wymuszenie takich samych kolorów Highlight dla stanu Inactive
+        # aby ExtraSelections (np. wyniki wyszukiwania) nie blakły po utracie focusu.
+        pal = self.palette()
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
+        self.setPalette(pal)
 
     def _setup_actions(self):
         self._action_copy = QAction(self)
