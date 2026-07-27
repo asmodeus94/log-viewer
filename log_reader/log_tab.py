@@ -731,7 +731,8 @@ class LogTab(QWidget):
             return
         self._cancel_follow_if_active()
         self._search_result_index = index
-        line_no, _text = self._search_results_all[index]
+        item = self._search_results_all[index]
+        line_no = item[0] if isinstance(item, tuple) else item
 
         # Używamy ujednoliconego goto, co od razu poprawia błędy nawigacji
         self._goto_file_line(line_no)

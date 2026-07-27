@@ -28,7 +28,7 @@ class EditController(QObject):
         if not selected_text.strip():
             return
 
-        dialog = FormatDialog(self.tab.tab, selected_text, self.tab._last_formatter)
+        dialog = FormatDialog(self.tab, selected_text, self.tab._last_formatter)
         dialog.exec()
 
         # Zapisz na przyszłość (tylko w sesji) wybór formattera
