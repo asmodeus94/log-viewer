@@ -783,15 +783,16 @@ class LogTab(QWidget):
         sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
         self._search_extra_sel = sel
 
-        # Ustawiamy kursor bez fizycznego zaznaczenia tekstu w kontrolce,
-        # aby uniknąć szarego systemowego tła (nieaktywnego zaznaczenia)
-        # nakładającego się na nasze żółte tło ExtraSelection.
-        # Po setTextCursor cursorPositionChanged odpali się i przebuduje listę
-        # ExtraSelections łącznie z bieżącą linią + tym podświetleniem.
+        # Aby uniknąć natywnego, szarego tła zaznaczenia tekstu w Qt (które pojawia się
+        # na bieżącym kursorze gdy widżet traci focus i nakłada się na nasze tło),
+        # musimy wyczyścić zaznaczenie na kursorze przed jego ustawieniem.
+        block_cursor.clearSelection()
         self.text.setTextCursor(block_cursor)
 
-        # Wymuś odświeżenie widżetu żeby ExtraSelection pojawiło się od razu,
-        # nawet gdy focus jest na innej kontrolce (np. liście wyszukiwania).
+        # Ręcznie przebudowujemy podświetlenia, a następnie wymuszamy odświeżenie
+        # widżetu żeby ExtraSelection (i pozbycie się natywnego zaznaczenia) pojawiło
+        # się od razu, nawet gdy focus jest na liście wyszukiwania.
+        self._update_current_line_highlight()
         self.text.viewport().update()
 
     def _update_current_line_highlight(self) -> None:
