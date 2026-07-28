@@ -13,14 +13,16 @@ from log_reader.indexer import LineIndexer
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
 _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 
-# Współdzielony licznik postępu — globalny w kontekście procesu roboczego.
+# Współdzielone liczniki postępu — globalne w kontekście procesu roboczego.
 _shared_filter_progress_bytes = None
+_shared_filter_hits = None
 
 
-def _filter_init_worker(progress_val: "multiprocessing.Value") -> None:
-    """Inicjalizator procesu roboczego — ustawia globalny licznik postępu."""
-    global _shared_filter_progress_bytes
+def _filter_init_worker(progress_val: "multiprocessing.Value", hits_val: "multiprocessing.Value") -> None:
+    """Inicjalizator procesu roboczego — ustawia globalne liczniki postępu."""
+    global _shared_filter_progress_bytes, _shared_filter_hits
     _shared_filter_progress_bytes = progress_val
+    _shared_filter_hits = hits_val
 
 
 def _filter_worker_chunk(
@@ -104,15 +106,25 @@ def _filter_worker_chunk(
                 if lines and lines[-1] == b"":
                     lines.pop()
 
+                local_hits = 0
                 for line_bytes in lines:
                     if strategy.match(line_bytes):
                         results.append(line_no)
+                        local_hits += 1
                     line_no += 1
+
+                global _shared_filter_hits
+                if local_hits > 0 and _shared_filter_hits is not None:
+                    with _shared_filter_hits.get_lock():
+                        _shared_filter_hits.value += local_hits
 
         # Obsłuż ewentualny carry na samym końcu zakresu (linia bez \n)
         if carry:
             if strategy.match(carry):
                 results.append(line_no)
+                if _shared_filter_hits is not None:
+                    with _shared_filter_hits.get_lock():
+                        _shared_filter_hits.value += 1
 
     except Exception:
         pass
@@ -375,15 +387,15 @@ class FilterEngine:
         ]
 
         shared_bytes = multiprocessing.Value('Q', 0)
+        shared_hits = multiprocessing.Value('Q', 0)
         # Słownik: chunk_id → array wyników (dla zachowania kolejności po scaleniu)
         chunk_results: dict[int, "array.array[int]"] = {}
-        total_hits = 0
 
         try:
             with multiprocessing.Pool(
                 n_workers,
                 initializer=_filter_init_worker,
-                initargs=(shared_bytes,)
+                initargs=(shared_bytes, shared_hits)
             ) as pool:
                 # imap_unordered — iterator dostarczający wyniki chunk po chunku,
                 # w kolejności ich ukończenia (nie koniecznie wg chunk_id).
@@ -402,9 +414,10 @@ class FilterEngine:
                         # Żaden chunk jeszcze nie skończył — raportuj postęp
                         # na podstawie licznika bajtów ze współdzielonej pamięci.
                         bytes_done = shared_bytes.value
+                        current_hits = shared_hits.value
                         pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
                         try:
-                            on_progress(min(pct, 99.0), total_hits)
+                            on_progress(min(pct, 99.0), current_hits)
                         except Exception:
                             pass
                         continue
@@ -412,15 +425,15 @@ class FilterEngine:
                         # Wszystkie chunki zostały odebrane — kończymy pętlę.
                         break
 
-                    # Odbieramy wynik chunku: aktualizujemy licznik trafień na bieżąco
+                    # Odbieramy wynik chunku: dodajemy do wyników
                     chunk_results[chunk_id] = partial
-                    total_hits += len(partial)
 
                     bytes_done = shared_bytes.value
+                    current_hits = shared_hits.value
                     pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
                     try:
                         # Przekazujemy wyniki bieżącego chunku — GUI może dołączyć je do listy
-                        on_progress(min(pct, 99.0), total_hits, "filtering", partial)
+                        on_progress(min(pct, 99.0), current_hits, "filtering", partial)
                     except Exception:
                         pass
 
