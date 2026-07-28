@@ -1,3 +1,4 @@
+from PySide6 import QtCore
 from PySide6 import QtGui, QtWidgets
 from PySide6.QtCore import QPoint
 import bisect
@@ -71,7 +72,22 @@ class UIController(QObject):
         mono_font.setPointSize(9)
 
         self.tab.search_results_view.setFont(mono_font)
-        self.tab.search_results_view.clicked.connect(self.tab._on_search_result_clicked)
+        self.tab.search_results_view.activated.connect(self.tab._on_search_result_clicked)
+        # Filtr zdarzeń dla obsługi klawisza Return/Enter na systemie Mac OS
+        class ReturnKeyFilter(QtCore.QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QtCore.QEvent.KeyPress:
+                    if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+                        index = obj.currentIndex()
+                        if index.isValid():
+                            obj.activated.emit(index)
+                        return True
+                return super().eventFilter(obj, event)
+        self.tab._return_key_filter = ReturnKeyFilter(self.tab)
+        self.tab.search_results_view.installEventFilter(self.tab._return_key_filter)
+
+        # Poprawka: nawigacja klawiszem enter i double-click
+        self.tab.search_results_view.doubleClicked.connect(self.tab._on_search_result_clicked)
 
         self.tab.minimap.position_clicked.connect(self.tab._on_minimap_click)
         self.tab.pct_label.setStyleSheet(f"color: {THEME_DARK['fg_dim']}; font-size: 10px; padding: 4px;")
@@ -117,6 +133,13 @@ class UIController(QObject):
             self.tab.minimap._bg = QColor(t["minimap_bg"])
             self.tab.minimap._viewport_color = QColor(t["minimap_viewport"])
             self.tab.minimap.update()
+        pal = self.tab.text.palette()
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
+        self.tab.text.setPalette(pal)
+
         self.tab._update_text_colors()
 
     def _update_text_colors(self) -> None:
