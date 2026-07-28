@@ -2,7 +2,6 @@ import re
 import array
 import threading
 import multiprocessing
-import time
 import sys
 from typing import Callable, List, Optional, Tuple, Iterator
 from abc import ABC, abstractmethod
@@ -359,7 +358,11 @@ class FilterEngine:
 
         Plik dzielony jest na N zakresów wzdłuż granic linii (z istniejącego indeksu).
         Każdy rdzeń CPU dostaje swój zakres i zwraca pasujące numery linii.
-        Wyniki są scalane w kolejności, zachowując porządek linii w pliku.
+
+        Używa imap_unordered zamiast map_async, dzięki czemu wyniki każdego
+        chunku są odbierane natychmiast po jego zakończeniu — licznik trafień
+        jest aktualizowany na bieżąco przez on_progress.
+        Wyniki są scalane w kolejności (po chunk_id), zachowując porządek linii.
         """
         n_workers = max(2, multiprocessing.cpu_count())
         ranges = self._compute_search_ranges(n_workers)
@@ -372,7 +375,9 @@ class FilterEngine:
         ]
 
         shared_bytes = multiprocessing.Value('Q', 0)
-        chunk_results: List[Tuple[int, "array.array[int]"]] = []
+        # Słownik: chunk_id → array wyników (dla zachowania kolejności po scaleniu)
+        chunk_results: dict[int, "array.array[int]"] = {}
+        total_hits = 0
 
         try:
             with multiprocessing.Pool(
@@ -380,28 +385,44 @@ class FilterEngine:
                 initializer=_filter_init_worker,
                 initargs=(shared_bytes,)
             ) as pool:
-                async_result = pool.map_async(_filter_worker_chunk, args_list)
+                # imap_unordered — iterator dostarczający wyniki chunk po chunku,
+                # w kolejności ich ukończenia (nie koniecznie wg chunk_id).
+                imap_iter = pool.imap_unordered(_filter_worker_chunk, args_list)
 
-                # Pętla monitorująca — zgłasza postęp i obsługuje anulowanie
-                while not async_result.ready():
+                while True:
                     if self._cancel.is_set() or not self._is_current_session(session):
                         pool.terminate()
                         return
 
+                    try:
+                        # Czekaj na kolejny wynik z limitem 0.1 s — pozwala
+                        # sprawdzać anulowanie bez blokowania wątku na stałe.
+                        chunk_id, partial = imap_iter.next(timeout=0.1)
+                    except multiprocessing.TimeoutError:
+                        # Żaden chunk jeszcze nie skończył — raportuj postęp
+                        # na podstawie licznika bajtów ze współdzielonej pamięci.
+                        bytes_done = shared_bytes.value
+                        pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
+                        try:
+                            on_progress(min(pct, 99.0), total_hits)
+                        except Exception:
+                            pass
+                        continue
+                    except StopIteration:
+                        # Wszystkie chunki zostały odebrane — kończymy pętlę.
+                        break
+
+                    # Odbieramy wynik chunku: aktualizujemy licznik trafień na bieżąco
+                    chunk_results[chunk_id] = partial
+                    total_hits += len(partial)
+
                     bytes_done = shared_bytes.value
                     pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
                     try:
-                        on_progress(min(pct, 99.0), 0)
+                        # Przekazujemy wyniki bieżącego chunku — GUI może dołączyć je do listy
+                        on_progress(min(pct, 99.0), total_hits, "filtering", partial)
                     except Exception:
                         pass
-
-                    time.sleep(0.1)
-
-                # Sprawdź anulowanie jeszcze raz tuż przed pobraniem wyników
-                if self._cancel.is_set() or not self._is_current_session(session):
-                    return
-
-                chunk_results = async_result.get()
 
         except Exception as e:
             if self._is_current_session(session) and not self._cancel.is_set():
@@ -411,9 +432,13 @@ class FilterEngine:
                     pass
             return
 
-        # Scal wyniki — chunk_id gwarantuje zachowanie kolejności linii w pliku
+        # Sprawdź anulowanie przed scaleniem
+        if self._cancel.is_set() or not self._is_current_session(session):
+            return
+
+        # Scal wyniki — sortowanie po chunk_id gwarantuje zachowanie kolejności linii
         merged: "array.array[int]" = array.array('Q')
-        for _chunk_id, partial in sorted(chunk_results, key=lambda x: x[0]):
+        for _chunk_id, partial in sorted(chunk_results.items(), key=lambda x: x[0]):
             merged.extend(partial)
 
         if self._is_current_session(session) and not self._cancel.is_set():

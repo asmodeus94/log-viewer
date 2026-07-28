@@ -64,7 +64,7 @@ class IndexerWorker(QObject):
 
 class FilterWorker(QObject):
     """Worker uruchamiający FilterEngine w tle."""
-    progress = Signal(float, int, str)
+    progress = Signal(float, int, str, object)  # pct, hits, state, partial_results (array lub None)
     finished = Signal(object, object, object, object, object, object)  # results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
 
     def __init__(self, engine: FilterEngine, pattern: str, use_regex: bool,
@@ -80,8 +80,9 @@ class FilterWorker(QObject):
 
     @Slot()
     def run(self):
-        def on_progress(pct: float, hits: int, state: str = "filtering"):
-            self.progress.emit(pct, hits, state)
+        def on_progress(pct: float, hits: int, state: str = "filtering",
+                        partial_results: object = None):
+            self.progress.emit(pct, hits, state, partial_results)
 
         def on_done(results, error):
             if error or not results:
@@ -89,9 +90,9 @@ class FilterWorker(QObject):
                 return
 
             if self._context_after > 0:
-                self.progress.emit(100.0, len(results), "context")
+                self.progress.emit(100.0, len(results), "context", None)
             else:
-                self.progress.emit(100.0, len(results), "filtering")
+                self.progress.emit(100.0, len(results), "filtering", None)
 
             filter_all_lines = array.array('Q')
             total = self._engine.indexer.line_count if self._engine.indexer else 0
