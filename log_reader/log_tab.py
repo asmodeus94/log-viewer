@@ -790,6 +790,10 @@ class LogTab(QWidget):
         # ExtraSelections łącznie z bieżącą linią + tym podświetleniem.
         self.text.setTextCursor(block_cursor)
 
+        # Wymuś odświeżenie widżetu żeby ExtraSelection pojawiło się od razu,
+        # nawet gdy focus jest na innej kontrolce (np. liście wyszukiwania).
+        self.text.viewport().update()
+
     def _update_current_line_highlight(self) -> None:
         """Przebudowuje listę ExtraSelections.
 
