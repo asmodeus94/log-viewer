@@ -72,7 +72,6 @@ class UIController(QObject):
         mono_font.setPointSize(9)
 
         self.tab.search_results_view.setFont(mono_font)
-        self.tab.search_results_view.clicked.connect(self.tab._on_search_result_clicked)
         self.tab.search_results_view.activated.connect(self.tab._on_search_result_clicked)
         # Filtr zdarzeń dla obsługi klawisza Return/Enter na systemie Mac OS
         class ReturnKeyFilter(QtCore.QObject):
