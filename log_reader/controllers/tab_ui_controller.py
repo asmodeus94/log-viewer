@@ -73,6 +73,8 @@ class UIController(QObject):
         self.tab.search_results_view.setFont(mono_font)
         self.tab.search_results_view.clicked.connect(self.tab._on_search_result_clicked)
         self.tab.search_results_view.activated.connect(self.tab._on_search_result_clicked)
+        if hasattr(self.tab.search_results_view, 'enter_pressed'):
+            self.tab.search_results_view.enter_pressed.connect(self.tab._on_search_result_clicked)
         # Fix: handle enter key navigation via activated and ensure arrow navigation triggers selection changes if desired
         # but to just navigate via enter on keyboard:
         self.tab.search_results_view.doubleClicked.connect(self.tab._on_search_result_clicked)
@@ -122,6 +124,11 @@ class UIController(QObject):
             self.tab.minimap._viewport_color = QColor(t["minimap_viewport"])
             self.tab.minimap.update()
 
+
+        pal = self.tab.text.palette()
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        self.tab.text.setPalette(pal)
 
         self.tab._update_text_colors()
 

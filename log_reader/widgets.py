@@ -99,6 +99,11 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.setAcceptDrops(True)
         self._setup_actions()
 
+        pal = self.palette()
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        self.setPalette(pal)
+
 
     def _setup_actions(self):
         self._action_copy = QAction(self)
@@ -675,3 +680,15 @@ class ExpandingLineEdit(QTextEdit):
                 self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             else:
                 self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+class SearchResultsListView(QListView):
+    enter_pressed = Signal(QModelIndex)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            index = self.currentIndex()
+            if index.isValid():
+                self.enter_pressed.emit(index)
+            event.accept()
+        else:
+            super().keyPressEvent(event)

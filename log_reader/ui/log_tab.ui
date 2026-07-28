@@ -127,7 +127,7 @@
          </widget>
         </item>
         <item>
-         <widget class="QListView" name="search_results_view">
+         <widget class="SearchResultsListView" name="search_results_view">
           <property name="uniformItemSizes">
            <bool>true</bool>
           </property>

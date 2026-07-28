@@ -747,9 +747,7 @@ class LogTab(QWidget):
             self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.PositionAtCenter)
         self._update_search_results_label()
 
-        # Wymuś prawidłowe narysowanie tła
-        self.text.setFocus()
-        self.search_results_view.setFocus()
+
 
     @Slot(QtCore.QModelIndex)
     def _on_search_result_clicked(self, index: QtCore.QModelIndex) -> None:
@@ -784,6 +782,7 @@ class LogTab(QWidget):
         sel.cursor = sel_cursor
         sel.format.setBackground(QColor(self.theme["highlight"]))
         sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
+        sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
         self._search_extra_sel = sel
 
         # Ustawiamy kursor bez fizycznego zaznaczenia tekstu w kontrolce,
@@ -846,6 +845,7 @@ class LogTab(QWidget):
                 sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
                 sel.format.setBackground(QColor(t["highlight"]))
                 sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
+                sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
                 sels.append(sel)
 
         # 3) Zakładki — zielone tło.
