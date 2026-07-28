@@ -99,9 +99,14 @@ class LogPlainTextEdit(QPlainTextEdit):
         self.setAcceptDrops(True)
         self._setup_actions()
 
+        # Wymuszamy, aby nieaktywny stan kontrolki miał identyczne kolory
+        # jak aktywny (tło, podświetlenie, tekst), żeby np. wynik wyszukiwania
+        # (żółte tło) nie bladł, gdy focus jest na dolnej liście wyników.
         pal = self.palette()
         pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
         pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
         self.setPalette(pal)
 
     def _setup_actions(self):
@@ -396,15 +401,7 @@ class SearchResultsModel(QAbstractListModel):
         if role == Qt.UserRole:
             return line_no
         if role == Qt.ForegroundRole:
-            upper = text[:200].upper()
-            if "[ERROR]" in upper or " ERROR " in upper:
-                return self._color_error
-            elif "[WARN]" in upper or " WARN " in upper:
-                return self._color_warn
-            elif "[INFO]" in upper or " INFO " in upper:
-                return self._color_info
-            elif "[DEBUG]" in upper or " DEBUG " in upper:
-                return self._color_debug
+            return None
         return None
 
     def clear(self) -> None:

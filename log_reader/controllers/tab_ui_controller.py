@@ -78,7 +78,7 @@ class UIController(QObject):
         class ReturnKeyFilter(QtCore.QObject):
             def eventFilter(self, obj, event):
                 if event.type() == QtCore.QEvent.KeyPress:
-                    if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                    if event.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
                         index = obj.currentIndex()
                         if index.isValid():
                             obj.activated.emit(index)
@@ -137,6 +137,8 @@ class UIController(QObject):
         pal = self.tab.text.palette()
         pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
         pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
+        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
         self.tab.text.setPalette(pal)
 
         self.tab._update_text_colors()
