@@ -104,7 +104,6 @@ class LogPlainTextEdit(QPlainTextEdit):
         pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
         self.setPalette(pal)
 
-
     def _setup_actions(self):
         self._action_copy = QAction(self)
         self._action_copy.setShortcut(QKeySequence("Ctrl+C"))
@@ -680,15 +679,3 @@ class ExpandingLineEdit(QTextEdit):
                 self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             else:
                 self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-class SearchResultsListView(QListView):
-    enter_pressed = Signal(QModelIndex)
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            index = self.currentIndex()
-            if index.isValid():
-                self.enter_pressed.emit(index)
-            event.accept()
-        else:
-            super().keyPressEvent(event)

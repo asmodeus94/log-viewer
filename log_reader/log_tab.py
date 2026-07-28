@@ -747,8 +747,6 @@ class LogTab(QWidget):
             self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.PositionAtCenter)
         self._update_search_results_label()
 
-
-
     @Slot(QtCore.QModelIndex)
     def _on_search_result_clicked(self, index: QtCore.QModelIndex) -> None:
         if not index.isValid():
