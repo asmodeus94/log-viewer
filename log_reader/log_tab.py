@@ -38,7 +38,7 @@ from .helpers import (
 from .i18n import I18N
 from .config import UserConfig
 from .indexer import LineIndexer, IndexEntry
-from .controllers import FileController, EditController, SearchController, FilterController, UIController
+from .controllers import FileController, EditController, SearchController, FilterController, UIController, BookmarkController
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
@@ -71,6 +71,7 @@ class LogTab(QWidget):
         self.edit_controller = EditController(self)
         self.search_controller = SearchController(self)
         self.filter_controller = FilterController(self)
+        self.bookmark_controller = BookmarkController(self)
         self.ui_controller = UIController(self)
 
         # Stan pliku
@@ -1078,71 +1079,20 @@ class LogTab(QWidget):
         return self.edit_controller.cmd_export()
 
     # -------------------------------------------------------- bookmarks ----
-    def cmd_toggle_bookmark(self) -> None:
-        """Przełącza zakładkę w LINII KURSORA.
+    def cmd_toggle_bookmark(self):
+        return self.bookmark_controller.cmd_toggle_bookmark()
 
-        Działa wyłącznie na jednej linii — bez względu na to, czy istnieje
-        selekcja. To celowa decyzja UX: wieloliniowe, przypadkowe selekcje
-        (np. Shift+klik po przewinięciu, Cmd+A) nie powinny powodować
-        masowego zakładkowania całego zakresu. Przed dodaniem zakładki
-        selekcja jest czyszczona (anulowana), żeby zniknęło podświetlenie
-        Qt, które można pomylić z kolorem zakładki.
-        """
-        cursor = self.text.textCursor()
-        # Wyczyść selekcję (zostaw sam kursor) — eliminuje wizualne mylenie
-        # zaznaczenia Qt z kolorem zakładki i zapobiega przypadkowym
-        # operacjom na wielu liniach. clearSelection() zostawia kursor w
-        # obecnej pozycji bez ryzyka przesunięcia na koniec dokumentu.
-        if cursor.hasSelection():
-            cursor.clearSelection()
-            self.text.setTextCursor(cursor)
-            cursor = self.text.textCursor()
-        widget_line = cursor.blockNumber()
-        if widget_line < 0 or widget_line >= len(self.line_map):
-            return
-        file_line = self.line_map[widget_line]
-        if file_line in self.bookmarks:
-            del self.bookmarks[file_line]
-            self._status(self.t("msg_bookmark_removed").format(n=file_line + 1))
-        else:
-            self.bookmarks[file_line] = None
-            self._status(self.t("msg_bookmark_added").format(n=file_line + 1))
-        self._refresh_bookmarks_tree()
-        self._reload_current_view()
-        # Po reload ustaw kursor z powrotem na tę samą linię — bez tego
-        # _load_window przesuwa go na początek dokumentu.
-        block = self.text.document().findBlockByNumber(widget_line)
-        if block.isValid():
-            new_cur = QtGui.QTextCursor(block)
-            self.text.setTextCursor(new_cur)
+    def _refresh_bookmarks_tree(self):
+        return self.bookmark_controller._refresh_bookmarks_tree()
 
-    def _refresh_bookmarks_tree(self) -> None:
-        self.bm_tree.clear()
-        for ln in sorted(self.bookmarks.keys()):
-            item = QTreeWidgetItem([str(ln + 1)])
-            item.setData(0, Qt.UserRole, ln)
-            self.bm_tree.addTopLevelItem(item)
+    def _refresh_edits_tree(self):
+        return self.bookmark_controller._refresh_edits_tree()
 
-    def _refresh_edits_tree(self) -> None:
-        self.ed_tree.clear()
-        for ln in sorted(self.edit_buffer._edits.keys()):
-            item = QTreeWidgetItem([str(ln + 1)])
-            item.setData(0, Qt.UserRole, ln)
-            self.ed_tree.addTopLevelItem(item)
+    def _goto_bookmark(self):
+        return self.bookmark_controller._goto_bookmark()
 
-    def _goto_bookmark(self) -> None:
-        item = self.bm_tree.currentItem()
-        if not item:
-            return
-        ln = item.data(0, Qt.UserRole)
-        self._goto_file_line(ln)
-
-    def _goto_edit(self) -> None:
-        item = self.ed_tree.currentItem()
-        if not item:
-            return
-        ln = item.data(0, Qt.UserRole)
-        self._goto_file_line(ln)
+    def _goto_edit(self):
+        return self.bookmark_controller._goto_edit()
 
     def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
         self._cancel_follow_if_active()
@@ -1192,94 +1142,20 @@ class LogTab(QWidget):
             new_cur = QtGui.QTextCursor(block)
             self.text.setTextCursor(new_cur)
 
-    def _delete_selected_bookmarks(self) -> None:
-        """Usuwa wszystkie zaznaczone w drzewie Zakładki.
+    def _delete_selected_bookmarks(self):
+        return self.bookmark_controller._delete_selected_bookmarks()
 
-        Po usunięciu zaznacza następny element w drzewie (jak w IDE —
-        zaznaczenie „przesuwa się" na kolejny wpis, zamiast znikać).
-        """
-        items = self.bm_tree.selectedItems()
-        if not items:
-            self._status(self.t("msg_no_selection"))
-            return
-        # Zapamiętaj indeks pierwszego zaznaczonego elementu — po odświeżeniu
-        # spróbujemy zaznaczyć element na tej samej pozycji (czyli następny).
-        first_selected_idx = self.bm_tree.indexOfTopLevelItem(items[0])
-        removed = 0
-        for item in items:
-            ln = item.data(0, Qt.UserRole)
-            if ln in self.bookmarks:
-                del self.bookmarks[ln]
-                removed += 1
-        if removed:
-            self._refresh_bookmarks_tree()
-            self._reload_current_view()
-            self._status(self.t("msg_bookmarks_removed").format(n=removed))
-            # Auto-zaznacz następny element na tej samej pozycji.
-            count = self.bm_tree.topLevelItemCount()
-            if count > 0:
-                next_idx = min(first_selected_idx, count - 1)
-                self.bm_tree.setCurrentItem(self.bm_tree.topLevelItem(next_idx))
+    def _delete_selected_edits(self):
+        return self.bookmark_controller._delete_selected_edits()
 
-    def _delete_selected_edits(self) -> None:
-        """Usuwa wszystkie zaznaczone w drzewie Edycje (czyści bufor dla nich).
+    def cmd_next_bookmark(self):
+        return self.bookmark_controller.cmd_next_bookmark()
 
-        Po usunięciu zaznacza następny element w drzewie (jak w IDE).
-        """
-        items = self.ed_tree.selectedItems()
-        if not items:
-            self._status(self.t("msg_no_selection"))
-            return
-        first_selected_idx = self.ed_tree.indexOfTopLevelItem(items[0])
-        removed = 0
-        for item in items:
-            ln = item.data(0, Qt.UserRole)
-            if self.edit_buffer.has(ln):
-                self.edit_buffer.discard(ln)
-                removed += 1
-        if removed:
-            self._refresh_edits_tree()
-            self._reload_current_view()
-            self._refresh_status()
-            self._status(self.t("msg_edits_removed").format(n=removed))
-            # Auto-zaznacz następny element na tej samej pozycji.
-            count = self.ed_tree.topLevelItemCount()
-            if count > 0:
-                next_idx = min(first_selected_idx, count - 1)
-                self.ed_tree.setCurrentItem(self.ed_tree.topLevelItem(next_idx))
+    def cmd_prev_bookmark(self):
+        return self.bookmark_controller.cmd_prev_bookmark()
 
-    def cmd_next_bookmark(self) -> None:
-        if not self.bookmarks:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_bookmarks"))
-            return
-        cursor = self.text.textCursor()
-        current_file_line = self.line_map[cursor.blockNumber()] if self.line_map else -1
-        sorted_bms = sorted(self.bookmarks.keys())
-        for ln in sorted_bms:
-            if ln > current_file_line:
-                self._goto_file_line(ln)
-                return
-        self._goto_file_line(sorted_bms[0])
-
-    def cmd_prev_bookmark(self) -> None:
-        if not self.bookmarks:
-            QMessageBox.information(self._main, self.t("app_title"), self.t("msg_no_bookmarks"))
-            return
-        cursor = self.text.textCursor()
-        current_file_line = self.line_map[cursor.blockNumber()] if self.line_map else (self.indexer.line_count if self.indexer else 0)
-        sorted_bms = sorted(self.bookmarks.keys(), reverse=True)
-        for ln in sorted_bms:
-            if ln < current_file_line:
-                self._goto_file_line(ln)
-                return
-        self._goto_file_line(sorted_bms[0])
-
-    def cmd_clear_bookmarks(self) -> None:
-        if not self.bookmarks:
-            return
-        self.bookmarks.clear()
-        self._refresh_bookmarks_tree()
-        self._reload_current_view()
+    def cmd_clear_bookmarks(self):
+        return self.bookmark_controller.cmd_clear_bookmarks()
 
     # ----------------------------------------------------------- follow ----
     def _cancel_follow_if_active(self) -> None:

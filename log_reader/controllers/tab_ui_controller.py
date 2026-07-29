@@ -37,19 +37,19 @@ class UIController(QObject):
         self.tab.pct_label = self.tab.ui.pct_label
 
         # Set up signals
-        self.tab.bm_tree.itemDoubleClicked.connect(self.tab._goto_bookmark)
-        self.tab.btn_del_bookmarks.clicked.connect(self.tab._delete_selected_bookmarks)
+        self.tab.bm_tree.itemDoubleClicked.connect(self.tab.bookmark_controller._goto_bookmark)
+        self.tab.btn_del_bookmarks.clicked.connect(self.tab.bookmark_controller._delete_selected_bookmarks)
         QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.tab.bm_tree,
-                        activated=self.tab._delete_selected_bookmarks)
+                        activated=self.tab.bookmark_controller._delete_selected_bookmarks)
         QtGui.QShortcut(QKeySequence("Backspace"), self.tab.bm_tree,
-                        activated=self.tab._delete_selected_bookmarks)
+                        activated=self.tab.bookmark_controller._delete_selected_bookmarks)
 
-        self.tab.ed_tree.itemDoubleClicked.connect(self.tab._goto_edit)
-        self.tab.btn_del_edits.clicked.connect(self.tab._delete_selected_edits)
+        self.tab.ed_tree.itemDoubleClicked.connect(self.tab.bookmark_controller._goto_edit)
+        self.tab.btn_del_edits.clicked.connect(self.tab.bookmark_controller._delete_selected_edits)
         QtGui.QShortcut(QKeySequence.StandardKey.Delete, self.tab.ed_tree,
-                        activated=self.tab._delete_selected_edits)
+                        activated=self.tab.bookmark_controller._delete_selected_edits)
         QtGui.QShortcut(QKeySequence("Backspace"), self.tab.ed_tree,
-                        activated=self.tab._delete_selected_edits)
+                        activated=self.tab.bookmark_controller._delete_selected_edits)
 
         self.tab.text.files_dropped.connect(self.tab._main._on_files_dropped)
         self.tab.text.verticalScrollBar().valueChanged.connect(self.tab._on_scroll_changed)
