@@ -58,5 +58,5 @@ Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejśc
 ### 7. `widgets.py`
 Definiuje wyspecjalizowane, wizualne komponenty widoku dla biblioteki PySide6:
 * `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
-* `MiniMap` – maluje na kanwie pionową mapę w oparciu o wykryte alerty typu *ERROR*, *WARN*, *INFO* czy *DEBUG*, oferując błyskawiczną nawigację.
+* `MiniMap` – maluje na kanwie pionową mapę wskaźnika pozycji i widocznego obszaru w oparciu o całkowitą liczbę wierszy, oferując błyskawiczną nawigację.
 * `SearchResultsModel` – model danych oparty na `QAbstractListModel`, optymalizujący listę setek tysięcy rezultatów bez obciążania i zawieszania aplikacji za pomocą leniwego pobierania elementów w miarę scrollowania (`fetchMore()`).

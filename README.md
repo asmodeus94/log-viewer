@@ -8,7 +8,7 @@
 ## Główne możliwości:
 * **Asynchroniczne ładowanie** plików wielkości wielu GB przy minimalnym zużyciu zasobów,
 * **Zaawansowane filtrowanie** po konkretnych wzorcach lub wyrażeniach regularnych wraz z możliwością ustawienia tzw. linii kontekstu po każdym wystąpieniu.
-* **Mini-mapa** z kolorowaniem logów (`ERROR`, `WARN`, `INFO`, `DEBUG`).
+* **Mini-mapa** służąca do błyskawicznej nawigacji i podglądu pozycji w pliku.
 * Możliwość robienia **zakładek** (bookmarks) i nanoszenia i zapisywania **edycji** w pliku.
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
 * Interfejs wyposażony w funkcjonalność Drag&Drop.

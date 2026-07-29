@@ -354,31 +354,24 @@ class TestCurrentLineHighlightAndFormatting:
            "Zakładkowane bloki: {bookmark_blocks}"
         )
 
-    def test_bookmark_and_log_level_coexist(self, app_instance):
-        """Linia INFO z dodaną zakładką: zielone tło (ExtraSelection) + niebieski foreground (charFormat).
+    def test_bookmark_formatting(self, app_instance):
+        """Linia z dodaną zakładką: zielone tło (ExtraSelection).
 
         Po refactorze tło zakładki jest dokładane przez ExtraSelections (nie
         przez charFormat, bo QPlainTextEdit z QSS background-color ignoruje
-        tła charFormat). Foreground nadal jest przez charFormat.
+        tła charFormat).
         """
         window, _ = app_instance
         window._load_window(at_line=0)
         app = QtWidgets.QApplication.instance()
         app.processEvents()
 
-        # Pierwsze 4 linie to INFO/WARN/ERROR/DEBUG — INFO jest w linii 0
         cursor = QtGui.QTextCursor(window.text.document().findBlockByNumber(0))
         window.text.setTextCursor(cursor)
         app.processEvents()
 
         window.cmd_toggle_bookmark()
         app.processEvents()
-
-        block0 = window.text.document().findBlockByNumber(0)
-        # Foreground z charFormat — INFO level
-        fg = block0.charFormat().foreground().color().name()
-        info_color = QtGui.QColor(window.theme["info"]).name()
-        assert fg == info_color, f"Foreground powinien być INFO, jest {fg}"
 
         # Tło zakładki — w ExtraSelections
         bookmark_color = QtGui.QColor(window.theme["bookmark"]).name()

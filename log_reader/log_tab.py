@@ -32,7 +32,6 @@ from .helpers import (
     WINDOW_SIZE_LINES, MAX_DISPLAY_LINES, MAX_DISPLAY_LINE_LENGTH,
     FOLLOW_POLL_MS, FILTER_PROGRESS_MS, DEFAULT_ENCODING,
     TAG_HIGHLIGHT, TAG_BOOKMARK, TAG_EDITED, TAG_TRUNCATED,
-    TAG_ERROR, TAG_WARN, TAG_INFO, TAG_DEBUG, TAG_TIMESTAMP, TAG_CONTEXT,
     SUPPORTED_ENCODINGS, OPEN_FILETYPES, THEME_DARK, THEME_LIGHT,
 )
 from .i18n import I18N
@@ -396,28 +395,13 @@ class LogTab(QWidget):
             tags.append(TAG_BOOKMARK)
         if was_truncated:
             tags.append(TAG_TRUNCATED)
-        tags.extend(self._detect_log_tags(display_text))
         return display_text, tags
-
-    def _detect_log_tags(self, text: str) -> List[str]:
-        tags = []
-        upper = text.upper()
-        if " ERROR " in upper or upper.startswith("ERROR") or "[ERROR]" in upper:
-            tags.append(TAG_ERROR)
-        elif " WARN " in upper or " WARNING " in upper or upper.startswith("WARN") or "[WARN]" in upper:
-            tags.append(TAG_WARN)
-        elif " INFO " in upper or upper.startswith("INFO") or "[INFO]" in upper:
-            tags.append(TAG_INFO)
-        elif " DEBUG " in upper or upper.startswith("DEBUG") or "[DEBUG]" in upper:
-            tags.append(TAG_DEBUG)
-        return tags
 
     def _apply_line_format(self, block, tag: str) -> None:
         """Nakłada formatowanie dla pojedynczego tagu na bloku.
 
         Podział odpowiedzialności:
-          - **Foreground** (kolor tekstu: ERROR/WARN/INFO/DEBUG, italic
-            truncated) — przez `setBlockCharFormat`, działa niezawodnie.
+          - **Foreground** (italic truncated) — przez `setBlockCharFormat`, działa niezawodnie.
           - **Background** (zakładka, edycja) — NIE tu, lecz w
             `_build_extra_selections` przez `ExtraSelections`. W Qt QPlainTextEdit
             z QSS ustawionym `background-color`, tła z charFormat są często
@@ -436,14 +420,6 @@ class LogTab(QWidget):
             font = fmt.font()
             font.setItalic(True)
             fmt.setFont(font)
-        elif tag == TAG_ERROR:
-            fmt.setForeground(QColor(t["error"]))
-        elif tag == TAG_WARN:
-            fmt.setForeground(QColor(t["warn"]))
-        elif tag == TAG_INFO:
-            fmt.setForeground(QColor(t["info"]))
-        elif tag == TAG_DEBUG:
-            fmt.setForeground(QColor(t["debug"]))
         # TAG_BOOKMARK i TAG_EDITED — tło dokładane przez ExtraSelections.
         cursor.setBlockCharFormat(fmt)
 
