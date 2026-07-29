@@ -194,7 +194,7 @@ class RegexStrategy(FilterStrategy):
 
         return not matched if self.negate else matched
 
-def read_file_chunks(path: str, chunk_size: int = 4 * 1024 * 1024) -> Iterator[bytes]:
+def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
     with open_maybe_compressed(path, "rb") as f:
         carry = b""
