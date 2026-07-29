@@ -102,16 +102,14 @@ def _filter_worker_chunk(
                         carry = data
                         continue
 
-                lines = complete_data.split(b"\n")
-                if lines and lines[-1] == b"":
-                    lines.pop()
+                local_hits_list = strategy.match_chunk(complete_data, line_no)
+                results.extend(local_hits_list)
+                local_hits = len(local_hits_list)
 
-                local_hits = 0
-                for line_bytes in lines:
-                    if strategy.match(line_bytes):
-                        results.append(line_no)
-                        local_hits += 1
-                    line_no += 1
+                lines_count = complete_data.count(b"\n")
+                if complete_data and not complete_data.endswith(b"\n"):
+                    lines_count += 1
+                line_no += lines_count
 
                 global _shared_filter_hits
                 if local_hits > 0 and _shared_filter_hits is not None:
@@ -120,11 +118,11 @@ def _filter_worker_chunk(
 
         # Obsłuż ewentualny carry na samym końcu zakresu (linia bez \n)
         if carry:
-            if strategy.match(carry):
-                results.append(line_no)
-                if _shared_filter_hits is not None:
-                    with _shared_filter_hits.get_lock():
-                        _shared_filter_hits.value += 1
+            carry_hits = strategy.match_chunk(carry, line_no)
+            results.extend(carry_hits)
+            if _shared_filter_hits is not None and carry_hits:
+                with _shared_filter_hits.get_lock():
+                    _shared_filter_hits.value += len(carry_hits)
 
     except Exception:
         pass
@@ -146,6 +144,19 @@ class FilterStrategy(ABC):
         """Sprawdza, czy przekazane bajty linii pasują do wzorca strategii."""
         pass
 
+    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+        """Domyślna implementacja chunkowa – dzieli na linie i wywołuje match()."""
+        lines = chunk.split(b"\n")
+        if lines and lines[-1] == b"":
+            lines.pop()
+
+        hits = []
+        for line_bytes in lines:
+            if self.match(line_bytes):
+                hits.append(start_line)
+            start_line += 1
+        return hits
+
 
 class PlainTextStrategy(FilterStrategy):
     """Strategia dla zwykłego wyszukiwania tekstu (bez wyrażeń regularnych)."""
@@ -163,6 +174,49 @@ class PlainTextStrategy(FilterStrategy):
             matched = self.needle_bytes in line_bytes
 
         return not matched if self.negate else matched
+
+    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+        if not self.needle_bytes:
+            return [] if self.negate else list(range(start_line, start_line + chunk.count(b"\n") + (1 if chunk and not chunk.endswith(b"\n") else 0)))
+
+        haystack = chunk.lower() if not self.case_sensitive else chunk
+        hits = []
+
+        if self.negate:
+            lines = haystack.split(b"\n")
+            if lines and lines[-1] == b"":
+                lines.pop()
+
+            for line_bytes in lines:
+                if self.needle_bytes not in line_bytes:
+                    hits.append(start_line)
+                start_line += 1
+            return hits
+
+        pos = 0
+        lines_counted = start_line
+        last_nl_pos = -1
+
+        while True:
+            hit_pos = haystack.find(self.needle_bytes, pos)
+            if hit_pos == -1:
+                break
+
+            nl_count = haystack.count(b"\n", last_nl_pos + 1, hit_pos)
+            lines_counted += nl_count
+            # Unikaj dodawania tej samej linii wielokrotnie, jeśli jest na niej wiele dopasowań
+            if not hits or hits[-1] != lines_counted:
+                hits.append(lines_counted)
+
+            next_nl = haystack.find(b"\n", hit_pos)
+            if next_nl == -1:
+                break
+
+            last_nl_pos = next_nl
+            lines_counted += 1
+            pos = next_nl + 1
+
+        return hits
 
 
 class RegexStrategy(FilterStrategy):
@@ -193,6 +247,12 @@ class RegexStrategy(FilterStrategy):
             matched = self.matcher_str.search(text) is not None
 
         return not matched if self.negate else matched
+
+    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+        # W przypadku Regex, używamy bezpiecznego podejścia z klasy bazowej (podział na linie).
+        # finditer na wieloliniowym ciągu dla złożonych regexów lub negacji mógłby być
+        # trudny do poprawnej obsługi. Fallback zapewnia pełną poprawność.
+        return super().match_chunk(chunk, start_line)
 
 def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
@@ -496,14 +556,13 @@ class FilterEngine:
                 chunk_count += 1
                 bytes_read += len(block)
 
-                lines = block.split(b"\n")
-                if lines and lines[-1] == b"":
-                    lines.pop()
+                chunk_hits = strategy.match_chunk(block, line_no)
+                results.extend(chunk_hits)
 
-                for line_bytes in lines:
-                    if strategy.match(line_bytes):
-                        results.append(line_no)
-                    line_no += 1
+                lines_count = block.count(b"\n")
+                if block and not block.endswith(b"\n"):
+                    lines_count += 1
+                line_no += lines_count
 
                 if self._is_current_session(session) and not self._cancel.is_set():
                     pct = (bytes_read / size * 100.0) if size else 0.0
