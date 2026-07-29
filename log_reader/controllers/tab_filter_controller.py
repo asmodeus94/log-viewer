@@ -62,8 +62,9 @@ class FilterController(QObject):
         self.tab._filter_thread.start()
         self.tab._status(self.tab._fmt("st_filtering", pct=0.0, hits=0))
 
-    @Slot(float, int, str)
-    def _on_filter_progress(self, pct: float, hits: int, state: str) -> None:
+    @Slot(float, int, str, object)
+    def _on_filter_progress(self, pct: float, hits: int, state: str,
+                            partial_results: object = None) -> None:
         if state == "context":
             self.tab._status(self.tab.t("st_context_building"))
             return

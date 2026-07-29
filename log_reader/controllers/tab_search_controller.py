@@ -102,8 +102,9 @@ class SearchController(QObject):
         self.tab._search_thread.finished.connect(self.tab._search_thread.deleteLater, Qt.QueuedConnection)
         self.tab._search_thread.start()
 
-    @Slot(float, int, str)
-    def _on_search_progress(self, pct: float, hits: int, state: str) -> None:
+    @Slot(float, int, str, object)
+    def _on_search_progress(self, pct: float, hits: int, state: str,
+                            partial_results: object = None) -> None:
         if state == "context":
             self.tab._status(self.tab.t("st_context_building"))
             return
@@ -111,6 +112,11 @@ class SearchController(QObject):
         self.tab._search_results_label.setText(
             f"{self.tab.t('lbl_search_results_searching')} ({hits})"
         )
+        # Jeśli otrzymaliśmy częściowe wyniki z nowo ukończonego chunku,
+        # dodajemy je na bieżąco do modelu listy (bez resetowania całości)
+        if partial_results is not None and len(partial_results) > 0 and self.tab._search_model:
+            self.tab._search_results_all = getattr(self.tab, '_search_results_all', [])
+            self.tab._search_model.append_results(list(partial_results))
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:

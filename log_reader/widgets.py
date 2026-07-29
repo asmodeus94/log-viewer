@@ -413,7 +413,8 @@ class SearchResultsModel(QAbstractListModel):
     def get_line_no(self, row: int) -> Optional[int]:
         """Zwraca numer linii pliku dla danego wiersza wyników."""
         if 0 <= row < len(self._all_results):
-            return self._all_results[row][0]
+            item = self._all_results[row]
+            return item[0] if isinstance(item, tuple) else item
         return None
 
     def find_row_by_line_no(self, line_no: int) -> int:

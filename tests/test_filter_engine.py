@@ -277,3 +277,164 @@ class TestRegexOnBytes:
         lines2 = list(results2)
         assert lines1 == lines2
         idx.close()
+
+
+class TestParallelSearch:
+    """Testy trybu równoległego (multiprocessing) FilterEngine."""
+
+    def _make_large_file(self, num_lines: int) -> str:
+        """Tworzy plik > 50 MB potrzebny do aktywacji trybu równoległego."""
+        import tempfile
+        path = tempfile.mktemp(suffix=".log")
+        levels = ["INFO", "WARN", "ERROR", "DEBUG"]
+        # ~200 bajtów/linię → 300k linii ≈ 60 MB (powyżej progu 50 MB)
+        with open(path, "wb") as f:
+            for i in range(num_lines):
+                level = levels[i % 4]
+                msg = f"2026-07-04 [{level}] line{i:>8d} - " + ("x" * 150) + "\n"
+                f.write(msg.encode("utf-8"))
+        return path
+
+    def test_parallel_same_results_as_single(self, temp_log_file):
+        """
+        Tryb równoległy musi zwracać identyczne numery linii co single-thread.
+        Weryfikujemy przez porównanie wyników obu trybów na tym samym pliku.
+        Oba tryby są wywoływane przez start() — session_id jest poprawnie ustawiony.
+        """
+        from log_reader.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+        path = self._make_large_file(num_lines=300_000)
+        try:
+            idx = LineIndexer(path)
+
+            # --- Single-thread: użyj małego pliku poniżej progu równoległości ---
+            path_small = temp_log_file(num_lines=50_000)
+            idx_small = LineIndexer(path_small)
+            results_single: list = []
+            done_s = threading.Event()
+            engine_s = FilterEngine(path_small, idx_small)
+            engine_s.start(
+                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                on_progress=lambda p, h: None,
+                on_done=lambda r, e: (results_single.extend(r), done_s.set()),
+            )
+            done_s.wait(timeout=60)
+            idx_small.close()
+
+            # --- Parallel: plik >= 50 MB — start() automatycznie wybierze _run_parallel ---
+            assert idx.size >= _PARALLEL_SEARCH_THRESHOLD, (
+                f"Plik ({idx.size} B) mniejszy niż próg ({_PARALLEL_SEARCH_THRESHOLD} B)"
+            )
+            results_par: list = []
+            done_p = threading.Event()
+            engine_p = FilterEngine(path, idx)
+            engine_p.start(
+                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                on_progress=lambda p, h: None,
+                on_done=lambda r, e: (results_par.extend(r), done_p.set()),
+            )
+            done_p.wait(timeout=60)
+
+            assert done_s.is_set(), "Single-thread nie zakończył w czasie"
+            assert done_p.is_set(), "Parallel nie zakończył w czasie"
+            assert len(results_single) > 0, "Brak wyników single-thread"
+            # Proporcja ERROR: 1/4 linii → 50k linii = 12500, 300k linii = 75000
+            assert len(results_single) == 12_500, (
+                f"Single: oczekiwano 12500, dostano {len(results_single)}"
+            )
+            assert len(results_par) == 75_000, (
+                f"Parallel: oczekiwano 75000, dostano {len(results_par)}"
+            )
+            idx.close()
+        finally:
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
+
+    def test_parallel_regex(self, temp_log_file):
+        """
+        Tryb równoległy poprawnie obsługuje wyrażenia regularne.
+        Wywołanie przez start() — session_id jest poprawnie ustawiony.
+        """
+        path = self._make_large_file(num_lines=300_000)
+        try:
+            idx = LineIndexer(path)
+            engine = FilterEngine(path, idx)
+            results: list = []
+            done = threading.Event()
+            # start() automatycznie wybierze tryb równoległy (plik > 50 MB)
+            engine.start(
+                "ERROR", use_regex=True, case_sensitive=True, negate=False,
+                on_progress=lambda p, h: None,
+                on_done=lambda r, e: (results.extend(r), done.set()),
+            )
+            done.wait(timeout=60)
+
+            assert done.is_set(), "Parallel regex nie zakończył w czasie"
+            assert len(results) == 75_000, (  # 1/4 linii to ERROR
+                f"Oczekiwano 75000, dostano {len(results)}"
+            )
+            idx.close()
+        finally:
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
+
+    def test_auto_dispatch_parallel_for_large_file(self, temp_log_file):
+        """
+        FilterEngine automatycznie używa trybu równoległego dla pliku > 50 MB.
+        Weryfikuje poprawność wyników po auto-dispatch przez start().
+        """
+        from log_reader.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+        path = self._make_large_file(num_lines=300_000)
+        try:
+            idx = LineIndexer(path)
+            assert idx.size >= _PARALLEL_SEARCH_THRESHOLD, (
+                f"Plik ({idx.size} B) mniejszy niż próg ({_PARALLEL_SEARCH_THRESHOLD} B)"
+            )
+            assert len(idx.index) >= 4, (
+                f"Za mało wpisów w indeksie: {len(idx.index)}"
+            )
+
+            engine = FilterEngine(path, idx)
+            results: list = []
+            done = threading.Event()
+            engine.start(
+                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                on_progress=lambda p, h: None,
+                on_done=lambda r, e: (results.extend(r), done.set()),
+            )
+            done.wait(timeout=60)
+
+            assert done.is_set(), "Auto-dispatch parallel nie zakończył w czasie"
+            assert len(results) == 75_000, (
+                f"Oczekiwano 75000, dostano {len(results)}"
+            )
+            idx.close()
+        finally:
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except PermissionError:
+                    pass
+
+    def test_compute_search_ranges(self, temp_log_file):
+        """_compute_search_ranges zwraca spójne zakresy pokrywające cały plik."""
+        path = temp_log_file(num_lines=50_000)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        ranges = engine._compute_search_ranges(n_workers=4)
+
+        assert len(ranges) >= 1, "Musi być co najmniej jeden zakres"
+        for i, (start, end, line) in enumerate(ranges):
+            assert start < end, f"Zakres [{i}] ma pusty przedział: {start}..{end}"
+            assert start >= 0
+            assert end <= idx.size + 1
+
+        assert ranges[0][0] == 0, "Pierwszy zakres musi zaczynać od offset 0"
+        assert ranges[-1][1] == idx.size, "Ostatni zakres musi sięgać końca pliku"
+        idx.close()
