@@ -4,7 +4,7 @@ import sys
 import tempfile
 import pytest
 
-# Dodaj katalog nadrzędny do path by móc importować pakiet log_reader
+# Dodaj katalog nadrzędny do path by móc importować pakiet log_viewer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Wycisz ostrzeżenia z qt.qpa.fonts (np. brak czcionki "Sans Serif" na macOS)

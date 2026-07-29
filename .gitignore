@@ -1,5 +1,5 @@
 __pycache__/
-log_reader/ui/ui_*.py
+log_viewer/ui/ui_*.py
 .coverage
 
 dist/

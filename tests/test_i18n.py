@@ -1,5 +1,5 @@
 """Testy i18n.py — parzystość kluczy PL/EN."""
-from log_reader.i18n import I18N
+from log_viewer.i18n import I18N
 
 
 class TestI18N:

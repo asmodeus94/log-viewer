@@ -1,4 +1,4 @@
-"""Konfiguracja użytkownika w ~/.logreader.json."""
+"""Konfiguracja użytkownika w ~/.log-viewer.json."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .helpers import (
 
 class UserConfig:
     """
-    Trwała konfiguracja użytkownika — zapisywana w ~/.logreader.json.
+    Trwała konfiguracja użytkownika — zapisywana w ~/.log-viewer.json.
     Ładowana przy starcie aplikacji, automatycznie zapisywana przy zmianach.
 
     Pola (z domyślnymi wartościami):
@@ -71,7 +71,7 @@ class UserConfig:
         try:
             tmp_fd, tmp_path = tempfile.mkstemp(
                 dir=os.path.dirname(os.path.abspath(self.path)) or ".",
-                prefix=".logreader_cfg_",
+                prefix=".log-viewer_cfg_",
             )
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)

@@ -4,7 +4,7 @@ import time
 import gzip
 import pytest
 from unittest.mock import patch
-from log_reader.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk, open_maybe_compressed
+from log_viewer.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk, open_maybe_compressed
 
 
 class TestLineIndexerBasic:
@@ -198,7 +198,7 @@ class TestLineIndexerFileDescriptorCache:
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
 
-        with patch("log_reader.indexer.open_maybe_compressed", wraps=open_maybe_compressed) as mock_open:
+        with patch("log_viewer.indexer.open_maybe_compressed", wraps=open_maybe_compressed) as mock_open:
             # Wykonaj 100 operacji
             for i in range(100):
                 idx.read_lines(i * 5, 3)

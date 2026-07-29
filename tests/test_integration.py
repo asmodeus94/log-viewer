@@ -3,9 +3,9 @@ import os
 import time
 import threading
 
-from log_reader.edit_buffer import EditBuffer
-from log_reader.indexer import LineIndexer
-from log_reader.filter_engine import FilterEngine
+from log_viewer.edit_buffer import EditBuffer
+from log_viewer.indexer import LineIndexer
+from log_viewer.filter_engine import FilterEngine
 
 
 class TestIntegrationFlow:

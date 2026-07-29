@@ -8,7 +8,7 @@ Moduły:
   - exceptions: FileChangedError, CompressedSaveError
   - helpers: fmt_size, truncate_for_display, parse_dnd_files, is_compressed, open_maybe_compressed
   - i18n: słownik PL/EN
-  - config: UserConfig (~/.logreader.json)
+  - config: UserConfig (~/.log-viewer.json)
   - indexer: LineIndexer (rzadki indeks co 1 MB, multiprocessing)
   - filter_engine: FilterEngine (skanowanie w tle, session isolation)
   - edit_buffer: EditBuffer (edycja in-place, walidacja mtime)
@@ -19,7 +19,7 @@ Moduły:
   - app: Fasada w celu utrzymania kompatybilności wstecznej
 
 Użycie:
-    python -m log_reader [plik.log]
+    python -m log_viewer [plik.log]
 
 Licencja: MIT
 """

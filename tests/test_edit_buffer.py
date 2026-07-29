@@ -4,8 +4,8 @@ import gzip
 import stat
 import time
 import pytest
-from log_reader.edit_buffer import EditBuffer
-from log_reader.exceptions import FileChangedError, CompressedSaveError
+from log_viewer.edit_buffer import EditBuffer
+from log_viewer.exceptions import FileChangedError, CompressedSaveError
 
 
 class TestEditBuffer:

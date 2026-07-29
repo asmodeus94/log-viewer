@@ -202,12 +202,12 @@
   <customwidget>
    <class>LogPlainTextEdit</class>
    <extends>QPlainTextEdit</extends>
-   <header>log_reader.widgets</header>
+   <header>log_viewer.widgets</header>
   </customwidget>
   <customwidget>
    <class>MiniMap</class>
    <extends>QWidget</extends>
-   <header>log_reader.widgets</header>
+   <header>log_viewer.widgets</header>
   </customwidget>
  </customwidgets>
 </ui>

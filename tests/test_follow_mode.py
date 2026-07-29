@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6 import QtWidgets
-from log_reader.app import LogViewerWindow
-from log_reader.config import UserConfig
+from log_viewer.app import LogViewerWindow
+from log_viewer.config import UserConfig
 
 def test_follow_toggles_and_scrolls_to_bottom(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -22,7 +22,7 @@ def test_follow_toggles_and_scrolls_to_bottom(temp_log_file):
     tab.text.verticalScrollBar().setValue(0)
     assert tab.text.verticalScrollBar().value() == 0
 
-    from log_reader.indexer import LineIndexer
+    from log_viewer.indexer import LineIndexer
 
     # Ręcznie tworzymy instancję indexera, tak abyśmy nie musieli czekać na
     # QThread z `open_file()`, który nie nadąża w tym środowisku testowym.
@@ -47,7 +47,7 @@ def test_follow_new_lines_scrolls_to_bottom(temp_log_file):
     path = temp_log_file(num_lines=100)
     tab = window.open_file_in_tab(path)
 
-    from log_reader.indexer import LineIndexer
+    from log_viewer.indexer import LineIndexer
     indexer = LineIndexer(path, progress_cb=None, encoding="utf-8", index_interval_bytes=1024 * 1024)
     tab.indexer = indexer
     tab.file_path = path

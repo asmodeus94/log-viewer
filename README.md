@@ -60,7 +60,7 @@ Opcjonalnie możesz od razu wywołać podgląd pliku, przekazując jego ścieżk
 python run.py /sciezka/do/twojego_logu.log
 ```
 
-*(Jeśli z jakiegoś powodu chcesz uruchomić sam moduł bez automatycznej kompilacji UI, nadal możesz to zrobić poprzez `python -m log_reader`, pamiętając uprzednio o ręcznej kompilacji poleceniem `python scripts/compile_ui.py`).*
+*(Jeśli z jakiegoś powodu chcesz uruchomić sam moduł bez automatycznej kompilacji UI, nadal możesz to zrobić poprzez `python -m log_viewer`, pamiętając uprzednio o ręcznej kompilacji poleceniem `python scripts/compile_ui.py`).*
 
 ## Budowanie aplikacji (PyInstaller)
 

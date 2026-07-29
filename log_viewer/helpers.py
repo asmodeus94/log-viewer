@@ -20,7 +20,7 @@ MAX_DISPLAY_LINE_LENGTH = 10000
 FOLLOW_POLL_MS = 600
 FILTER_PROGRESS_MS = 100
 DEFAULT_ENCODING = "utf-8"
-CONFIG_FILE_PATH = "~/.logreader.json"
+CONFIG_FILE_PATH = "~/.log-viewer.json"
 
 # Tagi Text widgeta
 TAG_HIGHLIGHT = "highlight"
@@ -228,6 +228,6 @@ def get_resource_path(relative_path: str) -> str:
         # PyInstaller tworzy folder tymczasowy i zapisuje ścieżkę do niego w _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
-        # Jeśli nie spakowane, root to folder nadrzędny wobec log_reader
+        # Jeśli nie spakowane, root to folder nadrzędny wobec log_viewer
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)

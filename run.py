@@ -30,15 +30,15 @@ def main():
         print("Error: Could not import scripts/compile_ui.py.")
         sys.exit(1)
 
-    # Krok 2: Uruchom aplikację log_reader
+    # Krok 2: Uruchom aplikację log_viewer
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
 
     try:
-        from log_reader.main import main as log_reader_main
-        log_reader_main()
+        from log_viewer.main import main as log_viewer_main
+        log_viewer_main()
     except ImportError as e:
-        print(f"Error: Could not start log_reader. ({e})")
+        print(f"Error: Could not start log_viewer. ({e})")
         sys.exit(1)
 
 if __name__ == "__main__":

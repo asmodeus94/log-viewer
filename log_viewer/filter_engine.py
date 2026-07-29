@@ -6,8 +6,8 @@ import sys
 from typing import Callable, List, Optional, Tuple, Iterator
 from abc import ABC, abstractmethod
 
-from log_reader.helpers import open_maybe_compressed
-from log_reader.indexer import LineIndexer
+from log_viewer.helpers import open_maybe_compressed
+from log_viewer.indexer import LineIndexer
 
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).

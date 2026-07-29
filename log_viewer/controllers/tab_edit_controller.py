@@ -1,15 +1,15 @@
 from PySide6 import QtGui
 from PySide6.QtWidgets import QVBoxLayout, QLabel, QPlainTextEdit, QDialogButtonBox, QPushButton
-from log_reader.widgets import FormatDialog
+from log_viewer.widgets import FormatDialog
 from PySide6.QtCore import QObject, Qt, Slot, QThread
 from PySide6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog, QFileDialog
 from PySide6.QtGui import QTextCursor
 import os
-from log_reader.workers import SaveWorker
-from log_reader.helpers import fmt_size, open_maybe_compressed
-from log_reader.widgets import FormatDialog
+from log_viewer.workers import SaveWorker
+from log_viewer.helpers import fmt_size, open_maybe_compressed
+from log_viewer.widgets import FormatDialog
 from PySide6.QtWidgets import QDialog
-from log_reader.formatters import format_json, format_xml, format_log
+from log_viewer.formatters import format_json, format_xml, format_log
 
 class EditController(QObject):
     def __init__(self, tab):

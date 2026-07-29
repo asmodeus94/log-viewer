@@ -3,8 +3,8 @@ import os
 import time
 import threading
 import pytest
-from log_reader.indexer import LineIndexer
-from log_reader.filter_engine import FilterEngine
+from log_viewer.indexer import LineIndexer
+from log_viewer.filter_engine import FilterEngine
 
 
 class TestFilterEngine:
@@ -189,7 +189,7 @@ class TestRegexOnBytes:
         """Regex na bajtach znajduje te same wyniki co regex na str."""
         path = temp_log_file(num_lines=1000)
         import threading
-        from log_reader.indexer import LineIndexer
+        from log_viewer.indexer import LineIndexer
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
@@ -208,7 +208,7 @@ class TestRegexOnBytes:
         """Regex case-insensitive na bajtach."""
         path = temp_log_file(num_lines=1000)
         import threading
-        from log_reader.indexer import LineIndexer
+        from log_viewer.indexer import LineIndexer
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
@@ -227,7 +227,7 @@ class TestRegexOnBytes:
         """Regex z pattern \\d+ na bajtach."""
         path = temp_log_file(num_lines=1000)
         import threading
-        from log_reader.indexer import LineIndexer
+        from log_viewer.indexer import LineIndexer
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
@@ -246,7 +246,7 @@ class TestRegexOnBytes:
         """Plain text i regex dają te same wyniki dla prostego wzorca."""
         path = temp_log_file(num_lines=1000)
         import threading
-        from log_reader.indexer import LineIndexer
+        from log_viewer.indexer import LineIndexer
         idx = LineIndexer(path)
 
         # Plain text
@@ -301,7 +301,7 @@ class TestParallelSearch:
         Weryfikujemy przez porównanie wyników obu trybów na tym samym pliku.
         Oba tryby są wywoływane przez start() — session_id jest poprawnie ustawiony.
         """
-        from log_reader.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+        from log_viewer.filter_engine import _PARALLEL_SEARCH_THRESHOLD
         path = self._make_large_file(num_lines=300_000)
         try:
             idx = LineIndexer(path)
@@ -388,7 +388,7 @@ class TestParallelSearch:
         FilterEngine automatycznie używa trybu równoległego dla pliku > 50 MB.
         Weryfikuje poprawność wyników po auto-dispatch przez start().
         """
-        from log_reader.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+        from log_viewer.filter_engine import _PARALLEL_SEARCH_THRESHOLD
         path = self._make_large_file(num_lines=300_000)
         try:
             idx = LineIndexer(path)

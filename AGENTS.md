@@ -23,7 +23,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 
 ## 5. UI Layout i Biznesowa Logika
 - Oddzielaj w całości wygląd (layout) od logiki biznesowej, używając do tego dedykowanych plików `.ui` przetrzymywanych w osobnym folderze.
-- Wspieraj użycie tzw. "Promoted Widgets" z Qt Designer dla niestandardowych (customowych) komponentów, np. umieszczając je w `log_reader/ui/`.
+- Wspieraj użycie tzw. "Promoted Widgets" z Qt Designer dla niestandardowych (customowych) komponentów, np. umieszczając je w `log_viewer/ui/`.
 - Zarządzaj zależnymi od kontekstu elementami UI (np. stan filtrów lub wyszukiwarki) na poziomie pojedynczych kart. Kodowanie znaków jest zamierzonym wyjątkiem i musi ściśle pozostać globalnym ustawieniem aplikacji.
 
 ## 6. Język Komunikacji
@@ -40,7 +40,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - Podczas tworzenia plików w Pythonie gdzie wymagane są restrykcyjne uprawnienia, preferowanym i bezpieczniejszym podejściem jest zbudowanie niestandardowego `opener`'a w funkcji `open()` zamiast używania kombinacji `os.open()` oraz `os.fdopen()`, by zapobiec tzw. "file descriptor leaks".
 
 ## 10. Internacjonalizacja i Słowniki Językowe
-- Kiedy wprowadzane są nowe teksty w plikach UI, dodawaj zawsze i bezwzględnie ich tłumaczenia w obu dedykowanych słownikach w pliku `log_reader/i18n.py`. Zaktualizuj także testy w module weryfikującym (`tests/test_i18n.py`).
+- Kiedy wprowadzane są nowe teksty w plikach UI, dodawaj zawsze i bezwzględnie ich tłumaczenia w obu dedykowanych słownikach w pliku `log_viewer/i18n.py`. Zaktualizuj także testy w module weryfikującym (`tests/test_i18n.py`).
 - Jeżeli pasek narzędzi lub inne elementy wymagają dynamicznych zmian wynikających np. z tłumaczeń to ich logika powinna rezydować bezpośrednio w kodzie Pythona, nie wewnątrz w `.ui`.
 
 ## 11. Zależności i Wymagania podczas Testów

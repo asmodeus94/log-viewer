@@ -2,7 +2,7 @@
 import os
 import json
 import pytest
-from log_reader.config import UserConfig
+from log_viewer.config import UserConfig
 
 
 class TestUserConfig:
