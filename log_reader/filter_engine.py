@@ -204,7 +204,7 @@ class PlainTextStrategy(FilterStrategy):
 
             nl_count = haystack.count(b"\n", last_nl_pos + 1, hit_pos)
             lines_counted += nl_count
-            # Avoid appending the same line multiple times if there are multiple hits
+            # Unikaj dodawania tej samej linii wielokrotnie, jeśli jest na niej wiele dopasowań
             if not hits or hits[-1] != lines_counted:
                 hits.append(lines_counted)
 
@@ -249,10 +249,9 @@ class RegexStrategy(FilterStrategy):
         return not matched if self.negate else matched
 
     def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
-        # Regex to match each line in a chunk optimally using finditer
-        # Wait, if we split the chunk, it might be faster or slower than finditer on a multi-line string.
-        # But for negate or complex regex, finditer without splitting might be tricky if we want line-by-line negations.
-        # Let's fallback to the base class split approach for RegexStrategy to ensure correctness.
+        # W przypadku Regex, używamy bezpiecznego podejścia z klasy bazowej (podział na linie).
+        # finditer na wieloliniowym ciągu dla złożonych regexów lub negacji mógłby być
+        # trudny do poprawnej obsługi. Fallback zapewnia pełną poprawność.
         return super().match_chunk(chunk, start_line)
 
 def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
