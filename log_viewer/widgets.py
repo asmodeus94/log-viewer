@@ -570,6 +570,9 @@ class FormatDialog(QDialog):
 
         self.formatter_combo.currentTextChanged.connect(self._apply_format)
 
+        self.ui.btn_reformat.setText(self.t("btn_reformat"))
+        self.ui.btn_reformat.clicked.connect(self._reformat_current_text)
+
         self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
@@ -578,6 +581,16 @@ class FormatDialog(QDialog):
         self.text_edit.setFont(font)
 
         # Zastosuj formatowanie przy otwarciu
+        self._apply_format(self.formatter_combo.currentText())
+
+    def _reformat_current_text(self):
+        """Pobiera obecny tekst, aktualizuje oryginał i ponawia formatowanie."""
+        current_text = self.text_edit.toPlainText()
+        failed_msg = self.t("msg_format_failed") + "\n\n"
+        if current_text.startswith(failed_msg):
+            current_text = current_text[len(failed_msg):]
+
+        self.original_text = current_text
         self._apply_format(self.formatter_combo.currentText())
 
     def _apply_format(self, formatter_name: str) -> None:
