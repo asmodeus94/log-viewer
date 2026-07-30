@@ -5,10 +5,10 @@ import bisect
 from PySide6.QtCore import QTimer
 from PySide6 import QtGui
 from PySide6.QtGui import QKeySequence
-from log_reader.widgets import SearchResultsModel
+from log_viewer.widgets import SearchResultsModel
 from PySide6.QtCore import QObject, Qt, Slot, QTimer
 from PySide6.QtGui import QFont, QColor, QFontDatabase, QTextCursor
-from log_reader.helpers import THEME_DARK, THEME_LIGHT
+from log_viewer.helpers import THEME_DARK, THEME_LIGHT
 from typing import Optional, List, Tuple
 
 class UIController(QObject):

@@ -5,7 +5,7 @@ import sys
 
 def main():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ui_dir = os.path.join(repo_root, "log_reader", "ui")
+    ui_dir = os.path.join(repo_root, "log_viewer", "ui")
 
     if not os.path.isdir(ui_dir):
         print(f"Error: UI directory not found at {ui_dir}")

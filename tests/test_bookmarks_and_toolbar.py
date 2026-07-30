@@ -17,9 +17,9 @@ if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from log_reader.app import LogViewerWindow
-from log_reader.config import UserConfig
-from log_reader.indexer import LineIndexer
+from log_viewer.app import LogViewerWindow
+from log_viewer.config import UserConfig
+from log_viewer.indexer import LineIndexer
 
 
 @pytest.fixture
@@ -583,7 +583,7 @@ class TestFilterContext:
         # filter_context_spin jest w LogViewerWindow (toolbar), nie w LogTab.
         # __getattr__ deleguje do aktywnej zakładki, ale sam spinbox jest
         # na poziomie okna.
-        from log_reader.app import LogViewerWindow
+        from log_viewer.app import LogViewerWindow
         main = None
         # Pobierz referencję do LogViewerWindow przez parent tab.
         tab = window.tabs.currentWidget()
@@ -743,7 +743,7 @@ class TestIndexingProgress:
             def progress_cb(pct: float):
                 progress_values.append(pct)
 
-            from log_reader.indexer import LineIndexer
+            from log_viewer.indexer import LineIndexer
             idx = LineIndexer(test_file, progress_cb=progress_cb, encoding="utf-8")
             try:
                 assert len(progress_values) > 0, "Brak odczytów postępu"
@@ -758,7 +758,7 @@ class TestIndexingProgress:
 
     def test_indexer_worker_has_cancel_method(self):
         """IndexerWorker ma metodę cancel() i is_cancelled()."""
-        from log_reader.workers import IndexerWorker
+        from log_viewer.workers import IndexerWorker
         worker = IndexerWorker("/tmp/nonexistent", "utf-8", 1024 * 1024)
         assert hasattr(worker, "cancel")
         assert hasattr(worker, "is_cancelled")
@@ -770,7 +770,7 @@ class TestIndexingProgress:
         """LogTab._on_index_progress MUSI być metodą (nie lambdą) — closure
         nie jest picklowalne cross-thread, powoduje błędy QTimer w worker
         thread („Timers cannot be stopped from another thread")."""
-        from log_reader.app import LogTab
+        from log_viewer.app import LogTab
         # Metoda jest bound method klasy — sprawdzamy istnienie.
         assert hasattr(LogTab, "_on_index_progress"), (
             "LogTab musi mieć metodę _on_index_progress (nie lambdę) — "
@@ -785,7 +785,7 @@ class TestIndexingProgress:
     def test_logtab_has_reindex_slots(self):
         """LogTab ma sloty _on_reindex_finished, _on_follow_reindex_slot,
         _on_follow_reindex_clear_flag — bezpośrednio metody (nie lambdy)."""
-        from log_reader.app import LogTab
+        from log_viewer.app import LogTab
         import inspect
         for name in ("_on_reindex_finished", "_on_follow_reindex_slot",
                      "_on_follow_reindex_clear_flag", "_on_index_progress",
@@ -814,7 +814,7 @@ class TestIndexingProgress:
             # przy pierwszym odczycie wyniku i przerwie.
             cancel_event.set()
 
-            from log_reader.indexer import LineIndexer
+            from log_viewer.indexer import LineIndexer
             idx = LineIndexer(
                 test_file, encoding="utf-8",
                 cancel_event=cancel_event,
@@ -850,7 +850,7 @@ class TestIndexingProgress:
                     f.write(line)
             actual_size = os.path.getsize(test_file)
 
-            from log_reader.indexer import LineIndexer
+            from log_viewer.indexer import LineIndexer
             t0 = time.time()
             idx = LineIndexer(test_file, encoding="utf-8")
             t1 = time.time()
@@ -880,7 +880,7 @@ class TestIndexingProgress:
 
 class TestI18nKeys:
     def test_new_keys_present_in_pl(self):
-        from log_reader.i18n import I18N
+        from log_viewer.i18n import I18N
         for key in ("btn_delete_sel", "msg_bookmarks_added", "msg_bookmarks_removed",
                     "msg_edits_removed", "msg_no_selection",
                     "lbl_filter_context", "tt_filter_context",
@@ -889,7 +889,7 @@ class TestI18nKeys:
             assert I18N["pl"][key], f"Pusta wartość dla {key} w PL"
 
     def test_new_keys_present_in_en(self):
-        from log_reader.i18n import I18N
+        from log_viewer.i18n import I18N
         for key in ("btn_delete_sel", "msg_bookmarks_added", "msg_bookmarks_removed",
                     "msg_edits_removed", "msg_no_selection",
                     "lbl_filter_context", "tt_filter_context",

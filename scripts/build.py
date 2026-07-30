@@ -77,10 +77,10 @@ def build_app():
 
     # 3. Argumenty PyInstaller
     # Generujemy w locie mały plik startowy, żeby uniknąć rzucania ImportError (relative import)
-    # gdy próbujemy odpalić paczkę używając log_reader/main.py jako bezpośredniego script-file'a.
+    # gdy próbujemy odpalić paczkę używając log_viewer/main.py jako bezpośredniego script-file'a.
     frozen_main = os.path.join(repo_root, "run_frozen.py")
     with open(frozen_main, "w") as f:
-        f.write("import multiprocessing\nfrom log_reader.main import main\n\nif __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n")
+        f.write("import multiprocessing\nfrom log_viewer.main import main\n\nif __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n")
 
     main_script = frozen_main
 

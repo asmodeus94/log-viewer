@@ -1,5 +1,5 @@
 """Testy formatters.py — format_json, format_xml, format_log."""
-from log_reader.formatters import format_json, format_xml, format_log
+from log_viewer.formatters import format_json, format_xml, format_log
 
 class TestFormatJson:
     def test_valid_json(self):

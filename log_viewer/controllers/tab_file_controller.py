@@ -4,9 +4,9 @@ from PySide6.QtWidgets import QMessageBox, QProgressDialog
 import os
 import time
 import os
-from log_reader.helpers import fmt_size
-from log_reader.workers import IndexerWorker
-from log_reader.indexer import LineIndexer
+from log_viewer.helpers import fmt_size
+from log_viewer.workers import IndexerWorker
+from log_viewer.indexer import LineIndexer
 
 class FileController(QObject):
     def __init__(self, tab):

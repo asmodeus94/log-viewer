@@ -11,8 +11,8 @@ if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 from PySide6 import QtWidgets
-from log_reader.app import LogViewerWindow
-from log_reader.config import UserConfig
+from log_viewer.app import LogViewerWindow
+from log_viewer.config import UserConfig
 
 def test_duplicate_file_tab_names(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -23,21 +23,21 @@ def test_duplicate_file_tab_names(temp_log_file):
     base_name = os.path.basename(path)
 
     # 1. otwarcie
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         t1 = window.open_file_in_tab(path)
         t1.file_path = path  # Must set this because open_file is mocked
         assert window.tabs.count() == 1
         assert window.tabs.tabText(0) == base_name
 
     # 2. otwarcie
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         t2 = window.open_file_in_tab(path)
         t2.file_path = path
         assert window.tabs.count() == 2
         assert window.tabs.tabText(1) == f"{base_name} [A]"
 
     # 3. otwarcie
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         t3 = window.open_file_in_tab(path)
         t3.file_path = path
         assert window.tabs.count() == 3
@@ -60,7 +60,7 @@ def test_window_title_updates_on_tab_change(temp_log_file):
     assert window.windowTitle() == app_title
 
     # Otwarcie pierwszego pliku
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         t1 = window.open_file_in_tab(path1)
         t1.file_path = path1
         # Musimy ręcznie zmienić tytuł, bo open_file jest zmockowane
@@ -69,7 +69,7 @@ def test_window_title_updates_on_tab_change(temp_log_file):
         assert window.windowTitle() == f"{base_name1} - {app_title}"
 
     # Otwarcie drugiego pliku
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         t2 = window.open_file_in_tab(path2)
         t2.file_path = path2
         window._on_tab_title_changed(t2, base_name2)
@@ -93,7 +93,7 @@ def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
 
     path = temp_log_file(num_lines=10)
 
-    with patch("log_reader.log_tab.LogTab.open_file"):
+    with patch("log_viewer.log_tab.LogTab.open_file"):
         tab = window.open_file_in_tab(path)
 
     tab.file_path = path
@@ -109,7 +109,7 @@ def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
 
 import gc
 import time
-from log_reader.log_tab import _running_tasks
+from log_viewer.log_tab import _running_tasks
 
 def test_qthread_survives_tab_closure(temp_log_file):
     """Weryfikuje, że w czasie działania wątku usunięcie zakładki nie powoduje utraty referencji i błędu (GC)."""

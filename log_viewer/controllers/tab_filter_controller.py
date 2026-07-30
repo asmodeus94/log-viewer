@@ -3,8 +3,8 @@ from PySide6.QtWidgets import QMessageBox
 import array
 import re
 from typing import Optional, List, Tuple
-from log_reader.filter_engine import FilterEngine
-from log_reader.workers import FilterWorker
+from log_viewer.filter_engine import FilterEngine
+from log_viewer.workers import FilterWorker
 
 class FilterController(QObject):
     def __init__(self, tab):

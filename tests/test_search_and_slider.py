@@ -15,10 +15,10 @@ if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from log_reader.app import LogViewerWindow
-from log_reader.config import UserConfig
-from log_reader.indexer import LineIndexer
-from log_reader.widgets import SearchResultsModel
+from log_viewer.app import LogViewerWindow
+from log_viewer.config import UserConfig
+from log_viewer.indexer import LineIndexer
+from log_viewer.widgets import SearchResultsModel
 
 
 @pytest.fixture
@@ -242,7 +242,7 @@ class TestSearchFlow:
     def test_search_no_results(self, app_instance):
         window, _ = app_instance
         # Patch messagebox by uniknąć blokowania
-        from log_reader import app as app_module
+        from log_viewer import app as app_module
         from unittest.mock import patch
         with patch.object(QtWidgets.QMessageBox, 'information'):
             window.search_entry.setText("NONEXISTENT_XYZ_12345")

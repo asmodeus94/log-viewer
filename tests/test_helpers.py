@@ -3,7 +3,7 @@ import os
 import gzip
 import tempfile
 import pytest
-from log_reader.helpers import (
+from log_viewer.helpers import (
     THEME_DARK, THEME_LIGHT,
     fmt_size, truncate_for_display, parse_dnd_files, dnd_files_to_open,
     is_compressed, open_maybe_compressed,

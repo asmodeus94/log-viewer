@@ -97,7 +97,7 @@ class EditBuffer:
         # więc inny proces nie może dopisać danych między odczytami.
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=os.path.dirname(os.path.abspath(src_path)) or ".",
-            prefix=".logreader_tmp_",
+            prefix=".log-viewer_tmp_",
         )
         bytes_written = 0
 

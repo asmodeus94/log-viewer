@@ -10,7 +10,7 @@ def test_highlight_and_scroll_does_not_select_text():
     if app is None:
         app = QApplication(sys.argv)
 
-    from log_reader.log_tab import LogTab
+    from log_viewer.log_tab import LogTab
 
     main_window_mock = MagicMock()
     main_window_mock.encoding = "utf-8"
