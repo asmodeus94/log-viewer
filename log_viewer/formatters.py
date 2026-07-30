@@ -12,20 +12,20 @@ def extract_json(text: str) -> Tuple[str, str, str, bool]:
 
     # Szukamy pierwszego znaku, który może być początkiem JSONa ({ lub [)
     i = 0
-    text_len = len(text)
 
-    while i < text_len:
+    while True:
         idx1 = text.find('{', i)
         idx2 = text.find('[', i)
 
-        if idx1 == -1 and idx2 == -1:
-            break
-        elif idx1 == -1:
+        if idx1 == -1:
             i = idx2
         elif idx2 == -1:
             i = idx1
         else:
             i = min(idx1, idx2)
+
+        if i == -1:
+            break
 
         try:
             # raw_decode próbuje sparsować JSON od podanego indeksu i zwraca dane oraz pozycję końcową
