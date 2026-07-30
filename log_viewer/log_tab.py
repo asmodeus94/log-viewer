@@ -806,6 +806,14 @@ class LogTab(QWidget):
         context_set = set(getattr(self, "_context_widget_lines", []))
         filter_hit_set = set(getattr(self, "_filter_hit_widget_lines", []))
 
+        # Cache QColor aby zapobiec ich alokowaniu w pętlach
+        color_context = QColor(t["context"])
+        color_highlight = QColor(t["highlight"])
+        color_black = QColor("#000000")
+        color_bookmark = QColor(t["bookmark"])
+        color_edited = QColor(t["edited"])
+        color_current_line = QColor(t["current_line"])
+
         # 1) Kontekst filtra — delikatne tło (pierwsze, najniższy priorytet).
         for li in context_set:
             block = doc.findBlockByNumber(li)
@@ -813,7 +821,7 @@ class LogTab(QWidget):
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(QColor(t["context"]))
+                sel.format.setBackground(color_context)
                 sels.append(sel)
 
         # 2) Trafienia filtra — żółte tło (wyraźnie odróżnia od kontekstu).
@@ -824,8 +832,8 @@ class LogTab(QWidget):
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(QColor(t["highlight"]))
-                sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
+                sel.format.setBackground(color_highlight)
+                sel.format.setForeground(color_black) # Czarny tekst dla czytelności na żółtym tle
                 sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
                 sels.append(sel)
 
@@ -836,7 +844,7 @@ class LogTab(QWidget):
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(QColor(t["bookmark"]))
+                sel.format.setBackground(color_bookmark)
                 sels.append(sel)
 
         # 4) Edycje — pomarańczowe tło (nadpisuje zakładkę dla edytowanej linii).
@@ -846,7 +854,7 @@ class LogTab(QWidget):
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(QColor(t["edited"]))
+                sel.format.setBackground(color_edited)
                 sels.append(sel)
 
         # 5) Podświetlenie wyniku wyszukiwania (żółte, silniejsze).
@@ -867,7 +875,7 @@ class LogTab(QWidget):
             cur_cursor = QtGui.QTextCursor(self.text.textCursor())
             cur_cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
             cur.cursor = cur_cursor
-            cur.format.setBackground(QColor(t["current_line"]))
+            cur.format.setBackground(color_current_line)
             cur.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
             sels.append(cur)
 
