@@ -130,9 +130,9 @@ class FileController(QObject):
         self.tab.line_map = None
         self.tab.filter_results = None
         self.tab._filter_all_lines = None
-        self.tab._filter_context_lines = None
-        self.tab._hit_text_map = None
-        self.tab._hit_lines_set = None
+        self.tab.filter_context_lines = None
+        self.tab._filter_hit_text_map = None
+        self.tab._filter_hit_lines = None
         self.tab.filter_engine = None
         self.tab._search_engine = None
         try:

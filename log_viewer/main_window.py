@@ -712,12 +712,18 @@ class LogViewerWindow(QMainWindow):
         return act
 
     # --------------------------------------------------------- tab mgmt ---
+    def _on_tab_title_changed_current(self, title_str: str) -> None:
+        """Slot: aktualizuje tytuł zakładki. Nadawca jest ustalany przez sender()."""
+        tab = self.sender()
+        if tab is not None:
+            self._on_tab_title_changed(tab, title_str)
+
     def _new_tab(self, title: str = "") -> LogTab:
         """Tworzy nową pustą zakładkę i ustawia ją jako aktywną."""
         tab = LogTab(self)
         # Połącz sygnały tab z oknem
         tab.status_changed.connect(self._on_tab_status_changed)
-        tab.title_changed.connect(lambda title_str, t=tab: self._on_tab_title_changed(t, title_str))
+        tab.title_changed.connect(self._on_tab_title_changed_current)
         self.tabs.addTab(tab, title or self.t("st_ready"))
         self.tabs.setCurrentWidget(tab)
         # Aplikuj motyw do nowej zakładki
@@ -890,6 +896,13 @@ class LogViewerWindow(QMainWindow):
             )
             if choice != QMessageBox.Yes:
                 return
+        # Rozłącz sygnały przed zamknięciem — zapobiega utrzymywaniu
+        # referencji do zamkniętej karty przez połączenia Qt.
+        try:
+            tab.status_changed.disconnect(self._on_tab_status_changed)
+            tab.title_changed.disconnect(self._on_tab_title_changed_current)
+        except (RuntimeError, TypeError):
+            pass
         tab.close()
         self.tabs.removeTab(index)
         tab.deleteLater()
@@ -1096,4 +1109,10 @@ class LogViewerWindow(QMainWindow):
                     event.ignore()
                     return
             tab.close()
+        # Usuń karty i zaplanuj ich zniszczenie
+        while self.tabs.count() > 0:
+            tab = self.tabs.widget(0)
+            self.tabs.removeTab(0)
+            if isinstance(tab, LogTab):
+                tab.deleteLater()
         event.accept()
