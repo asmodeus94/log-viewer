@@ -408,6 +408,7 @@ class SearchResultsModel(QAbstractListModel):
         self.beginResetModel()
         self._all_results = []
         self._visible_count = 0
+        self._indexer = None
         self.endResetModel()
 
     def get_line_no(self, row: int) -> Optional[int]:

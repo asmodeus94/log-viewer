@@ -1250,6 +1250,9 @@ class LogTab(QWidget):
 
     def close(self) -> None:
         """Zamyka indexer, anuluje wątki. Wywoływane przy zamykaniu zakładki."""
+        # --- Wyłącz follow mode aby przerwać cykl QTimer.singleShot ---
+        self.follow_active = False
+
         try:
             if self._edge_timer:
                 self._edge_timer.stop()
@@ -1257,6 +1260,8 @@ class LogTab(QWidget):
                 self._minimap_update_timer.stop()
             if self._scroll_debounce_timer:
                 self._scroll_debounce_timer.stop()
+            if self._edge_load_timer:
+                self._edge_load_timer.stop()
         except Exception:
             pass
         if self.filter_engine and self.filter_engine.is_running():
@@ -1285,14 +1290,30 @@ class LogTab(QWidget):
                 pass
             self.indexer = None
 
+        # --- Wyczyść dane filtrowania (poprawione nazwy atrybutów) ---
         self.line_map = None
         self.filter_results = None
         self._filter_all_lines = None
-        self._filter_context_lines = None
-        self._hit_text_map = None
-        self._hit_lines_set = None
+        self.filter_context_lines = None
+        self._filter_hit_text_map = None
+        self._filter_hit_lines = None
         self.filter_engine = None
         self._search_engine = None
+
+        # --- Wyczyść dane wyszukiwania ---
+        self._search_results = []
+        self._search_results_all = []
+        if self._search_model is not None:
+            self._search_model.clear()
+            self._search_model = None
+        self._search_worker = None
+        self._search_thread = None
+
+        # --- Wyczyść pozostałe duże struktury danych ---
+        self.window_lines = []
+        self._minimap_data = []
+        self.edit_buffer = None
+        self.bookmarks = {}
         try:
             self.text.clear()
         except Exception:
