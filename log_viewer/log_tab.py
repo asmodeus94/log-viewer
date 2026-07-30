@@ -4,44 +4,30 @@ from __future__ import annotations
 
 import os
 _running_tasks = set()
-import re
-import sys
 import time
 import bisect
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QSize, QPoint
+from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QPoint
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase,
-    QDragEnterEvent, QDropEvent, QCursor,
+    QColor,
 )
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QPlainTextEdit, QWidget, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QLabel, QLineEdit, QCheckBox, QPushButton,
-    QMenuBar, QMenu, QStatusBar, QFileDialog, QMessageBox, QInputDialog,
-    QProgressBar, QSplitter, QTreeWidget, QTreeWidgetItem, QSlider,
-    QDialog, QDialogButtonBox, QSpinBox, QComboBox, QFontComboBox,
-    QSizePolicy, QToolBar, QFrame, QProgressDialog, QListView, QTabWidget,
+    QApplication, QWidget, QMessageBox, QInputDialog,
+    QProgressDialog,
 )
 
-from .exceptions import FileChangedError, CompressedSaveError
 from .helpers import (
-    fmt_size, truncate_for_display, parse_dnd_files, dnd_files_to_open,
-    is_compressed, open_maybe_compressed,
-    WINDOW_SIZE_LINES, MAX_DISPLAY_LINES, MAX_DISPLAY_LINE_LENGTH,
-    FOLLOW_POLL_MS, FILTER_PROGRESS_MS, DEFAULT_ENCODING,
-    TAG_HIGHLIGHT, TAG_BOOKMARK, TAG_EDITED, TAG_TRUNCATED,
-    SUPPORTED_ENCODINGS, OPEN_FILETYPES, THEME_DARK, THEME_LIGHT,
+    fmt_size, truncate_for_display,
+    TAG_BOOKMARK, TAG_EDITED, TAG_TRUNCATED,
 )
-from .i18n import I18N
-from .config import UserConfig
-from .indexer import LineIndexer, IndexEntry
+from .indexer import LineIndexer
 from .controllers import FileController, EditController, SearchController, FilterController, UIController, BookmarkController
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
-from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog
+from .widgets import SearchResultsModel
 from .ui.ui_log_tab import Ui_LogTab
 
 class LogTab(QWidget):
@@ -57,7 +43,13 @@ class LogTab(QWidget):
     status_changed = Signal(str)
     title_changed = Signal(str)
 
-    def _register_thread_worker(self, thread: QThread, worker: QObject) -> None:
+
+    # UI elements type hints (from compiled UI)
+    text: QtWidgets.QPlainTextEdit
+    pct_label: QtWidgets.QLabel
+    search_results_view: QtWidgets.QListView
+
+    def _register_thread_worker(self, thread: QThread, worker: QtCore.QObject) -> None:
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
         task_ref = (thread, worker)
         _running_tasks.add(task_ref)
@@ -270,7 +262,7 @@ class LogTab(QWidget):
         if show_progress:
             progress = QProgressDialog(self.t("st_loading"), self.t("btn_cancel"), 0, 0, self._main)
             progress.setWindowTitle(self.t("app_title"))
-            progress.setWindowModality(Qt.WindowModal)
+            progress.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
             progress.setMinimumDuration(500)
             progress.show()
             QApplication.processEvents()
@@ -373,9 +365,9 @@ class LogTab(QWidget):
             self._minimap_update_timer.start(100)
 
         if self.follow_active:
-            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
         else:
-            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
 
         self.text.setTextCursor(cursor)
         self._refresh_status()
@@ -434,7 +426,7 @@ class LogTab(QWidget):
         if not self.indexer or self._is_loading:
             return
 
-        # Odrzucamy wykonanie jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
+        # Odrzucamy wykonanie, jeśli użytkownik właśnie przewinął (i timer zostałby wyzerowany),
         # ale my jesteśmy w środku innego obciążającego zadania, albo gdy od ostatniego
         # załadowania minęło niezwykle mało czasu
         now = time.time()
@@ -528,7 +520,7 @@ class LogTab(QWidget):
         old_value = scrollbar.value()
         try:
             cursor = self.text.textCursor()
-            cursor.movePosition(QtGui.QTextCursor.End)
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
             cursor.beginEditBlock()
             for ln, text in new_lines:
                 display_text, tags = self._prepare_line_for_display(ln, text)
@@ -541,8 +533,8 @@ class LogTab(QWidget):
             if len(self.line_map) > self.max_display_lines:
                 to_remove = len(self.line_map) - self.max_display_lines
                 cursor.beginEditBlock()
-                cursor.movePosition(QtGui.QTextCursor.Start)
-                cursor.movePosition(QtGui.QTextCursor.NextBlock, QtGui.QTextCursor.KeepAnchor, to_remove)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.NextBlock, QtGui.QTextCursor.MoveMode.KeepAnchor, to_remove)
                 cursor.removeSelectedText()
                 cursor.endEditBlock()
                 self.line_map = self.line_map[to_remove:]
@@ -569,7 +561,7 @@ class LogTab(QWidget):
             old_first_file_line = self.line_map[0] if self.line_map else 0
             old_val = scrollbar.value()
             cursor = self.text.textCursor()
-            cursor.movePosition(QtGui.QTextCursor.Start)
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
             cursor.beginEditBlock()
             for ln, text in reversed(new_lines):
                 display_text, tags = self._prepare_line_for_display(ln, text)
@@ -585,12 +577,12 @@ class LogTab(QWidget):
             if len(self.line_map) > self.max_display_lines:
                 to_remove = len(self.line_map) - self.max_display_lines
                 cursor.beginEditBlock()
-                cursor.movePosition(QtGui.QTextCursor.End)
-                cursor.movePosition(QtGui.QTextCursor.StartOfBlock, QtGui.QTextCursor.MoveAnchor)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.StartOfBlock, QtGui.QTextCursor.MoveMode.MoveAnchor)
                 if to_remove > 1:
-                    cursor.movePosition(QtGui.QTextCursor.PreviousBlock, QtGui.QTextCursor.MoveAnchor, to_remove - 1)
-                cursor.movePosition(QtGui.QTextCursor.PreviousCharacter, QtGui.QTextCursor.MoveAnchor)
-                cursor.movePosition(QtGui.QTextCursor.End, QtGui.QTextCursor.KeepAnchor)
+                    cursor.movePosition(QtGui.QTextCursor.MoveOperation.PreviousBlock, QtGui.QTextCursor.MoveMode.MoveAnchor, to_remove - 1)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.PreviousCharacter, QtGui.QTextCursor.MoveMode.MoveAnchor)
+                cursor.movePosition(QtGui.QTextCursor.MoveOperation.End, QtGui.QTextCursor.MoveMode.KeepAnchor)
                 cursor.removeSelectedText()
                 cursor.endEditBlock()
                 self.line_map = self.line_map[:self.max_display_lines]
@@ -721,7 +713,7 @@ class LogTab(QWidget):
         if self._search_model and index < len(self._search_results):
             model_index = self._search_model.index(index, 0)
             self.search_results_view.setCurrentIndex(model_index)
-            self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.PositionAtCenter)
+            self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
         self._update_search_results_label()
 
     @Slot(QtCore.QModelIndex)
@@ -751,13 +743,13 @@ class LogTab(QWidget):
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
         block_cursor = QtGui.QTextCursor(self.text.document().findBlockByNumber(widget_line_no))
         sel_cursor = QtGui.QTextCursor(block_cursor)
-        sel_cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        sel_cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
 
         sel = QtWidgets.QTextEdit.ExtraSelection()
         sel.cursor = sel_cursor
         sel.format.setBackground(QColor(self.theme["highlight"]))
         sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
-        sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+        sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
         self._search_extra_sel = sel
 
         # Aby uniknąć natywnego, szarego tła zaznaczenia tekstu w Qt (które pojawia się
@@ -811,7 +803,7 @@ class LogTab(QWidget):
             if block.isValid():
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format.setBackground(QColor(t["context"]))
                 sels.append(sel)
 
@@ -822,10 +814,10 @@ class LogTab(QWidget):
             if block.isValid():
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format.setBackground(QColor(t["highlight"]))
                 sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
-                sel.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+                sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
                 sels.append(sel)
 
         # 3) Zakładki — zielone tło.
@@ -834,7 +826,7 @@ class LogTab(QWidget):
             if block.isValid():
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format.setBackground(QColor(t["bookmark"]))
                 sels.append(sel)
 
@@ -844,7 +836,7 @@ class LogTab(QWidget):
             if block.isValid():
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.LineUnderCursor)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format.setBackground(QColor(t["edited"]))
                 sels.append(sel)
 
@@ -864,10 +856,10 @@ class LogTab(QWidget):
                 and current_block != search_block):
             cur = QtWidgets.QTextEdit.ExtraSelection()
             cur_cursor = QtGui.QTextCursor(self.text.textCursor())
-            cur_cursor.select(QtGui.QTextCursor.LineUnderCursor)
+            cur_cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
             cur.cursor = cur_cursor
             cur.format.setBackground(QColor(t["current_line"]))
-            cur.format.setProperty(QtGui.QTextFormat.FullWidthSelection, True)
+            cur.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
             sels.append(cur)
 
         self.text.setExtraSelections(sels)
@@ -903,7 +895,7 @@ class LogTab(QWidget):
 
         answer, ok = QInputDialog.getText(
             self._main, self.t("dlg_goto_title"), self.t("dlg_goto_prompt"),
-            QtWidgets.QLineEdit.Normal, "",
+            QtWidgets.QLineEdit.EchoMode.Normal, "",
         )
         if not ok or not answer:
             return
@@ -947,9 +939,9 @@ class LogTab(QWidget):
             choice = QMessageBox.question(
                 self, self.t("app_title"),
                 self.t("msg_clear_edits").format(n=len(self.edit_buffer)),
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No, QtWidgets.QMessageBox.StandardButton.No,
             )
-            if choice != QMessageBox.Yes:
+            if choice != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
 
         # Zatrzymujemy follow jeżeli działa
@@ -980,7 +972,7 @@ class LogTab(QWidget):
 
         self.open_file(self.file_path, title=title)
 
-        # Wywołanie _start_reindex by ustawić scroll po zakończeniu indeksowania
+        # Wywołanie _start_reindex, by ustawić scroll po zakończeniu indeksowania
         # jeśli proces odczytu to reindex po reload. W open_file po reindeksie
         # jest _load_window(0). Ponieważ jest on asynchroniczny, przekażemy go
         # przez wymuszenie reindeksu i ominięcie _load_window na 0.
