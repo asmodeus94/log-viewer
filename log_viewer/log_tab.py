@@ -6,10 +6,13 @@ import os
 _running_tasks = set()
 import time
 import bisect
-from typing import Optional, List, Tuple, Dict
+from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .main_window import LogViewerWindow
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QPoint
+from PySide6.QtCore import Signal, Slot, QTimer, QThread, QPoint
 from PySide6.QtGui import (
     QColor,
 )
@@ -27,7 +30,7 @@ from .controllers import FileController, EditController, SearchController, Filte
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
 from .workers import IndexerWorker, FilterWorker, SaveWorker
-from .widgets import SearchResultsModel
+from .widgets import SearchResultsModel, LogPlainTextEdit
 from .ui.ui_log_tab import Ui_LogTab
 
 class LogTab(QWidget):
@@ -45,7 +48,7 @@ class LogTab(QWidget):
 
 
     # UI elements type hints (from compiled UI)
-    text: QtWidgets.QPlainTextEdit
+    text: LogPlainTextEdit
     pct_label: QtWidgets.QLabel
     search_results_view: QtWidgets.QListView
 
@@ -79,17 +82,17 @@ class LogTab(QWidget):
         # Wirtualne okno
         self.window_start: int = 0
         self.window_lines: List[Tuple[int, str]] = []
-        self.line_map: List[int] = []
+        self.line_map: Optional[List[int]] = []
 
         # Filtr
         self.filter_active: bool = False
-        self.filter_results: List[Tuple[int, int, str]] = []
-        self._filter_hit_text_map: Dict[int, str] = {}
-        self._filter_hit_lines: set = set()
-        self._filter_all_lines: List[int] = []
+        self.filter_results: Optional[List[Tuple[int, int, str]]] = []
+        self._filter_hit_text_map: Optional[Dict[int, str]] = {}
+        self._filter_hit_lines: Optional[set] = set()
+        self._filter_all_lines: Optional[List[int]] = []
         # Linie kontekstu (N linii po każdym trafieniu) — zbiór numerów linii pliku.
         # Tła kontekstu są dodawane przez ExtraSelections (jak zakładki).
-        self.filter_context_lines: set = set()
+        self.filter_context_lines: Optional[set] = set()
         # Ile linii kontekstu po każdym trafieniu (0 = wyłączone).
         self._filter_context_after: int = 0
 
@@ -103,7 +106,7 @@ class LogTab(QWidget):
         self._last_search_negate: bool = False
         # Wyniki wyszukiwania (panel dolny)
         self._search_results: List[Tuple[int, str]] = []
-        self._search_results_all: List[Tuple[int, str]] = []  # pełne wyniki
+        self._search_results_all: List[Union[int, Tuple[int, str]]] = []  # pełne wyniki
         self._search_result_index: int = -1
         self._search_engine: Optional[FilterEngine] = None
         self._search_thread: Optional[QThread] = None
@@ -153,6 +156,9 @@ class LogTab(QWidget):
         self.tb_filter_case: bool = False
         self.tb_filter_negate: bool = False
         self.tb_filter_context: int = 0
+
+        # Timer do ładowania krawędzi zainicjalizowany przed użyciem
+        self._edge_load_timer = QTimer(self)
 
         # Build UI
         self.ui = Ui_LogTab()
@@ -259,6 +265,7 @@ class LogTab(QWidget):
         distance = abs(at_line - self.window_start)
         show_progress = distance > 100000
 
+        progress = None
         if show_progress:
             progress = QProgressDialog(self.t("st_loading"), self.t("btn_cancel"), 0, 0, self._main)
             progress.setWindowTitle(self.t("app_title"))
@@ -270,7 +277,7 @@ class LogTab(QWidget):
         try:
             self._load_window_impl(at_line)
         finally:
-            if show_progress:
+            if progress:
                 progress.close()
 
     def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
@@ -735,7 +742,9 @@ class LogTab(QWidget):
 
     def _get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
         if self.edit_buffer.has(file_line_no):
-            return self.edit_buffer.get(file_line_no)
+            edit = self.edit_buffer.get(file_line_no)
+            if edit is not None:
+                return edit
         if widget_line_idx < len(self.window_lines):
             return self.window_lines[widget_line_idx][1]
         return ""
