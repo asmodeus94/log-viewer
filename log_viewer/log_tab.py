@@ -79,6 +79,9 @@ class LogTab(QWidget):
         self._file_size_at_open: int = 0
         self._last_file_inode: int = 0
 
+        # Cache dla obiektów QColor
+        self._theme_colors: Dict[str, QColor] = {}
+
         # Wirtualne okno
         self.window_start: int = 0
         self.window_lines: List[Tuple[int, str]] = []
@@ -226,6 +229,21 @@ class LogTab(QWidget):
         return self.ui_controller._apply_font_to_text()
 
     def _apply_theme(self) -> None:
+        # Odśwież cache QColor przed aktualizacją UI
+        t = self.theme
+        self._theme_colors = {
+            "truncated": QColor(t.get("truncated", "#6a6a6a")),
+            "error": QColor(t.get("error", "#f44747")),
+            "warn": QColor(t.get("warn", "#cca700")),
+            "info": QColor(t.get("info", "#569cd6")),
+            "debug": QColor(t.get("debug", "#c586c0")),
+            "highlight": QColor(t.get("highlight", "#fff176")),
+            "context": QColor(t.get("context", "#3a3d3a")),
+            "bookmark": QColor(t.get("bookmark", "#6a9955")),
+            "edited": QColor(t.get("edited", "#ce9178")),
+            "current_line": QColor(t.get("current_line", "#2a2d2e")),
+            "black": QColor("#000000"),
+        }
         return self.ui_controller._apply_theme()
 
     def _update_text_colors(self) -> None:
@@ -413,9 +431,9 @@ class LogTab(QWidget):
             return
         cursor = QtGui.QTextCursor(block)
         fmt = cursor.blockCharFormat()
-        t = self.theme
+
         if tag == TAG_TRUNCATED:
-            fmt.setForeground(QColor(t["truncated"]))
+            fmt.setForeground(self._theme_colors.get("truncated", QColor("#6a6a6a")))
             font = fmt.font()
             font.setItalic(True)
             fmt.setFont(font)
@@ -756,8 +774,8 @@ class LogTab(QWidget):
 
         sel = QtWidgets.QTextEdit.ExtraSelection()
         sel.cursor = sel_cursor
-        sel.format.setBackground(QColor(self.theme["highlight"]))
-        sel.format.setForeground(QColor("#000000")) # Czarny tekst dla czytelności na żółtym tle
+        sel.format.setBackground(self._theme_colors.get("highlight", QColor("#fff176")))
+        sel.format.setForeground(self._theme_colors.get("black", QColor("#000000"))) # Czarny tekst dla czytelności na żółtym tle
         sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
         self._search_extra_sel = sel
 
@@ -806,13 +824,14 @@ class LogTab(QWidget):
         context_set = set(getattr(self, "_context_widget_lines", []))
         filter_hit_set = set(getattr(self, "_filter_hit_widget_lines", []))
 
-        # Cache QColor aby zapobiec ich alokowaniu w pętlach
-        color_context = QColor(t["context"])
-        color_highlight = QColor(t["highlight"])
-        color_black = QColor("#000000")
-        color_bookmark = QColor(t["bookmark"])
-        color_edited = QColor(t["edited"])
-        color_current_line = QColor(t["current_line"])
+        # Użycie już istniejącego cache QColor (self._theme_colors)
+        # bez tworzenia nowych obiektów w każdej klatce renderowania.
+        color_context = self._theme_colors.get("context", QColor("#3a3d3a"))
+        color_highlight = self._theme_colors.get("highlight", QColor("#fff176"))
+        color_black = self._theme_colors.get("black", QColor("#000000"))
+        color_bookmark = self._theme_colors.get("bookmark", QColor("#6a9955"))
+        color_edited = self._theme_colors.get("edited", QColor("#ce9178"))
+        color_current_line = self._theme_colors.get("current_line", QColor("#2a2d2e"))
 
         # 1) Kontekst filtra — delikatne tło (pierwsze, najniższy priorytet).
         for li in context_set:
