@@ -95,7 +95,7 @@ class FilterController(QObject):
         self.tab._filter_hit_text_map = hit_text_map
         self.tab._filter_hit_lines = hit_lines_set
 
-        self.tab._load_window(at_line=0)
+        self.tab._load_window(at_line=0, force_reload=True)
         self.tab._status(self.tab._fmt("st_filtered", hits=len(results), total=self.tab.indexer.line_count))
 
     def _update_filter_cache(self) -> None:
@@ -120,7 +120,7 @@ class FilterController(QObject):
         if not silent:
             self.tab._main.filter_entry.clear()
         if was_active and self.tab.indexer:
-            self.tab._load_window(at_line=0)
+            self.tab._load_window(at_line=0, force_reload=True)
         else:
             self.tab._update_position_slider()
         self.tab._refresh_status()
