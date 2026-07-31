@@ -412,6 +412,65 @@ class LineIndexer:
                 current += 1
             return f.tell()
 
+    def read_specific_lines(self, target_lines: List[int]) -> List[Tuple[int, str]]:
+        """
+        Zoptymalizowana metoda do wczytywania wielu konkretnych (potencjalnie rzadkich) linii naraz.
+        Zamiast szukać offsetu i przewijać plik dla każdej małej grupy linii z osobna (co psuje wydajność),
+        utrzymuje pozycję odczytu i przechodzi sekwencyjnie między liniami, lub skacze tylko gdy to opłacalne.
+        """
+        if not target_lines:
+            return []
+
+        # Usunięcie duplikatów i posortowanie ułatwia sekwencyjny odczyt
+        targets = sorted(list(set(target_lines)))
+        out: List[Tuple[int, str]] = []
+        proxy = _IndexLineProxy(self.index)
+
+        with self._file_lock:
+            f = self._get_file()
+            current_line = -1
+
+            for target_line in targets:
+                if target_line < 0 or target_line >= self.line_count:
+                    continue
+
+                # Znajdź najbliższy wpis w indeksie przed pożądaną linią
+                idx = bisect.bisect_right(proxy, target_line) - 1
+                start = self.index[max(0, idx)]
+
+                # Jeśli nasza aktualna pozycja (current_line) jest już bliżej celu niż znacznik z indeksu,
+                # to nie cofamy się (nie robimy f.seek), tylko kontynuujemy czytanie do przodu.
+                if current_line != -1 and start.line <= current_line <= target_line:
+                    pass
+                else:
+                    # Skaczemy, bo znacznik z indeksu jest bliżej (albo byliśmy za daleko / jeszcze nie zaczęliśmy)
+                    f.seek(start.offset)
+                    current_line = start.line
+
+                # Przewijaj linie do przodu dopóki nie trafisz w target_line
+                while current_line < target_line:
+                    line = f.readline()
+                    if not line:
+                        break
+                    current_line += 1
+
+                if current_line == target_line:
+                    raw = f.readline()
+                    if not raw:
+                        break
+                    try:
+                        text = raw.decode(self.encoding, errors="replace")
+                    except Exception:
+                        text = repr(raw)
+                    if text.endswith("\r\n"):
+                        text = text[:-2]
+                    elif text.endswith("\n") or text.endswith("\r"):
+                        text = text[:-1]
+                    out.append((target_line, text))
+                    current_line += 1
+
+        return out
+
     def read_lines(self, start_line: int, count: int) -> List[Tuple[int, str]]:
         if start_line < 0:
             start_line = 0

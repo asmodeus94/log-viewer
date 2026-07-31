@@ -299,29 +299,48 @@ class LogTab(QWidget):
                 progress.close()
 
     def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
-        context_needed = chunk_lines
-        context_text_map: Dict[int, str] = {}
-        if context_needed:
-            # Znajdź ciągłe zakresy w context_needed (posortowane).
-            i = 0
-            while i < len(context_needed):
-                j = i
-                while (j + 1 < len(context_needed)
-                       and context_needed[j + 1] == context_needed[j] + 1):
-                    j += 1
-                range_start = context_needed[i]
-                range_count = j - i + 1
-                read = self.indexer.read_lines(range_start, range_count)
-                if read:
-                    for (rln, rtext) in read:
-                        context_text_map[rln] = rtext
-                i = j + 1
+        if not chunk_lines:
+            return []
 
-        lines = []
-        for ln in chunk_lines:
-            if ln in context_text_map:
-                lines.append((ln, context_text_map[ln]))
-        return lines
+        # Zamiast wielokrotnie uruchamiać read_lines (i offset_of_line + f.seek)
+        # dla każdego małego, ciągłego bloku wyników filtra,
+        # korzystamy ze zoptymalizowanej metody w LineIndexerze
+        # która jednym przelotem sekwencyjnym wyciągnie żądane linie.
+
+        if hasattr(self.indexer, 'read_specific_lines'):
+            read_lines = self.indexer.read_specific_lines(chunk_lines)
+            context_text_map = {ln: text for ln, text in read_lines}
+
+            lines = []
+            for ln in chunk_lines:
+                if ln in context_text_map:
+                    lines.append((ln, context_text_map[ln]))
+            return lines
+        else:
+            # Fallback jeśli starsza wersja indexera (np. test) nie ma tej metody
+            context_needed = chunk_lines
+            context_text_map: Dict[int, str] = {}
+            if context_needed:
+                # Znajdź ciągłe zakresy w context_needed (posortowane).
+                i = 0
+                while i < len(context_needed):
+                    j = i
+                    while (j + 1 < len(context_needed)
+                           and context_needed[j + 1] == context_needed[j] + 1):
+                        j += 1
+                    range_start = context_needed[i]
+                    range_count = j - i + 1
+                    read = self.indexer.read_lines(range_start, range_count)
+                    if read:
+                        for (rln, rtext) in read:
+                            context_text_map[rln] = rtext
+                    i = j + 1
+
+            lines = []
+            for ln in chunk_lines:
+                if ln in context_text_map:
+                    lines.append((ln, context_text_map[ln]))
+            return lines
 
     def _load_window_impl(self, at_line: int) -> None:
         if self.filter_active and self.filter_results:
