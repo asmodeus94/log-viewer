@@ -370,3 +370,24 @@ class TestReadSpecificLines:
         assert len(lines) == 0
 
         idx.close()
+
+
+    def test_read_specific_lines_performance(self, temp_log_file):
+        """Test wydajnościowy dla read_specific_lines sprawdzający limit czasu wykonywania dla bardzo rozproszonych danych."""
+        import time
+        path = temp_log_file(num_lines=100000)
+        idx = LineIndexer(path)
+
+        # Wybieramy co 10. linię - bardzo rozproszony układ (najgorszy przypadek)
+        targets = list(range(0, 100000, 10))
+
+        start_time = time.time()
+        lines = idx.read_specific_lines(targets)
+        end_time = time.time()
+
+        # Nawet na wolnych maszynach ciągłe odczytywanie 10 tys. rozproszonych linii
+        # w jednym przejściu (bez setek seeków) powinno trwać znacznie poniżej sekundy
+        assert (end_time - start_time) < 1.0, f"Performance test failed, took {end_time - start_time} seconds"
+        assert len(lines) == 10000
+
+        idx.close()
