@@ -298,3 +298,96 @@ class TestFreezeSupport:
         # Jeśli plik > 100MB, użyje parallel. Sprawdź że nie crashuje.
         assert idx.line_count == 50000
         idx.close()
+
+class TestReadSpecificLines:
+    def test_read_specific_lines_sparse(self, temp_log_file):
+        """Metoda read_specific_lines poprawnie odczytuje oddalone od siebie linie."""
+        path = temp_log_file(num_lines=1000)
+        idx = LineIndexer(path)
+
+        targets = [10, 500, 990]
+        lines = idx.read_specific_lines(targets)
+
+        assert len(lines) == 3
+        assert lines[0][0] == 10
+        assert "line      10" in lines[0][1]
+        assert lines[1][0] == 500
+        assert "line     500" in lines[1][1]
+        assert lines[2][0] == 990
+        assert "line     990" in lines[2][1]
+
+        idx.close()
+
+    def test_read_specific_lines_continuous(self, temp_log_file):
+        """Metoda read_specific_lines poprawnie odczytuje blok ciągłych linii."""
+        path = temp_log_file(num_lines=1000)
+        idx = LineIndexer(path)
+
+        targets = [100, 101, 102, 103, 104]
+        lines = idx.read_specific_lines(targets)
+
+        assert len(lines) == 5
+        for i, (ln, text) in enumerate(lines):
+            assert ln == 100 + i
+            assert f"line     {100+i}" in text
+
+        idx.close()
+
+    def test_read_specific_lines_unordered_and_duplicates(self, temp_log_file):
+        """Metoda read_specific_lines ignoruje duplikaty i radzi sobie z listą nieposortowaną."""
+        path = temp_log_file(num_lines=1000)
+        idx = LineIndexer(path)
+
+        targets = [500, 10, 500, 990, 10]
+        lines = idx.read_specific_lines(targets)
+
+        assert len(lines) == 3
+        assert lines[0][0] == 10
+        assert lines[1][0] == 500
+        assert lines[2][0] == 990
+
+        idx.close()
+
+    def test_read_specific_lines_out_of_bounds(self, temp_log_file):
+        """Metoda read_specific_lines bezpiecznie ignoruje indeksy poza zakresem."""
+        path = temp_log_file(num_lines=1000)
+        idx = LineIndexer(path)
+
+        targets = [-5, 10, 2000, 5000]
+        lines = idx.read_specific_lines(targets)
+
+        assert len(lines) == 1
+        assert lines[0][0] == 10
+
+        idx.close()
+
+    def test_read_specific_lines_empty(self, temp_log_file):
+        """Metoda read_specific_lines zwraca pustą listę dla pustej wejściowej."""
+        path = temp_log_file(num_lines=1000)
+        idx = LineIndexer(path)
+
+        lines = idx.read_specific_lines([])
+        assert len(lines) == 0
+
+        idx.close()
+
+
+    def test_read_specific_lines_performance(self, temp_log_file):
+        """Test wydajnościowy dla read_specific_lines sprawdzający limit czasu wykonywania dla bardzo rozproszonych danych."""
+        import time
+        path = temp_log_file(num_lines=100000)
+        idx = LineIndexer(path)
+
+        # Wybieramy co 10. linię - bardzo rozproszony układ (najgorszy przypadek)
+        targets = list(range(0, 100000, 10))
+
+        start_time = time.time()
+        lines = idx.read_specific_lines(targets)
+        end_time = time.time()
+
+        # Nawet na wolnych maszynach ciągłe odczytywanie 10 tys. rozproszonych linii
+        # w jednym przejściu (bez setek seeków) powinno trwać znacznie poniżej sekundy
+        assert (end_time - start_time) < 1.0, f"Performance test failed, took {end_time - start_time} seconds"
+        assert len(lines) == 10000
+
+        idx.close()
