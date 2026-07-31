@@ -249,10 +249,44 @@ class RegexStrategy(FilterStrategy):
         return not matched if self.negate else matched
 
     def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
-        # W przypadku Regex, używamy bezpiecznego podejścia z klasy bazowej (podział na linie).
-        # finditer na wieloliniowym ciągu dla złożonych regexów lub negacji mógłby być
-        # trudny do poprawnej obsługi. Fallback zapewnia pełną poprawność.
-        return super().match_chunk(chunk, start_line)
+        if self.matcher_bytes is None:
+            # Fallback dla regexów, których nie dało się skompilować dla bajtów
+            return super().match_chunk(chunk, start_line)
+
+        hits = []
+        pos = 0
+        lines_counted = start_line
+        last_nl_pos = -1
+
+        while True:
+            match = self.matcher_bytes.search(chunk, pos)
+            if not match:
+                break
+
+            hit_pos = match.start()
+            # Liczymy znaki nowej linii tylko między ostatnim \n a pozycją obecnego trafienia
+            nl_count = chunk.count(b"\n", last_nl_pos + 1, hit_pos)
+            lines_counted += nl_count
+
+            if not hits or hits[-1] != lines_counted:
+                hits.append(lines_counted)
+
+            next_nl = chunk.find(b"\n", hit_pos)
+            if next_nl == -1:
+                break
+
+            last_nl_pos = next_nl
+            lines_counted += 1
+            pos = next_nl + 1
+
+        if self.negate:
+            total_lines = chunk.count(b"\n")
+            if chunk and not chunk.endswith(b"\n"):
+                total_lines += 1
+            positive_hits = set(hits)
+            return [line for line in range(start_line, start_line + total_lines) if line not in positive_hits]
+
+        return hits
 
 def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
