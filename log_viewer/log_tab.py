@@ -272,9 +272,20 @@ class LogTab(QWidget):
         return self.file_controller._on_index_done(idx)
 
     # -------------------------------------------------- virtual window -----
-    def _load_window(self, at_line: int) -> None:
+    def _load_window(self, at_line: int, force_reload: bool = False) -> None:
         if not self.indexer:
             return
+
+        if self.filter_active and self.filter_results:
+            n = len(self._filter_all_lines)
+            start = max(0, min(at_line, n - 1))
+        else:
+            start = max(0, min(at_line, max(0, self.indexer.line_count - 1)))
+
+        if not force_reload and start == self.window_start and self.line_map:
+            # Optymalizacja: Pomiń ponowne ładowanie dokładnie tego samego okna
+            return
+
         self._is_loading = True
 
         # Pokaż progress dialog dla skakania w dużych plikach,
@@ -361,11 +372,17 @@ class LogTab(QWidget):
 
         self.text.setPlainText("\n".join(text_parts))
         cursor = self.text.textCursor()
-        for tag, line_indices in tag_data.items():
-            for li in line_indices:
-                block = cursor.document().findBlockByNumber(li)
-                if block.isValid():
+        doc = self.text.document()
+        block = doc.begin()
+        i = 0
+        tag_lines_set = {tag: set(indices) for tag, indices in tag_data.items()}
+        while block.isValid():
+            for tag, indices_set in tag_lines_set.items():
+                if i in indices_set:
                     self._apply_line_format(block, tag)
+            block = block.next()
+            i += 1
+
         # Zbuduj ExtraSelections: zakładki (zielone tło) + edycje (pomarańczowe)
         # + kontekst filtra (delikatne tło) + trafienia filtra (żółte tło)
         # + bieżąca linia (delikatne szare tło).
@@ -376,6 +393,43 @@ class LogTab(QWidget):
         self._filter_hit_widget_lines = filter_hit_widget_lines
         self._search_extra_sel = None
         self.text.set_line_map(self.line_map)
+
+        # Optymalizacja: Statyczne formatowania (kontekst i wyniki filtra) zmieniają
+        # się tylko przy ładowaniu nowego bloku (tutaj). Trzymamy je w pamięci
+        # by nie iterować po tysiącach bloków przy każdym przesunięciu kursora.
+        self._static_extra_sels = []
+        color_context = self._theme_colors.get("context", QtGui.QColor("#3a3d3a"))
+        color_highlight = self._theme_colors.get("highlight", QtGui.QColor("#fff176"))
+        color_black = self._theme_colors.get("black", QtGui.QColor("#000000"))
+
+        context_set = set(context_widget_lines)
+        filter_hit_set = set(filter_hit_widget_lines)
+
+        doc = self.text.document()
+        block = doc.begin()
+        i = 0
+        while block.isValid():
+            # Kontekst filtra
+            if i in context_set:
+                sel = QtWidgets.QTextEdit.ExtraSelection()
+                sel.cursor = QtGui.QTextCursor(block)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+                sel.format.setBackground(color_context)
+                self._static_extra_sels.append(sel)
+
+            # Trafienia filtra
+            if i in filter_hit_set:
+                sel = QtWidgets.QTextEdit.ExtraSelection()
+                sel.cursor = QtGui.QTextCursor(block)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+                sel.format.setBackground(color_highlight)
+                sel.format.setForeground(color_black)
+                sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
+                self._static_extra_sels.append(sel)
+
+            block = block.next()
+            i += 1
+
         self._update_position_slider()
 
         # Odsprzęgnięta aktualizacja minimapy (szczególnie przydatna dla Follow)
@@ -788,16 +842,11 @@ class LogTab(QWidget):
         """Przebudowuje listę ExtraSelections.
 
         Kolejność dodawania (OSTATNIE wygrywa w Qt):
-          1. Kontekst filtra (delikatne szaro-zielone tło) — rysowane pierwsze,
-             najniższy priorytet.
-          2. Trafienia filtra (żółte tło) — wyższy priorytet niż kontekst.
-          3. Zakładki (zielone tło).
-          4. Edycje (pomarańczowe tło) — nadpisuje zakładkę dla edytowanej linii.
-          5. Podświetlenie wyniku wyszukiwania (żółte, silniejsze).
-          6. Bieżąca linia (delikatne szare tło) — POMIJANE gdy linia ma już
-             inne tło (zakładka/edycja/wynik wyszukiwania/trafienie). Bez tego
-             current_line (rysowane na końcu z FullWidthSelection) przykryłoby
-             zielone tło zakładki i wyglądałoby, jakby zakładka się nie dodała.
+          1. Kontekst filtra i trafienia filtra (z cache'u statycznego).
+          2. Zakładki (zielone tło).
+          3. Edycje (pomarańczowe tło) — nadpisuje zakładkę dla edytowanej linii.
+          4. Podświetlenie wyniku wyszukiwania (żółte, silniejsze).
+          5. Bieżąca linia (delikatne szare tło).
 
         W praktyce:
           - Linia z kursorem, bez zakładki → delikatne szare tło.
@@ -808,46 +857,20 @@ class LogTab(QWidget):
         """
         if self._is_loading:
             return
-        sels: List[QtWidgets.QTextEdit.ExtraSelection] = []
+
+        # Optymalizacja: Używamy statycznego cache'u (zbudowanego w _load_window_impl)
+        # by nie powtarzać szukania setek bloków przy każdym ruchu kursorem/zmianie
+        sels: List[QtWidgets.QTextEdit.ExtraSelection] = list(getattr(self, "_static_extra_sels", []))
+
         doc = self.text.document()
-        t = self.theme
 
         bookmark_set = set(getattr(self, "_bookmark_widget_lines", []))
         edited_set = set(getattr(self, "_edited_widget_lines", []))
-        context_set = set(getattr(self, "_context_widget_lines", []))
         filter_hit_set = set(getattr(self, "_filter_hit_widget_lines", []))
 
-        # Użycie już istniejącego cache QColor (self._theme_colors)
-        # bez tworzenia nowych obiektów w każdej klatce renderowania.
-        color_context = self._theme_colors.get("context", QColor("#3a3d3a"))
-        color_highlight = self._theme_colors.get("highlight", QColor("#fff176"))
-        color_black = self._theme_colors.get("black", QColor("#000000"))
         color_bookmark = self._theme_colors.get("bookmark", QColor("#6a9955"))
         color_edited = self._theme_colors.get("edited", QColor("#ce9178"))
         color_current_line = self._theme_colors.get("current_line", QColor("#2a2d2e"))
-
-        # 1) Kontekst filtra — delikatne tło (pierwsze, najniższy priorytet).
-        for li in context_set:
-            block = doc.findBlockByNumber(li)
-            if block.isValid():
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_context)
-                sels.append(sel)
-
-        # 2) Trafienia filtra — żółte tło (wyraźnie odróżnia od kontekstu).
-        # Tylko gdy filtr jest aktywny — bez filtra lista jest pusta.
-        for li in filter_hit_set:
-            block = doc.findBlockByNumber(li)
-            if block.isValid():
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_highlight)
-                sel.format.setForeground(color_black) # Czarny tekst dla czytelności na żółtym tle
-                sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
-                sels.append(sel)
 
         # 3) Zakładki — zielone tło.
         for li in bookmark_set:
@@ -859,7 +882,7 @@ class LogTab(QWidget):
                 sel.format.setBackground(color_bookmark)
                 sels.append(sel)
 
-        # 4) Edycje — pomarańczowe tło (nadpisuje zakładkę dla edytowanej linii).
+        # 4) Edycje — pomarańczowe tło
         for li in edited_set:
             block = doc.findBlockByNumber(li)
             if block.isValid():
@@ -869,15 +892,13 @@ class LogTab(QWidget):
                 sel.format.setBackground(color_edited)
                 sels.append(sel)
 
-        # 5) Podświetlenie wyniku wyszukiwania (żółte, silniejsze).
+        # 5) Podświetlenie wyniku wyszukiwania
         search_block = -1
         if self._search_extra_sel is not None:
             sels.append(self._search_extra_sel)
             search_block = self._search_extra_sel.cursor.blockNumber()
 
-        # 6) Bieżąca linia — delikatne tło, pełna szerokość.
-        # POMIŃ jeśli linia ma już inne tło (zakładka/edycja/wynik/trafienie).
-        # Kontekst filtra NIE blokuje current_line — kontekst jest delikatny.
+        # 6) Bieżąca linia — delikatne tło.
         current_block = self.text.textCursor().blockNumber()
         if (current_block not in bookmark_set
                 and current_block not in edited_set
@@ -1102,6 +1123,26 @@ class LogTab(QWidget):
 
         target_idx_in_map = 0
 
+        # Sprawdzamy czy linia już jest w załadowanym oknie.
+        # Unikamy wywoływania kosztownego _load_window i resetowania widoku,
+        # co jest bardzo odczuwalne podczas nawigacji po wynikach wyszukiwania.
+        if self.line_map:
+            try:
+                target_ln = self._filter_all_lines[ln] if (self.filter_active and is_filtered_index) else ln
+                if self.line_map[0] <= target_ln <= self.line_map[-1]:
+                    idx_in_map = bisect.bisect_left(self.line_map, target_ln)
+                    if idx_in_map != len(self.line_map) and self.line_map[idx_in_map] == target_ln:
+                        self.text.verticalScrollBar().setValue(idx_in_map)
+                        target_idx_in_map = idx_in_map
+
+                        block = self.text.document().findBlockByNumber(target_idx_in_map)
+                        if block.isValid():
+                            new_cur = QtGui.QTextCursor(block)
+                            self.text.setTextCursor(new_cur)
+                        return
+            except Exception:
+                pass
+
         if self.filter_active:
             if is_filtered_index:
                 idx = ln
@@ -1226,7 +1267,7 @@ class LogTab(QWidget):
             else:
                 top_line = self.line_map[0]
 
-        self._load_window(at_line=top_line)
+        self._load_window(at_line=top_line, force_reload=True)
         scrollbar.setValue(old_val)
 
     def _refresh_status(self) -> None:
