@@ -20,6 +20,8 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from log_viewer.app import LogViewerWindow
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
+from log_viewer.log_tab import LogTab
+from log_viewer.context_view import ContextExpandedView
 
 
 @pytest.fixture
@@ -600,7 +602,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = array.array('Q', [10, 20, 30])
         tab._filter_context_after = 2
-        filter_all = array.array('Q', [10, 11, 12, 20, 21, 22, 30, 31, 32])
+        filter_all = ContextExpandedView(tab.filter_results, 2, 100)
         tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
 
         # Po każdym trafieniu 2 następujące linie (z pominięciem trafień).
@@ -616,7 +618,8 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = array.array('Q', [10])
         tab._filter_context_after = 0
-        tab._on_filter_done(tab.filter_results, set(), [10], {10: "x"}, {10}, None)
+        filter_all = ContextExpandedView(tab.filter_results, 0, 100)
+        tab._on_filter_done(tab.filter_results, set(), filter_all, {10: "x"}, {10}, None)
         assert tab.filter_context_lines == set()
 
     def test_build_filter_context_skips_hit_lines(self, app_instance):
@@ -628,7 +631,7 @@ class TestFilterContext:
         # więc tylko {12}. Kontekst dla 11 = {12, 13}.
         tab.filter_results = array.array('Q', [10, 11])
         tab._filter_context_after = 2
-        filter_all = array.array('Q', [10, 11, 12, 13])
+        filter_all = ContextExpandedView(tab.filter_results, 2, 100)
         tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
         # 12, 13 — 11 i 10 są trafieniami, więc pominęliśmy je.
         assert set(tab._filter_all_lines) - set(tab.filter_results) == {12, 13}
@@ -640,7 +643,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = array.array('Q', [10])
         tab._filter_context_after = 2
-        filter_all = array.array('Q', [10, 11, 12])
+        filter_all = ContextExpandedView(tab.filter_results, 2, 100)
         tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
         assert len(tab._filter_all_lines) > 1
 
@@ -660,7 +663,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = array.array('Q', [10, 20, 30])
         tab._filter_context_after = 2
-        filter_all = array.array('Q', [10, 11, 12, 20, 21, 22, 30, 31, 32])
+        filter_all = ContextExpandedView(tab.filter_results, 2, 100)
         tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
@@ -686,7 +689,7 @@ class TestFilterContext:
         tab.filter_active = True
         tab.filter_results = array.array('Q', [5])
         tab._filter_context_after = 2
-        filter_all = array.array('Q', [5, 6, 7])
+        filter_all = ContextExpandedView(tab.filter_results, 2, 100)
         tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
         tab._load_window(at_line=0)
         app.processEvents()

@@ -94,25 +94,9 @@ class FilterWorker(QObject):
             else:
                 self.progress.emit(100.0, len(results), "filtering", None)
 
-            filter_all_lines = array.array('Q')
+            from .context_view import ContextExpandedView
             total = self._engine.indexer.line_count if self._engine.indexer else 0
-            n = self._context_after
-
-            if n > 0:
-                last_added = -1
-                for hit in results:
-                    if hit > last_added:
-                        filter_all_lines.append(hit)
-                        last_added = hit
-                    for offset in range(1, n + 1):
-                        ctx = hit + offset
-                        if ctx >= total:
-                            break
-                        if ctx > last_added:
-                            filter_all_lines.append(ctx)
-                            last_added = ctx
-            else:
-                filter_all_lines = results
+            filter_all_lines = ContextExpandedView(results, self._context_after, total)
 
             self.finished.emit(results, set(), filter_all_lines, {}, set(), error)
 
