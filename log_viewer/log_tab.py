@@ -55,7 +55,7 @@ class LogTab(QWidget):
     pct_label: QtWidgets.QLabel
     search_results_view: QtWidgets.QListView
 
-    def _register_thread_worker(self, thread: QThread, worker: QtCore.QObject) -> None:
+    def _register_thread_worker(self, thread: QtCore.QThread, worker: QtCore.QObject) -> None:
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
         task_ref = (thread, worker)
         _running_tasks.add(task_ref)
