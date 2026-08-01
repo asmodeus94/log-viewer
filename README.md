@@ -7,7 +7,7 @@
 
 ## Główne możliwości:
 * **Asynchroniczne ładowanie** plików wielkości wielu GB przy minimalnym zużyciu zasobów,
-* **Zaawansowane filtrowanie** po konkretnych wzorcach lub wyrażeniach regularnych wraz z możliwością ustawienia tzw. linii kontekstu po każdym wystąpieniu.
+* **Zaawansowane filtrowanie** po konkretnych wzorcach lub wyrażeniach regularnych wraz z możliwością ustawienia tzw. linii kontekstu po każdym wystąpieniu. Wyszukiwanie milionów rekordów jest zoptymalizowane do poziomu sprzętowego dysku, używając skompresowanej struktury **Bitset**.
 * **Mini-mapa** służąca do błyskawicznej nawigacji i podglądu pozycji w pliku.
 * Możliwość robienia **zakładek** (bookmarks) i nanoszenia i zapisywania **edycji** w pliku.
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
