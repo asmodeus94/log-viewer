@@ -9,7 +9,7 @@ import bisect
 import queue
 from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable
 
-from .context_view import bisect_left_custom, bisect_right_custom
+from .bitset import bisect_left_custom, bisect_right_custom
 
 if TYPE_CHECKING:
     from .main_window import LogViewerWindow

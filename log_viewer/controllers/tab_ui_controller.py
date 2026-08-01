@@ -9,7 +9,7 @@ from log_viewer.widgets import SearchResultsModel
 from PySide6.QtCore import QObject, Qt, Slot, QTimer
 from PySide6.QtGui import QFont, QColor, QFontDatabase, QTextCursor
 from log_viewer.helpers import THEME_DARK, THEME_LIGHT
-from log_viewer.context_view import bisect_left_custom
+from log_viewer.bitset import bisect_left_custom
 from typing import Optional, List, Tuple
 
 class UIController(QObject):

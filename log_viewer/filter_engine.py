@@ -27,7 +27,7 @@ def _filter_init_worker(progress_val: "multiprocessing.Value", hits_val: "multip
 
 def _filter_worker_chunk(
     args: Tuple[int, int, int, int, str, str, bool, bool, bool, str]
-) -> Tuple[int, "array.array[int]"]:
+) -> Tuple[int, int, "array.array[int]", int]:
     """
     Worker dla multiprocessing — przeszukuje przydzielony zakres bajtów pliku.
 
@@ -57,7 +57,7 @@ def _filter_worker_chunk(
         else:
             strategy = PlainTextStrategy(pattern, case_sensitive, negate, encoding)
     except Exception:
-        return (chunk_id, results)
+        return (chunk_id, 0, array.array('Q'), 0)
 
     line_no = start_line
     READ_CHUNK = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
@@ -127,7 +127,22 @@ def _filter_worker_chunk(
     except Exception:
         pass
 
-    return (chunk_id, results)
+    hit_count = len(results)
+    if hit_count == 0:
+        return (chunk_id, 0, array.array('Q'), 0)
+
+    min_idx = results[0]
+    max_idx = results[-1]
+    
+    base_word = min_idx // 64
+    end_word = max_idx // 64
+    
+    words = array.array('Q', [0] * (end_word - base_word + 1))
+    
+    for idx in results:
+        words[idx // 64 - base_word] |= (1 << (idx % 64))
+
+    return (chunk_id, base_word, words, hit_count)
 
 
 class FilterStrategy(ABC):
@@ -396,7 +411,8 @@ class FilterEngine:
             except re.error as e:
                 if self._is_current_session(session) and not self._cancel.is_set():
                     try:
-                        on_done(array.array('Q'), str(e))
+                        from log_viewer.bitset import Bitset
+                        on_done(Bitset(0), str(e))
                     except Exception:
                         pass
                 return
@@ -448,8 +464,8 @@ class FilterEngine:
 
         shared_bytes = multiprocessing.Value('Q', 0)
         shared_hits = multiprocessing.Value('Q', 0)
-        # Słownik: chunk_id → array wyników (dla zachowania kolejności po scaleniu)
-        chunk_results: dict[int, "array.array[int]"] = {}
+        # Słownik: chunk_id → (base_word, words)
+        chunk_results: dict[int, Tuple[int, "array.array[int]"]] = {}
 
         try:
             with multiprocessing.Pool(
@@ -469,7 +485,7 @@ class FilterEngine:
                     try:
                         # Czekaj na kolejny wynik z limitem 0.1 s — pozwala
                         # sprawdzać anulowanie bez blokowania wątku na stałe.
-                        chunk_id, partial = imap_iter.next(timeout=0.1)
+                        chunk_id, base_word, words, hit_count = imap_iter.next(timeout=0.1)
                     except multiprocessing.TimeoutError:
                         # Żaden chunk jeszcze nie skończył — raportuj postęp
                         # na podstawie licznika bajtów ze współdzielonej pamięci.
@@ -486,21 +502,23 @@ class FilterEngine:
                         break
 
                     # Odbieramy wynik chunku: dodajemy do wyników
-                    chunk_results[chunk_id] = partial
+                    if hit_count > 0:
+                        chunk_results[chunk_id] = (base_word, words)
 
                     bytes_done = shared_bytes.value
                     current_hits = shared_hits.value
                     pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
                     try:
                         # Przekazujemy wyniki bieżącego chunku — GUI może dołączyć je do listy
-                        on_progress(min(pct, 99.0), current_hits, "filtering", partial)
+                        on_progress(min(pct, 99.0), current_hits, "filtering", (base_word, words) if hit_count > 0 else None)
                     except Exception:
                         pass
 
         except Exception as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
-                    on_done(array.array('Q'), str(e))
+                    from log_viewer.bitset import Bitset
+                    on_done(Bitset(0), str(e))
                 except Exception:
                     pass
             return
@@ -509,14 +527,25 @@ class FilterEngine:
         if self._cancel.is_set() or not self._is_current_session(session):
             return
 
-        # Scal wyniki — sortowanie po chunk_id gwarantuje zachowanie kolejności linii
-        merged: "array.array[int]" = array.array('Q')
-        for _chunk_id, partial in sorted(chunk_results.items(), key=lambda x: x[0]):
-            merged.extend(partial)
+        from log_viewer.bitset import Bitset
+        merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
+        global_words = merged_bitset._words
+        
+        for _chunk_id, (base_word, words) in sorted(chunk_results.items(), key=lambda x: x[0]):
+            if len(words) == 1:
+                global_words[base_word] |= words[0]
+            elif len(words) > 1:
+                global_words[base_word] |= words[0]
+                global_words[base_word + len(words) - 1] |= words[-1]
+                if len(words) > 2:
+                    global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
+                    
+        merged_bitset._counts = None
+        merged_bitset._total_count = shared_hits.value
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
-                on_done(merged, None)
+                on_done(merged_bitset, None)
             except Exception:
                 pass
 
@@ -530,7 +559,9 @@ class FilterEngine:
         Używane dla małych plików (< 50 MB) oraz plików skompresowanych,
         gdzie multiprocessing przyniósłby zbyt duży narzut.
         """
-        results: "array.array[int]" = array.array('Q')
+        from log_viewer.bitset import Bitset
+        merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
+        total_hits = 0
         error: Optional[str] = None
 
         try:
@@ -557,7 +588,28 @@ class FilterEngine:
                 bytes_read += len(block)
 
                 chunk_hits = strategy.match_chunk(block, line_no)
-                results.extend(chunk_hits)
+                
+                if chunk_hits:
+                    min_idx = chunk_hits[0]
+                    max_idx = chunk_hits[-1]
+                    base_word = min_idx // 64
+                    end_word = max_idx // 64
+                    words = array.array('Q', [0] * (end_word - base_word + 1))
+                    for idx in chunk_hits:
+                        words[idx // 64 - base_word] |= (1 << (idx % 64))
+                    
+                    global_words = merged_bitset._words
+                    if len(words) == 1:
+                        global_words[base_word] |= words[0]
+                    elif len(words) > 1:
+                        global_words[base_word] |= words[0]
+                        global_words[base_word + len(words) - 1] |= words[-1]
+                        if len(words) > 2:
+                            global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
+                            
+                    merged_bitset._counts = None
+                    total_hits += len(chunk_hits)
+                    merged_bitset._total_count = total_hits
 
                 lines_count = block.count(b"\n")
                 if block and not block.endswith(b"\n"):
@@ -567,7 +619,7 @@ class FilterEngine:
                 if self._is_current_session(session) and not self._cancel.is_set():
                     pct = (bytes_read / size * 100.0) if size else 0.0
                     try:
-                        on_progress(pct, len(results))
+                        on_progress(pct, total_hits, "filtering", (base_word, words) if chunk_hits else None)
                     except Exception:
                         pass
 
@@ -576,6 +628,6 @@ class FilterEngine:
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
-                on_done(results, error)
+                on_done(merged_bitset, error)
             except Exception:
                 pass
