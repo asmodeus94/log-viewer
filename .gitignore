@@ -10,3 +10,4 @@ assets/*.ico
 
 run_frozen.py
 .idea/
+docs/

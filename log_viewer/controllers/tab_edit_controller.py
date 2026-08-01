@@ -5,7 +5,7 @@ from PySide6.QtCore import QObject, Qt, Slot, QThread
 from PySide6.QtWidgets import QMessageBox, QInputDialog, QProgressDialog, QFileDialog
 from PySide6.QtGui import QTextCursor
 import os
-from log_viewer.workers import SaveWorker
+from log_viewer.workers import SaveWorker, SaveAsWorker, ExportWorker
 from log_viewer.helpers import fmt_size, open_maybe_compressed
 from log_viewer.widgets import FormatDialog
 from PySide6.QtWidgets import QDialog
@@ -215,6 +215,30 @@ class EditController(QObject):
         self.tab._reload_current_view()
         self.tab._refresh_status()
 
+    @Slot(float)
+    def _update_save_progress(self, val: float):
+        if hasattr(self.tab, "_save_as_progress") and self.tab._save_as_progress:
+            if not self.tab._save_as_progress.wasCanceled():
+                self.tab._save_as_progress.setValue(int(val))
+
+    @Slot()
+    def _on_save_done(self):
+        if hasattr(self.tab, "_save_as_progress") and self.tab._save_as_progress:
+            self.tab._save_as_progress.close()
+            self.tab._save_as_progress = None
+        QMessageBox.information(self.tab._main, self.tab.t("app_title"),
+                                self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=self.tab._save_as_path))
+
+    @Slot(str)
+    def _on_save_error(self, err: str):
+        if hasattr(self.tab, "_save_as_progress") and self.tab._save_as_progress:
+            self.tab._save_as_progress.close()
+            self.tab._save_as_progress = None
+        if err == "cancelled":
+            self.tab._status(self.tab.t("st_cancelled"))
+        else:
+            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_save_error").format(err=err))
+
     def cmd_save_as(self) -> None:
         if not self.tab.file_path or not self.tab.indexer:
             QMessageBox.information(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
@@ -224,48 +248,100 @@ class EditController(QObject):
         )
         if not path:
             return
-        try:
-            with open_maybe_compressed(self.tab.file_path, "rb") as src, \
-                 open_maybe_compressed(path, "wb") as dst:
-                line_no = 0
-                for raw in src:
-                    if line_no in self.tab.edit_buffer._edits:
-                        new_text = self.tab.edit_buffer._edits[line_no]
-                        dst.write(new_text.encode(self.tab.encoding, errors="replace"))
-                        if not new_text.endswith("\n"):
-                            dst.write(b"\n")
-                    else:
-                        dst.write(raw)
-                    line_no += 1
-            QMessageBox.information(self.tab._main, self.tab.t("app_title"),
-                                    self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=path))
-        except Exception as e:
-            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), f"Save error: {e}")
+            
+        self.tab._save_as_path = path
+
+        self.tab._save_as_progress = QProgressDialog(self.tab.t("dlg_save_as_title"), self.tab.t("btn_cancel"), 0, 100, self.tab._main)
+        self.tab._save_as_progress.setWindowTitle(self.tab.t("dlg_save_as_title"))
+        self.tab._save_as_progress.setWindowModality(Qt.NonModal)
+        self.tab._save_as_progress.setValue(0)
+        self.tab._save_as_progress.show()
+
+        self.tab._save_as_thread = QThread()
+        self.tab._save_as_worker = SaveAsWorker(
+            self.tab.edit_buffer, self.tab.file_path, path, self.tab.encoding
+        )
+        self.tab._save_as_worker.moveToThread(self.tab._save_as_thread)
+        self.tab._save_as_thread.started.connect(self.tab._save_as_worker.run)
+        self.tab._register_thread_worker(self.tab._save_as_thread, self.tab._save_as_worker)
+
+        self.tab._save_as_worker.progress.connect(self._update_save_progress, Qt.QueuedConnection)
+        self.tab._save_as_progress.canceled.connect(self.tab._save_as_worker.cancel, Qt.DirectConnection)
+
+        self.tab._save_as_worker.finished.connect(self._on_save_done, Qt.QueuedConnection)
+        self.tab._save_as_worker.error.connect(self._on_save_error, Qt.QueuedConnection)
+
+        self.tab._save_as_worker.finished.connect(self.tab._save_as_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._save_as_worker.error.connect(self.tab._save_as_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._save_as_worker.finished.connect(self.tab._save_as_thread.quit, Qt.QueuedConnection)
+        self.tab._save_as_worker.error.connect(self.tab._save_as_thread.quit, Qt.QueuedConnection)
+        self.tab._save_as_thread.finished.connect(self.tab._save_as_thread.deleteLater)
+        self.tab._save_as_thread.start()
+
+    @Slot(float)
+    def _update_export_progress(self, val: float):
+        if hasattr(self.tab, "_export_progress") and self.tab._export_progress:
+            if not self.tab._export_progress.wasCanceled():
+                self.tab._export_progress.setValue(int(val))
+
+    @Slot(int)
+    def _on_export_done(self, count: int):
+        if hasattr(self.tab, "_export_progress") and self.tab._export_progress:
+            self.tab._export_progress.deleteLater()
+            self.tab._export_progress = None
+        self.tab._status(self.tab.t("msg_exported").format(n=count, path=self.tab._export_path))
+        QMessageBox.information(self.tab._main, self.tab.t("app_title"),
+                                self.tab.t("msg_exported").format(n=count, path=self.tab._export_path))
+
+    @Slot(str)
+    def _on_export_error(self, err: str):
+        if hasattr(self.tab, "_export_progress") and self.tab._export_progress:
+            self.tab._export_progress.deleteLater()
+            self.tab._export_progress = None
+        if err == "cancelled":
+            self.tab._status(self.tab.t("st_cancelled"))
+        else:
+            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_export_error").format(err=err))
 
     def cmd_export(self) -> None:
-        if not self.tab.indexer:
+        if not self.tab.indexer or not self.tab.file_path:
             QMessageBox.information(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self.tab._main, self.tab.t("dlg_export_title"), "", "Log files (*.log);;Text files (*.txt);;All files (*)"
+            self.tab._main, self.tab.t("dlg_export_title"), "", "Text Files (*.txt);;All Files (*)"
         )
         if not path:
             return
-        try:
-            count = 0
-            if self.tab.filter_active and self.tab.filter_results:
-                with open_maybe_compressed(path, "wb") as out:
-                    for (ln, _off, text) in self.tab.filter_results:
-                        out.write(text.encode(self.tab.encoding, errors="replace"))
-                        out.write(b"\n")
-                        count += 1
-            else:
-                with open_maybe_compressed(self.tab.file_path, "rb") as src, \
-                     open_maybe_compressed(path, "wb") as out:
-                    for raw in src:
-                        out.write(raw)
-                        count += 1
-            QMessageBox.information(self.tab._main, self.tab.t("app_title"),
-                                    self.tab.t("msg_exported").format(n=count, path=path))
-        except Exception as e:
-            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), f"Export error: {e}")
+            
+        self.tab._export_path = path
+
+        self.tab._export_progress = QProgressDialog(self.tab.t("dlg_export_title"), self.tab.t("btn_cancel"), 0, 100, self.tab._main)
+        self.tab._export_progress.setWindowTitle(self.tab.t("dlg_export_title"))
+        self.tab._export_progress.setWindowModality(Qt.WindowModal)
+        self.tab._export_progress.setValue(0)
+        self.tab._export_progress.show()
+
+        self.tab._export_thread = QThread()
+        self.tab._export_worker = ExportWorker(
+            self.tab.edit_buffer, self.tab.file_path, path,
+            encoding=self.tab.encoding,
+            filter_active=self.tab.filter_active,
+            filter_results=self.tab.filter_results,
+        )
+        self.tab._export_worker.moveToThread(self.tab._export_thread)
+        self.tab._export_thread.started.connect(self.tab._export_worker.run)
+        
+        self.tab._register_thread_worker(self.tab._export_thread, self.tab._export_worker)
+
+        self.tab._export_worker.progress.connect(self._update_export_progress, Qt.QueuedConnection)
+        self.tab._export_progress.canceled.connect(self.tab._export_worker.cancel, Qt.DirectConnection)
+
+        self.tab._export_worker.finished.connect(self._on_export_done, Qt.QueuedConnection)
+        self.tab._export_worker.error.connect(self._on_export_error, Qt.QueuedConnection)
+
+        self.tab._export_worker.finished.connect(self.tab._export_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._export_worker.error.connect(self.tab._export_worker.deleteLater, Qt.QueuedConnection)
+        self.tab._export_worker.finished.connect(self.tab._export_thread.quit, Qt.QueuedConnection)
+        self.tab._export_worker.error.connect(self.tab._export_thread.quit, Qt.QueuedConnection)
+        self.tab._export_thread.finished.connect(self.tab._export_thread.deleteLater)
+        self.tab._export_thread.start()

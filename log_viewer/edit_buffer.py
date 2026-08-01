@@ -100,6 +100,7 @@ class EditBuffer:
             prefix=".log-viewer_tmp_",
         )
         bytes_written = 0
+        last_progress_bytes = 0
 
         def secure_opener(path, flags):
             return os.open(path, flags, 0o600)
@@ -122,8 +123,9 @@ class EditBuffer:
                     else:
                         out.write(raw)
                     bytes_written += len(raw)
-                    if progress_cb and size:
+                    if progress_cb and size and (bytes_written - last_progress_bytes) > 1_048_576:
                         progress_cb(bytes_written / size * 100.0)
+                        last_progress_bytes = bytes_written
                     line_no += 1
 
             # #4: Błędy copystat logujemy, ale nie crashujemy — plik już jest zapisany

@@ -44,6 +44,11 @@ class Bitset(Sequence[int]):
     def __bool__(self) -> bool:
         return len(self) > 0
 
+    def __contains__(self, index: object) -> bool:
+        if not isinstance(index, int) or index < 0 or index >= self._size:
+            return False
+        return bool(self._words[index // 64] & (1 << (index % 64)))
+
     def bisect_left(self, index: int) -> int:
         if index <= 0:
             return 0

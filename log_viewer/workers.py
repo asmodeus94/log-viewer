@@ -144,3 +144,166 @@ class SaveWorker(QObject):
                 self.compressed.emit(str(e))
             else:
                 self.error.emit(str(e))
+
+
+class SaveAsWorker(QObject):
+    """Worker zapisujący zawartość (wraz z modyfikacjami z edit_buffer) do nowego pliku w tle."""
+    progress = Signal(float)
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, edit_buffer: EditBuffer, src_path: str, dst_path: str, encoding: str = "utf-8", total_lines: int = 0):
+        super().__init__()
+        self._edit_buffer = edit_buffer
+        self._src_path = src_path
+        self._dst_path = dst_path
+        self._encoding = encoding
+        self._total_lines = total_lines
+        self._cancel_event = threading.Event()
+
+    def cancel(self):
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self):
+        try:
+            import os
+            from .helpers import open_maybe_compressed
+            
+            edits = self._edit_buffer._edits
+            cancel_set = self._cancel_event.is_set
+            line_no = 0
+            last_progress_lines = 0
+
+            with open_maybe_compressed(self._src_path, "rb") as src, \
+                 open_maybe_compressed(self._dst_path, "wb") as dst:
+                for raw in src:
+                    if line_no in edits:
+                        new_text = edits[line_no]
+                        if new_text is not None:
+                            dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                    else:
+                        dst.write(raw)
+                    
+                    line_no += 1
+                    if self._total_lines and (line_no - last_progress_lines) > 5000:
+                        if cancel_set():
+                            break
+                        self.progress.emit(line_no / self._total_lines * 100.0)
+                        last_progress_lines = line_no
+            
+            if cancel_set():
+                self.error.emit("cancelled")
+                try:
+                    os.unlink(self._dst_path)
+                except OSError:
+                    pass
+                return
+
+            self.finished.emit()
+        except BaseException as e:
+            self.error.emit(str(e))
+
+
+class ExportWorker(QObject):
+    """Worker eksportujący wyniki filtrowania lub pełny plik z uwzględnieniem edycji z edit_buffer."""
+    progress = Signal(float)
+    finished = Signal(int)  # count
+    error = Signal(str)
+
+    def __init__(self, edit_buffer: EditBuffer, src_path: str, dst_path: str,
+                 encoding: str = "utf-8", filter_active: bool = False,
+                 filter_results=None, total_lines: int = 0):
+        super().__init__()
+        self._edit_buffer = edit_buffer
+        self._src_path = src_path
+        self._dst_path = dst_path
+        self._encoding = encoding
+        self._filter_active = filter_active
+        self._filter_results = filter_results
+        self._total_lines = total_lines
+        self._cancel_event = threading.Event()
+
+    def cancel(self):
+        self._cancel_event.set()
+
+    @Slot()
+    def run(self):
+        try:
+            import os
+            from .helpers import open_maybe_compressed
+            count = 0
+            
+            cancel_set = self._cancel_event.is_set
+            edits = self._edit_buffer._edits
+            line_no = 0
+            last_progress_lines = 0
+
+            with open_maybe_compressed(self._src_path, "rb") as src, \
+                 open_maybe_compressed(self._dst_path, "wb") as out:
+                
+                if not self._filter_active:
+                    for raw in src:
+                        if line_no in edits:
+                            new_text = edits[line_no]
+                            if new_text is not None:
+                                out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                count += 1
+                            else:
+                                out.write(raw)
+                                count += 1
+                        else:
+                            out.write(raw)
+                            count += 1
+                        
+                        line_no += 1
+                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                            if cancel_set():
+                                break
+                            self.progress.emit(line_no / self._total_lines * 100.0)
+                            last_progress_lines = line_no
+                else:
+                    words = self._filter_results._words
+                    num_words = len(words)
+                    word_idx = 0
+                    bit_idx = 0
+                    w = words[0] if num_words > 0 else 0
+                    
+                    for raw in src:
+                        if w & (1 << bit_idx):
+                            if line_no in edits:
+                                new_text = edits[line_no]
+                                if new_text is not None:
+                                    out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                    count += 1
+                            else:
+                                out.write(raw)
+                                count += 1
+                            
+                        line_no += 1
+                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                            if cancel_set():
+                                break
+                            self.progress.emit(line_no / self._total_lines * 100.0)
+                            last_progress_lines = line_no
+                            
+                        bit_idx += 1
+                        if bit_idx == 64:
+                            bit_idx = 0
+                            word_idx += 1
+                            if word_idx < num_words:
+                                w = words[word_idx]
+                            else:
+                                w = 0
+
+            if cancel_set():
+                self.error.emit("cancelled")
+                try:
+                    os.unlink(self._dst_path)
+                except OSError:
+                    pass
+                return
+
+            self.finished.emit(count)
+        except BaseException as e:
+            self.error.emit(str(e))
