@@ -9,6 +9,7 @@ from log_viewer.widgets import SearchResultsModel
 from PySide6.QtCore import QObject, Qt, Slot, QTimer
 from PySide6.QtGui import QFont, QColor, QFontDatabase, QTextCursor
 from log_viewer.helpers import THEME_DARK, THEME_LIGHT
+from log_viewer.bitset import bisect_left_custom
 from typing import Optional, List, Tuple
 
 class UIController(QObject):
@@ -190,8 +191,8 @@ class UIController(QObject):
 
             if self.tab.filter_active and self.tab._filter_all_lines:
                 flen = len(self.tab._filter_all_lines)
-                start_idx = bisect.bisect_left(self.tab._filter_all_lines, first_line)
-                end_idx = bisect.bisect_left(self.tab._filter_all_lines, last_line)
+                start_idx = bisect_left_custom(self.tab._filter_all_lines, first_line)
+                end_idx = bisect_left_custom(self.tab._filter_all_lines, last_line)
                 new_start = start_idx / flen
                 new_end = end_idx / flen
             else:

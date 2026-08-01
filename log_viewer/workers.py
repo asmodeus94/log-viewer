@@ -85,8 +85,9 @@ class FilterWorker(QObject):
             self.progress.emit(pct, hits, state, partial_results)
 
         def on_done(results, error):
-            if error or not results:
-                self.finished.emit(array.array('Q'), set(), array.array('Q'), {}, set(), error)
+            from .bitset import Bitset
+            if error or not results or len(results) == 0:
+                self.finished.emit(Bitset(0), set(), Bitset(0), {}, set(), error)
                 return
 
             if self._context_after > 0:
@@ -94,25 +95,7 @@ class FilterWorker(QObject):
             else:
                 self.progress.emit(100.0, len(results), "filtering", None)
 
-            filter_all_lines = array.array('Q')
-            total = self._engine.indexer.line_count if self._engine.indexer else 0
-            n = self._context_after
-
-            if n > 0:
-                last_added = -1
-                for hit in results:
-                    if hit > last_added:
-                        filter_all_lines.append(hit)
-                        last_added = hit
-                    for offset in range(1, n + 1):
-                        ctx = hit + offset
-                        if ctx >= total:
-                            break
-                        if ctx > last_added:
-                            filter_all_lines.append(ctx)
-                            last_added = ctx
-            else:
-                filter_all_lines = results
+            filter_all_lines = results.expand_context(self._context_after)
 
             self.finished.emit(results, set(), filter_all_lines, {}, set(), error)
 

@@ -66,3 +66,4 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 
 ## 15. Optymalizacja operacji listowych
 - Do przeszukiwania posortowanych kolekcji i list (np. w mapowaniach numerów linii z fizycznymi bytami) zawsze używaj modułu **`bisect`** (`bisect_left` lub `bisect_right`) zamiast wbudowanego, liniowego `list.index()`.
+- W przypadku operowania na zbiorach wyników mogących przekraczać miliony elementów (np. filtrowanie logów), bezwzględnie unikaj alokacji dużych list w Pythonie. Zamiast tego używaj wysoce zoptymalizowanej struktury **`Bitset`** opierającej się o wbudowany typ `array.array('Q')` i realizuj zliczanie iteracji wspierając się metodami implementowanymi po stronie języka C (np. `itertools.accumulate` w połączeniu z `int.bit_count`), by eliminować blokujące główny lub poboczny wątek pętle.

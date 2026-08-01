@@ -424,10 +424,22 @@ class SearchResultsModel(QAbstractListModel):
         Używa bisect — wyniki są posortowane rosnąco po line_no.
         Zwraca -1 jeśli nie znaleziono dokładnego dopasowania.
         """
+        if hasattr(self._all_results, 'bisect_left'):
+            idx = self._all_results.bisect_left(line_no)
+            if idx < len(self._all_results) and self._all_results[idx] == line_no:
+                # Doładowanie widocznych wierszy
+                if idx >= self._visible_count:
+                    items_to_fetch = idx - self._visible_count + 1
+                    self.beginInsertRows(QModelIndex(), self._visible_count, self._visible_count + items_to_fetch - 1)
+                    self._visible_count += items_to_fetch
+                    self.endInsertRows()
+                return idx
+            return -1
+
         import bisect
-        keys = [r[0] for r in self._all_results]
+        keys = [r[0] if isinstance(r, tuple) else r for r in self._all_results]
         idx = bisect.bisect_left(keys, line_no)
-        if idx < len(self._all_results) and self._all_results[idx][0] == line_no:
+        if idx < len(self._all_results) and keys[idx] == line_no:
             # Upewnij się, że element jest widoczny (doładowany) w jednym kroku
             if idx >= self._visible_count:
                 items_to_fetch = idx - self._visible_count + 1

@@ -6,7 +6,10 @@ import os
 _running_tasks = set()
 import time
 import bisect
-from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING
+import queue
+from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable
+
+from .bitset import bisect_left_custom, bisect_right_custom
 
 if TYPE_CHECKING:
     from .main_window import LogViewerWindow
@@ -484,7 +487,7 @@ class LogTab(QWidget):
             font = fmt.font()
             font.setItalic(True)
             fmt.setFont(font)
-        # TAG_BOOKMARK i TAG_EDITED — tło dokładane przez ExtraSelections.
+        # TAG_BOOKMARK and TAG_EDITED — tło dokładane przez ExtraSelections.
         cursor.setBlockCharFormat(fmt)
 
     def _check_edges(self) -> None:
@@ -515,7 +518,7 @@ class LogTab(QWidget):
                 current_last_line = self.line_map[-1] if self.line_map else 0
 
                 if self.filter_active and self._filter_all_lines:
-                    idx = bisect.bisect_right(self._filter_all_lines, current_last_line)
+                    idx = bisect_right_custom(self._filter_all_lines, current_last_line)
                     if idx < len(self._filter_all_lines):
                         self._is_loading = True
                         self._ignore_scroll_events = True
@@ -548,7 +551,7 @@ class LogTab(QWidget):
                 current_first_line = self.line_map[0]
 
                 if self.filter_active and self._filter_all_lines:
-                    idx = bisect.bisect_left(self._filter_all_lines, current_first_line)
+                    idx = bisect_left_custom(self._filter_all_lines, current_first_line)
                     if idx > 0:
                         self._is_loading = True
                         self._ignore_scroll_events = True
@@ -708,7 +711,7 @@ class LogTab(QWidget):
                 file_line = self.line_map[widget_line]
                 if self.filter_active and self._filter_all_lines:
                     total = max(1, len(self._filter_all_lines))
-                    idx = bisect.bisect_left(self._filter_all_lines, file_line)
+                    idx = bisect_left_custom(self._filter_all_lines, file_line)
                     pct = int((idx / total) * 1000)
                 else:
                     total = max(1, self.indexer.line_count)
@@ -968,7 +971,7 @@ class LogTab(QWidget):
             line_no = min(line_no, max(0, self.indexer.line_count - 1))
 
         if self.filter_active:
-            idx = bisect.bisect_left(self._filter_all_lines, line_no)
+            idx = bisect_left_custom(self._filter_all_lines, line_no)
             self._load_window(at_line=idx)
         else:
             self._load_window(at_line=line_no)
@@ -1147,7 +1150,7 @@ class LogTab(QWidget):
             if is_filtered_index:
                 idx = ln
             else:
-                idx = bisect.bisect_left(self._filter_all_lines, ln)
+                idx = bisect_left_custom(self._filter_all_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
             try:
@@ -1260,7 +1263,7 @@ class LogTab(QWidget):
             # dlatego musimy wyznaczyć rzeczywistą linię początkową na podstawie line_map.
             if self.filter_active and self._filter_all_lines:
                 try:
-                    idx = bisect.bisect_left(self._filter_all_lines, self.line_map[0])
+                    idx = bisect_left_custom(self._filter_all_lines, self.line_map[0])
                     top_line = idx
                 except Exception:
                     pass

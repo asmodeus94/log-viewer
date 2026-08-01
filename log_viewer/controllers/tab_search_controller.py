@@ -79,7 +79,9 @@ class SearchController(QObject):
             self.tab._search_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
 
         self.tab._search_results = []
-        self.tab._search_results_all = []
+        from log_viewer.bitset import Bitset
+        total = self.tab.indexer.line_count if self.tab.indexer else 0
+        self.tab._search_results_all = Bitset(total)
         self.tab._search_result_index = -1
         if self.tab._search_model:
             self.tab._search_model.clear()
@@ -115,8 +117,32 @@ class SearchController(QObject):
         # Jeśli otrzymaliśmy częściowe wyniki z nowo ukończonego chunku,
         # dodajemy je na bieżąco do modelu listy (bez resetowania całości)
         if partial_results is not None and len(partial_results) > 0 and self.tab._search_model:
-            self.tab._search_results_all = getattr(self.tab, '_search_results_all', [])
-            self.tab._search_model.append_results(list(partial_results))
+            if not isinstance(getattr(self.tab, '_search_results_all', None), Bitset):
+                total = self.tab.indexer.line_count if self.tab.indexer else 0
+                self.tab._search_results_all = Bitset(total)
+            
+            if isinstance(partial_results, tuple) and len(partial_results) == 2:
+                base_word, words = partial_results
+                global_words = self.tab._search_results_all._words
+                if len(words) == 1:
+                    global_words[base_word] |= words[0]
+                elif len(words) > 1:
+                    global_words[base_word] |= words[0]
+                    global_words[base_word + len(words) - 1] |= words[-1]
+                    if len(words) > 2:
+                        global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
+                self.tab._search_results_all._counts = None
+            else:
+                self.tab._search_results_all.update_indices(partial_results)
+            
+            import time
+            now = time.time()
+            if not hasattr(self.tab, '_last_search_model_update'):
+                self.tab._last_search_model_update = 0
+            # Throttle model updates to max 2 times per second to prevent GUI freeze on huge results
+            if now - self.tab._last_search_model_update > 0.5:
+                self.tab._search_model.set_results(self.tab._search_results_all, indexer=self.tab.indexer)
+                self.tab._last_search_model_update = now
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
@@ -128,8 +154,8 @@ class SearchController(QObject):
                     pass
             return
 
-        # Zapisujemy tylko listę numerów linii, teksty będą ładowane lazy (SearchResultsModel)
-        self.tab._search_results_all = results
+        self.tab._search_results_all = filter_all_lines
+            
         total_hits = len(self.tab._search_results_all)
 
         self.tab._search_results = self.tab._search_results_all
@@ -197,7 +223,9 @@ class SearchController(QObject):
 
         self.tab.search_pattern = ""
         self.tab._search_results = []
-        self.tab._search_results_all = []
+        from log_viewer.bitset import Bitset
+        total = self.tab.indexer.line_count if self.tab.indexer else 0
+        self.tab._search_results_all = Bitset(total)
         self.tab._search_result_index = -1
         self.tab._search_extra_sel = None
 
