@@ -34,6 +34,7 @@ Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą za
 * `SearchController` – koordynuje proces wyszukiwania fraz i wyrażeń w pliku.
 * `FilterController` – steruje filtrowaniem zawartości z uwzględnieniem dodatkowych opcji (jak linie kontekstu).
 * `UIController` – zarządza widokiem, podświetleniami linii i paskami nawigacyjnymi.
+* `BookmarkController` – zarządza zakładkami (bookmarks) w obrębie otwartego pliku.
 
 Klasa główna `LogTab` spina ze sobą te kontrolery, zachowując zwięzłość kodu i spójność stanu w karcie.
 
@@ -54,9 +55,12 @@ Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejśc
 * `IndexerWorker` – emituje zdarzenia w miarę postępu tworzenia mapowania offsetów indeksu z `LineIndexer`.
 * `FilterWorker` – spina działania `FilterEngine` wywołując asynchroniczne postępy wyszukiwania oraz agreguje finalny obiekt `Bitset` dla modelu.
 * `SaveWorker` – obsługuje tło zapisu zawartości po wniesieniu edycji na poszczególnych linijkach.
+* `SaveAsWorker` – obsługuje zapis zmodyfikowanej zawartości do nowego pliku asynchronicznie.
+* `ExportWorker` – obsługuje eksport wyników filtrowania i zaznaczeń do osobnego pliku.
 
 ### 7. `widgets.py`
 Definiuje wyspecjalizowane, wizualne komponenty widoku dla biblioteki PySide6:
 * `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
 * `MiniMap` – maluje na kanwie pionową mapę wskaźnika pozycji i widocznego obszaru w oparciu o całkowitą liczbę wierszy, oferując błyskawiczną nawigację.
 * `SearchResultsModel` – model danych oparty na `QAbstractListModel`, optymalizujący listę setek tysięcy rezultatów bez obciążania i zawieszania aplikacji za pomocą leniwego pobierania elementów w miarę scrollowania (`fetchMore()`). Jako źródło prawdy przyjmuje strukturę `Bitset`.
+* Oraz dodatkowe komponenty (takie jak `LineNumberArea`, `SettingsDialog`, `FormatDialog`, `ExpandingLineEdit`), które odpowiadają za detale wizualne i okna dialogowe aplikacji.

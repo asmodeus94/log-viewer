@@ -28,20 +28,20 @@ Sklonuj repozytorium do wybranego katalogu na dysku twardym i utwórz w nim wirt
 ```bash
 git clone https://github.com/asmodeus94/log-viewer.git
 cd log-viewer
-python -m venv venv
+python -m venv .venv
 ```
 
 Następnie aktywuj wirtualne środowisko i zainstaluj wymagane pakiety znajdujące się w pliku `requirements.txt`:
 
 * **Windows:**
   ```cmd
-  venv\Scripts\activate
+  .venv\Scripts\activate
   pip install -r requirements.txt
   ```
 
 * **Linux / macOS:**
   ```bash
-  source venv/bin/activate
+  source .venv/bin/activate
   pip install -r requirements.txt
   ```
 
