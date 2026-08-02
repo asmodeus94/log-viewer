@@ -35,3 +35,21 @@ class TestI18N:
         for key in required:
             assert key in I18N["pl"], f"Missing PL key: {key}"
             assert key in I18N["en"], f"Missing EN key: {key}"
+
+    def test_thousands_separator_formatting(self):
+        """Sprawdź czy szablony i18n prawidłowo formatują liczby > 999 z separatorem tysięcy."""
+        msg_pl = I18N["pl"]["st_filtering"].format(pct="50.0", hits=1250)
+        assert "1,250" in msg_pl
+
+        msg_en = I18N["en"]["st_filtering"].format(pct="50.0", hits=1250)
+        assert "1,250" in msg_en
+
+        msg_edits = I18N["pl"]["st_edits"].format(n=1000)
+        assert "1,000" in msg_edits
+
+        msg_search = I18N["pl"]["lbl_search_results_count"].format(n=5000, current=1, total=5000)
+        assert "5,000" in msg_search
+
+        msg_bm = I18N["pl"]["msg_bookmark_added"].format(n=12345)
+        assert "12,345" in msg_bm
+

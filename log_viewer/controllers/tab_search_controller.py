@@ -112,7 +112,7 @@ class SearchController(QObject):
             return
         self.tab._status(self.tab._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
         self.tab._search_results_label.setText(
-            f"{self.tab.t('lbl_search_results_searching')} ({hits})"
+            f"{self.tab.t('lbl_search_results_searching')} ({hits:,})"
         )
         # Jeśli otrzymaliśmy częściowe wyniki z nowo ukończonego chunku,
         # dodajemy je na bieżąco do modelu listy (bez resetowania całości)
