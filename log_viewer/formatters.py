@@ -24,20 +24,20 @@ def extract_json(text: str) -> Tuple[str, str, str, bool]:
         elif idx2 == -1:
             i = idx1
         else:
-            i = min(idx1, idx2)
+            i = idx1 if idx1 < idx2 else idx2
 
         if i == -1:
             break
 
         try:
-            # raw_decode próbuje sparsować JSON od podanego indeksu i zwraca dane oraz pozycję końcową
-            data, end_idx = decoder.raw_decode(text[i:])
+            # Używamy argumentu idx w raw_decode dla lepszej wydajności w przypadkach długich ciągów znaków
+            data, end_idx = decoder.raw_decode(text, i)
 
             # Upewniamy się, że znaleziony obiekt jest strukturą (dict lub list)
             if isinstance(data, (dict, list)):
                 prefix = text[:i]
-                json_text = text[i:i+end_idx]
-                suffix = text[i+end_idx:]
+                json_text = text[i:end_idx]
+                suffix = text[end_idx:]
                 return prefix, json_text, suffix, True
         except json.JSONDecodeError:
             pass # Próbujemy dalej, może to nie był właściwy początek
