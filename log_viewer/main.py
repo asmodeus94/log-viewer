@@ -9,7 +9,7 @@ from PySide6 import QtWidgets, QtGui
 from PySide6.QtCore import Qt
 
 import os
-from .app import LogViewerWindow
+from .main_window import LogViewerWindow
 from .config import UserConfig
 from .helpers import get_resource_path
 

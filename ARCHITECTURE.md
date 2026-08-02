@@ -38,18 +38,15 @@ Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą za
 
 Klasa główna `LogTab` spina ze sobą te kontrolery, zachowując zwięzłość kodu i spójność stanu w karcie.
 
-### 3. `app.py`
-Plik zredukowany do roli fasady importującej klasy z `main_window.py` oraz `log_tab.py`, zachowując wsteczną kompatybilność importów w innych częściach aplikacji i testach.
-
-### 4. `indexer.py`
+### 3. `indexer.py`
 Stanowi jądro mechanizmu pozwalającego obsłużyć ogromne pliki. Moduł wykorzystuje paczkę `multiprocessing` oraz metody indeksowania w celu minimalizowania obciążenia pamięci.
 * Zawiera moduł `LineIndexer`, który z wykorzystaniem asynchronicznych workerów analizuje plik w dużych częściach (np. po 256MB), ustalając relacje liczby linii w stosunku do przesunięć bajtów w pliku (`IndexEntry`). Indeks jest potem używany w aplikacji do szybkiego poruszania się po wielogigabajtowym pliku.
 
-### 5. `filter_engine.py`
+### 4. `filter_engine.py`
 Niskopoziomowy silnik wyszukiwania i filtrowania danych realizowany w osobnym wątku.
 * Klasa `FilterEngine` przetwarza surowe bajty zamiast bezpośrednio wczytywać napisy typu String (jeśli nie zażądano wyrażeń regularnych w danym requeście). Skutkuje to ogromnym wzrostem wydajności dla wyszukiwania i odfiltrowania danych dla określonych "igieł". Silnik zwraca wysoce skompresowany obiekt `Bitset` zamiast standardowych list, redukując użycie pamięci i przyspieszając operacje binarne na milionach dopasowań. Moduł jest zabezpieczony przed sytuacjami typu *race conditions* dla przerywanych akcji poszukiwawczych.
 
-### 6. `workers.py`
+### 5. `workers.py`
 Katalog obiektów wspierających asynchroniczność w Qt przy użyciu technologii `QThread` i `QObject`.
 Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejścia/Wyjścia (I/O) z głównego pętli UI:
 * `IndexerWorker` – emituje zdarzenia w miarę postępu tworzenia mapowania offsetów indeksu z `LineIndexer`.
@@ -58,7 +55,7 @@ Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejśc
 * `SaveAsWorker` – obsługuje zapis zmodyfikowanej zawartości do nowego pliku asynchronicznie.
 * `ExportWorker` – obsługuje eksport wyników filtrowania i zaznaczeń do osobnego pliku.
 
-### 7. `widgets.py`
+### 6. `widgets.py`
 Definiuje wyspecjalizowane, wizualne komponenty widoku dla biblioteki PySide6:
 * `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
 * `MiniMap` – maluje na kanwie pionową mapę wskaźnika pozycji i widocznego obszaru w oparciu o całkowitą liczbę wierszy, oferując błyskawiczną nawigację.

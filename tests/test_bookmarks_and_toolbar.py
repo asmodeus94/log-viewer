@@ -17,7 +17,7 @@ if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from log_viewer.app import LogViewerWindow
+from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
@@ -585,7 +585,7 @@ class TestFilterContext:
         # filter_context_spin jest w LogViewerWindow (toolbar), nie w LogTab.
         # __getattr__ deleguje do aktywnej zakładki, ale sam spinbox jest
         # na poziomie okna.
-        from log_viewer.app import LogViewerWindow
+        from log_viewer.main_window import LogViewerWindow
         main = None
         # Pobierz referencję do LogViewerWindow przez parent tab.
         tab = window.tabs.currentWidget()
@@ -773,7 +773,7 @@ class TestIndexingProgress:
         """LogTab._on_index_progress MUSI być metodą (nie lambdą) — closure
         nie jest picklowalne cross-thread, powoduje błędy QTimer w worker
         thread („Timers cannot be stopped from another thread")."""
-        from log_viewer.app import LogTab
+        from log_viewer.log_tab import LogTab
         # Metoda jest bound method klasy — sprawdzamy istnienie.
         assert hasattr(LogTab, "_on_index_progress"), (
             "LogTab musi mieć metodę _on_index_progress (nie lambdę) — "
@@ -788,7 +788,7 @@ class TestIndexingProgress:
     def test_logtab_has_reindex_slots(self):
         """LogTab ma sloty _on_reindex_finished, _on_follow_reindex_slot,
         _on_follow_reindex_clear_flag — bezpośrednio metody (nie lambdy)."""
-        from log_viewer.app import LogTab
+        from log_viewer.log_tab import LogTab
         import inspect
         for name in ("_on_reindex_finished", "_on_follow_reindex_slot",
                      "_on_follow_reindex_clear_flag", "_on_index_progress",
