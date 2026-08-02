@@ -249,9 +249,6 @@ class ExportWorker(QObject):
                             if new_text is not None:
                                 out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
                                 count += 1
-                            else:
-                                out.write(raw)
-                                count += 1
                         else:
                             out.write(raw)
                             count += 1
