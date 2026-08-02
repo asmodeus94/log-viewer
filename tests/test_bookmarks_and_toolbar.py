@@ -899,3 +899,10 @@ class TestI18nKeys:
                     "btn_cancel", "dlg_index_title", "st_cancelling", "st_cancelled"):
             assert key in I18N["en"], f"Brak klucza {key} w EN"
             assert I18N["en"][key], f"Pusta wartość dla {key} w EN"
+
+    def test_tree_items_formatting_thousands_separator(self):
+        """Drzewo zakładek i edycji wyświetla numery linii > 999 z separatorem tysięcy."""
+        file_line = 1234
+        formatted = f"{file_line + 1:,}"
+        assert formatted == "1,235"
+

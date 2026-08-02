@@ -157,6 +157,14 @@ class TestSearchResultsModel:
         assert "..." in data
         assert len(data) < 250
 
+    def test_thousands_separator_in_display_role(self):
+        """SearchResultsModel formatuje numery linii > 999 z separatorem tysięcy."""
+        model = SearchResultsModel()
+        model.set_results([(1234, "test line content")])
+        data = model.data(model.index(0, 0), QtCore.Qt.DisplayRole)
+        assert "1,235" in data
+
+
 
 class TestSearchFlow:
     def test_search_finds_results(self, app_instance):

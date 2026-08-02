@@ -43,14 +43,14 @@ class BookmarkController(QObject):
     def _refresh_bookmarks_tree(self) -> None:
         self.tab.bm_tree.clear()
         for ln in sorted(self.tab.bookmarks.keys()):
-            item = QTreeWidgetItem([str(ln + 1)])
+            item = QTreeWidgetItem([f"{ln + 1:,}"])
             item.setData(0, Qt.UserRole, ln)
             self.tab.bm_tree.addTopLevelItem(item)
 
     def _refresh_edits_tree(self) -> None:
         self.tab.ed_tree.clear()
         for ln in sorted(self.tab.edit_buffer._edits.keys()):
-            item = QTreeWidgetItem([str(ln + 1)])
+            item = QTreeWidgetItem([f"{ln + 1:,}"])
             item.setData(0, Qt.UserRole, ln)
             self.tab.ed_tree.addTopLevelItem(item)
 

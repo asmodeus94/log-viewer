@@ -397,7 +397,7 @@ class SearchResultsModel(QAbstractListModel):
             display = text[:200]
             if len(text) > 200:
                 display += "..."
-            return f"  {line_no + 1:>8}:  {display}"
+            return f"  {line_no + 1:>8,}:  {display}"
         if role == Qt.UserRole:
             return line_no
         if role == Qt.ForegroundRole:
