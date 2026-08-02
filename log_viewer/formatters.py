@@ -2,6 +2,8 @@ import re
 import json
 from typing import Tuple, Optional
 import defusedxml.minidom
+import defusedxml.expatreader
+import xml.sax
 
 def extract_json(text: str) -> Tuple[str, str, str, bool]:
     """
@@ -78,21 +80,44 @@ def extract_xml(text: str) -> Tuple[str, str, str, bool]:
     for start_match in re.finditer(r'<(?:[a-zA-Z_][\w:.-]*|\?xml)', text):
         i = start_match.start()
 
-        # XML musi zamykać się '>', więc szukamy od tyłu do przodu
-        j = text.rfind('>') + 1
+        # Kodujemy ciąg do bajtów, aby uniknąć problemów ze wskaźnikami przesunięcia bajtów w parserze C (expat)
+        # dla znaków wielobajtowych (np. polskich znaków) i błędów obsługi wieloliniowych ciągów.
+        remaining_text = text[i:]
+        encoded_text = remaining_text.encode('utf-8')
 
-        while j > i + 4:  # minimalna długość to np. <a/>, len == 4
-            candidate = text[i:j]
-            try:
-                # Walidujemy kandydata parserem XML
-                defusedxml.minidom.parseString(candidate)
+        parser = defusedxml.expatreader.create_parser()
+        try:
+            parser.feed(encoded_text)
+            parser.close()
+            # Jeśli sparsuje całą resztę wejścia bez błędu, cały pozostały string jest prawidłowym XMLem
+            return text[:i], remaining_text, "", True
+        except xml.sax.SAXParseException as e:
+            inner = e.getException()
+            # 9 to kod dla XML_ERROR_JUNK_AFTER_DOC_ELEMENT
+            if inner and getattr(inner, 'code', None) == 9:
+                # W expat inner.offset to kolumna, dla wielu linii bywa zawodne.
+                # Do ucięcia bajtów wykorzystujemy bezwzględny ErrorByteIndex.
+                byte_offset = getattr(parser._parser, 'ErrorByteIndex', None)
+                if byte_offset is not None:
+                    # Wyodrębniamy podciąg w bajtach i dekodujemy na znaki
+                    candidate_bytes = encoded_text[:byte_offset]
+                    try:
+                        candidate = candidate_bytes.decode('utf-8')
 
-                prefix = text[:i]
-                suffix = text[j:]
-                return prefix, candidate, suffix, True
-            except Exception:
-                # Szukamy poprzedniego '>'
-                j = text.rfind('>', i, j - 1) + 1
+                        # Expat uznaje białe znaki po dokumencie za część dokumentu.
+                        candidate_stripped = candidate.rstrip()
+                        if candidate_stripped.endswith('>'):
+                            # Podwójne sprawdzenie kandydata
+                            try:
+                                p2 = defusedxml.expatreader.create_parser()
+                                p2.feed(candidate_stripped.encode('utf-8'))
+                                p2.close()
+                                return text[:i], candidate_stripped, text[i+len(candidate_stripped):], True
+                            except Exception:
+                                pass
+                    except UnicodeDecodeError:
+                        pass
+            # Jeśli inny błąd parsowania (np. niezamknięty tag), kontynuujemy szukanie
 
     return text, "", "", False
 
