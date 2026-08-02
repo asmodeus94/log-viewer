@@ -33,13 +33,13 @@ python scripts/compile_ui.py
 
 W środowisku CI/CD lub w terminalach CLI mogą występować błędy związane z niedostępnością sesji "okienkowej" wyświetlania. Zalecamy dlatego uruchamianie testów wspierając się wirtualnym środowiskiem X (np. `xvfb` w dystrybucjach Linux).
 
-**Aby odpalić wszystkie testy zgrupowane pod katalogiem `tests/` wykonaj polecenie**:
+**Aby odpalić wszystkie testy zgrupowane pod katalogiem `tests/` wykonaj polecenie w aktywnym wirtualnym środowisku**:
 
 ```bash
 xvfb-run -a python -m pytest tests/
 ```
 
-W przypadku Windows, o ile dysponujesz włączonym lokalnie sesją okna, można pominąć narzędzie Xvfb i puścić prosto `pytest tests/`.
+W przypadku Windows, o ile dysponujesz włączonym lokalnie sesją okna, można pominąć narzędzie Xvfb i puścić prosto `pytest tests/` (lub wprost `.venv\Scripts\python -m pytest tests/`).
 
 ## Środowisko Testowe (Plik `conftest.py`)
 
