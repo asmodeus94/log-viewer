@@ -259,7 +259,8 @@ class EditController(QObject):
 
         self.tab._save_as_thread = QThread()
         self.tab._save_as_worker = SaveAsWorker(
-            self.tab.edit_buffer, self.tab.file_path, path, self.tab.encoding
+            self.tab.edit_buffer, self.tab.file_path, path, self.tab.encoding,
+            total_lines=self.tab.indexer.line_count
         )
         self.tab._save_as_worker.moveToThread(self.tab._save_as_thread)
         self.tab._save_as_thread.started.connect(self.tab._save_as_worker.run)
@@ -327,6 +328,7 @@ class EditController(QObject):
             encoding=self.tab.encoding,
             filter_active=self.tab.filter_active,
             filter_results=self.tab.filter_results,
+            total_lines=self.tab.indexer.line_count
         )
         self.tab._export_worker.moveToThread(self.tab._export_thread)
         self.tab._export_thread.started.connect(self.tab._export_worker.run)
