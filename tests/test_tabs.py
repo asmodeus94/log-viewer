@@ -11,7 +11,7 @@ if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
 from PySide6 import QtWidgets
-from log_viewer.app import LogViewerWindow
+from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
 
 def test_duplicate_file_tab_names(temp_log_file):

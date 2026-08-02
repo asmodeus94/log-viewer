@@ -16,7 +16,6 @@ Moduły:
   - widgets: LineNumberArea, LogPlainTextEdit, SettingsDialog
   - main_window: LogViewerWindow (główna aplikacja PySide6 - widżet z zakładkami)
   - log_tab: LogTab (pojedyncza zakładka z logiem)
-  - app: Fasada w celu utrzymania kompatybilności wstecznej
 
 Użycie:
     python -m log_viewer [plik.log]
