@@ -44,7 +44,8 @@ class LineNumberArea(QWidget):
 
     def update_width(self) -> None:
         fm = QFontMetrics(self._editor.font())
-        width = fm.horizontalAdvance("0" * self._width_digits) + 16
+        sample_text = f"{10**self._width_digits - 1:,}".replace(",", " ")
+        width = fm.horizontalAdvance(sample_text) + 16
         self.setFixedWidth(width)
 
     def sizeHint(self) -> QSize:
@@ -65,11 +66,12 @@ class LineNumberArea(QWidget):
             if block.isVisible() and bottom >= event.rect().top():
                 if block_number < len(self._line_map):
                     file_line = self._line_map[block_number] + 1
+                    file_line_str = f"{file_line:,}".replace(",", " ")
                     painter.drawText(
                         0, top, self.width() - 8,
                         self._editor.fontMetrics().height(),
                         Qt.AlignRight | Qt.AlignVCenter,
-                        str(file_line),
+                        file_line_str,
                     )
             block = block.next()
             block_number += 1
@@ -397,7 +399,8 @@ class SearchResultsModel(QAbstractListModel):
             display = text[:200]
             if len(text) > 200:
                 display += "..."
-            return f"  {line_no + 1:>8,}:  {display}"
+            formatted_line = f"{line_no + 1:>8,}".replace(",", " ")
+            return f"  {formatted_line}:  {display}"
         if role == Qt.UserRole:
             return line_no
         if role == Qt.ForegroundRole:
