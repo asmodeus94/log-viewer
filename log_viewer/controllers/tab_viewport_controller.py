@@ -143,6 +143,64 @@ class ViewportController(QObject):
         self.tab._search_extra_sel = None
         self.tab.text.set_line_map(self.tab.line_map)
 
+        self._rebuild_extra_selections()
+
+        self._update_position_slider()
+
+        if not self.tab._minimap_update_timer.isActive():
+            self.tab._minimap_update_timer.start(100)
+
+        if self.tab.follow_active:
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        else:
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+
+        self.tab.text.setTextCursor(cursor)
+        self.tab._refresh_status()
+        self.tab._is_loading = False
+        self.tab._last_edge_load_time = 0.0
+        self._update_current_line_highlight()
+
+    def _rebuild_extra_selections(self) -> None:
+        """Przebudowuje _static_extra_sels i listy indeksów widgetowych
+        na podstawie bieżącego line_map. Wywoływana po _load_window_impl,
+        _append_lines i _prepend_lines, aby doładowane linie też miały
+        poprawne podświetlenie filtra i kontekstu."""
+        line_map = self.tab.line_map
+        if not line_map:
+            self.tab._static_extra_sels = []
+            self.tab._filter_hit_widget_lines = []
+            self.tab._context_widget_lines = []
+            self.tab._bookmark_widget_lines = []
+            self.tab._edited_widget_lines = []
+            return
+
+        filter_hit_widget_lines: List[int] = []
+        context_widget_lines: List[int] = []
+        bookmark_widget_lines: List[int] = []
+        edited_widget_lines: List[int] = []
+
+        is_filtered = self.tab.filter_active and self.tab.filter_results
+
+        for i, ln in enumerate(line_map):
+            if ln in self.tab.bookmarks:
+                bookmark_widget_lines.append(i)
+            if self.tab.edit_buffer and self.tab.edit_buffer.has(ln):
+                edited_widget_lines.append(i)
+            if is_filtered:
+                hit_idx = bisect.bisect_left(self.tab.filter_results, ln)
+                is_hit = hit_idx < len(self.tab.filter_results) and self.tab.filter_results[hit_idx] == ln
+                if is_hit:
+                    filter_hit_widget_lines.append(i)
+                else:
+                    context_widget_lines.append(i)
+
+        self.tab._filter_hit_widget_lines = filter_hit_widget_lines
+        self.tab._context_widget_lines = context_widget_lines
+        self.tab._bookmark_widget_lines = bookmark_widget_lines
+        self.tab._edited_widget_lines = edited_widget_lines
+
+        # Buduj ExtraSelections dla kontekstu i trafień filtra
         self.tab._static_extra_sels = []
         color_context = self.tab._theme_colors.get("context", QtGui.QColor("#3a3d3a"))
         color_highlight = self.tab._theme_colors.get("highlight", QtGui.QColor("#fff176"))
@@ -173,22 +231,6 @@ class ViewportController(QObject):
 
             block = block.next()
             i += 1
-
-        self._update_position_slider()
-
-        if not self.tab._minimap_update_timer.isActive():
-            self.tab._minimap_update_timer.start(100)
-
-        if self.tab.follow_active:
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
-        else:
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
-
-        self.tab.text.setTextCursor(cursor)
-        self.tab._refresh_status()
-        self.tab._is_loading = False
-        self.tab._last_edge_load_time = 0.0
-        self._update_current_line_highlight()
 
     def _prepare_line_for_display(self, file_line_no: int, original_text: str) -> Tuple[str, List[str]]:
         is_edited = self.tab.edit_buffer.has(file_line_no)
@@ -332,6 +374,8 @@ class ViewportController(QObject):
                 old_value -= to_remove
 
             self.tab.text.set_line_map(self.tab.line_map)
+            self._rebuild_extra_selections()
+            self._update_current_line_highlight()
             scrollbar.setValue(max(0, old_value))
             self._update_position_slider()
         finally:
@@ -373,6 +417,8 @@ class ViewportController(QObject):
                 cursor.endEditBlock()
                 self.tab.line_map = self.tab.line_map[:self.tab.max_display_lines]
             self.tab.text.set_line_map(self.tab.line_map)
+            self._rebuild_extra_selections()
+            self._update_current_line_highlight()
             try:
                 idx = bisect.bisect_left(self.tab.line_map, old_first_file_line)
                 if idx != len(self.tab.line_map) and self.tab.line_map[idx] == old_first_file_line:
@@ -612,10 +658,12 @@ class ViewportController(QObject):
         self.tab._cancel_follow_if_active()
         if self.tab.filter_active:
             total = max(1, len(self.tab._filter_all_lines))
-            self._load_window(at_line=total - 1)
+            start = max(0, total - self.tab.window_size_lines)
+            self._load_window(at_line=start)
         else:
             total = max(1, self.tab.indexer.line_count)
-            self._load_window(at_line=total - 1)
+            start = max(0, total - self.tab.window_size_lines)
+            self._load_window(at_line=start)
 
         scrollbar = self.tab.text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
