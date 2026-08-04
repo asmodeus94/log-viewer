@@ -44,6 +44,12 @@ class TestI18N:
         msg_en = I18N["en"]["st_filtering"].format(pct="50.0", hits=1250)
         assert "1,250" in msg_en
 
+        msg_sp_pl = I18N["pl"]["st_searching_progress"].format(pct="50.0", hits=1250)
+        assert "1,250" in msg_sp_pl
+
+        msg_sp_en = I18N["en"]["st_searching_progress"].format(pct="50.0", hits=1250)
+        assert "1,250" in msg_sp_en
+
         msg_edits = I18N["pl"]["st_edits"].format(n=1000)
         assert "1,000" in msg_edits
 
