@@ -86,7 +86,7 @@ class SearchController(QObject):
         if self.tab._search_model:
             self.tab._search_model.clear()
         self.tab._search_results_label.setText(self.tab.t("lbl_search_results_searching"))
-        self.tab._status(self.tab._fmt("st_filtering", pct=0.0, hits=0))
+        self.tab._status(self.tab._fmt("st_searching_progress", pct=0.0, hits=0))
 
         self.tab._search_thread = QThread()
         self.tab._search_worker = FilterWorker(
@@ -110,7 +110,7 @@ class SearchController(QObject):
         if state == "context":
             self.tab._status(self.tab.t("st_context_building"))
             return
-        self.tab._status(self.tab._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
+        self.tab._status(self.tab._fmt("st_searching_progress", pct=f"{pct:.1f}", hits=hits))
         self.tab._search_results_label.setText(
             f"{self.tab.t('lbl_search_results_searching')} ({hits:,})"
         )
