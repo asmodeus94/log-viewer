@@ -264,10 +264,33 @@ class RegexStrategy(FilterStrategy):
         return not matched if self.negate else matched
 
     def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
-        # W przypadku Regex, używamy bezpiecznego podejścia z klasy bazowej (podział na linie).
-        # finditer na wieloliniowym ciągu dla złożonych regexów lub negacji mógłby być
-        # trudny do poprawnej obsługi. Fallback zapewnia pełną poprawność.
-        return super().match_chunk(chunk, start_line)
+        if self.matcher_bytes is not None:
+            matcher = self.matcher_bytes
+            target = chunk
+            nl = b"\n"
+        else:
+            matcher = self.matcher_str
+            try:
+                target = chunk.decode(self.encoding, errors="replace")
+            except Exception:
+                target = repr(chunk)
+            nl = "\n"
+
+        hits = []
+        last_nl_pos = -1
+        lines_counted = start_line
+
+        for match in matcher.finditer(target):
+            hit_pos = match.start()
+            if hit_pos > last_nl_pos:
+                nl_count = target.count(nl, last_nl_pos + 1, hit_pos)
+                lines_counted += nl_count
+                
+                if not hits or hits[-1] != lines_counted:
+                    hits.append(lines_counted)
+                last_nl_pos = hit_pos
+
+        return hits
 
 def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
@@ -457,7 +480,7 @@ class FilterEngine:
 
         args_list = [
             (i, start_off, end_off, start_ln,
-             self.path, pattern, use_regex, case_sensitive, negate,
+             self.path, pattern, use_regex, case_sensitive, False,
              self.indexer.encoding)
             for i, (start_off, end_off, start_ln) in enumerate(ranges)
         ]
@@ -543,6 +566,9 @@ class FilterEngine:
         merged_bitset._counts = None
         merged_bitset._total_count = shared_hits.value
 
+        if negate:
+            merged_bitset = ~merged_bitset
+
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
                 on_done(merged_bitset, None)
@@ -565,7 +591,7 @@ class FilterEngine:
         error: Optional[str] = None
 
         try:
-            strategy = self._create_strategy(pattern, use_regex, case_sensitive, negate)
+            strategy = self._create_strategy(pattern, use_regex, case_sensitive, False)
         except re.error as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
@@ -625,6 +651,9 @@ class FilterEngine:
 
         except Exception as e:
             error = str(e)
+
+        if negate and error is None:
+            merged_bitset = ~merged_bitset
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:

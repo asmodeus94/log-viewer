@@ -197,7 +197,6 @@ class Bitset(Sequence[int]):
                     reach = base + highest_bit + context_after
                     if reach > horizon:
                         horizon = reach
-            
             new_words[i] = new_w
             
         # Ostatnie słowo musi być ucięte do size, żeby nie mieć jedynek poza plikiem
@@ -207,6 +206,27 @@ class Bitset(Sequence[int]):
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF
             new_words[num_words - 1] &= mask
+            
+        return new_bs
+
+    def __invert__(self) -> "Bitset":
+        new_bs = Bitset(self._size)
+        new_words = new_bs._words
+        old_words = self._words
+        num_words = self._num_words
+        
+        for i in range(num_words):
+            new_words[i] = ~old_words[i] & 0xFFFFFFFFFFFFFFFF
+            
+        if self._size > 0:
+            last_valid_bit = (self._size - 1) % 64
+            mask = (1 << (last_valid_bit + 1)) - 1
+            if last_valid_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            new_words[-1] &= mask
+            
+        if self._counts is not None and self._total_count >= 0:
+            new_bs._total_count = self._size - self._total_count
             
         return new_bs
 

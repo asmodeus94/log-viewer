@@ -368,6 +368,8 @@ class LogTab(QWidget):
                 self._highlight_and_scroll(i)
                 break
         if self._search_model and index < len(self._search_results):
+            if hasattr(self._search_model, 'ensure_visible'):
+                self._search_model.ensure_visible(index)
             model_index = self._search_model.index(index, 0)
             self.search_results_view.setCurrentIndex(model_index)
             self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
