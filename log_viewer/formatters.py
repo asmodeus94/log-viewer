@@ -77,12 +77,24 @@ def extract_xml(text: str) -> Tuple[str, str, str, bool]:
     Zwraca krotkę: (prefix, xml_text, suffix, czy_znaleziono)
     """
     # Szukamy pierwszego znacznika XML, może to być deklaracja <?xml... lub tag <nazwa...
-    for start_match in re.finditer(r'<(?:[a-zA-Z_][\w:.-]*|\?xml)', text):
+    for start_match in re.finditer(r'<([a-zA-Z_][\w:.-]*|\?xml)', text):
         i = start_match.start()
+        tag_name = start_match.group(1)
+
+        remaining_text = text[i:]
+
+        # Szybka heurystyka: przed uruchomieniem wolnego parsera expat sprawdzamy,
+        # czy w ogóle istnieje potencjalne zamknięcie tagu.
+        if tag_name == '?xml':
+            if '?>' not in remaining_text:
+                continue
+        else:
+            closing_tag = f"</{tag_name}>"
+            if closing_tag not in remaining_text and '/>' not in remaining_text:
+                continue
 
         # Kodujemy ciąg do bajtów, aby uniknąć problemów ze wskaźnikami przesunięcia bajtów w parserze C (expat)
         # dla znaków wielobajtowych (np. polskich znaków) i błędów obsługi wieloliniowych ciągów.
-        remaining_text = text[i:]
         encoded_text = remaining_text.encode('utf-8')
 
         parser = defusedxml.expatreader.create_parser()
