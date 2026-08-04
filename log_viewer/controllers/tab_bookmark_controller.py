@@ -34,7 +34,8 @@ class BookmarkController(QObject):
             self.tab.bookmarks[file_line] = None
             self.tab._status(self.tab.t("msg_bookmark_added").format(n=file_line + 1))
         self._refresh_bookmarks_tree()
-        self.tab._reload_current_view()
+        self.tab.viewport_controller._rebuild_extra_selections()
+        self.tab.viewport_controller._update_current_line_highlight()
         block = self.tab.text.document().findBlockByNumber(widget_line)
         if block.isValid():
             new_cur = QtGui.QTextCursor(block)
@@ -87,7 +88,8 @@ class BookmarkController(QObject):
                 removed += 1
         if removed:
             self._refresh_bookmarks_tree()
-            self.tab._reload_current_view()
+            self.tab.viewport_controller._rebuild_extra_selections()
+            self.tab.viewport_controller._update_current_line_highlight()
             self.tab._status(self.tab.t("msg_bookmarks_removed").format(n=removed))
             count = self.tab.bm_tree.topLevelItemCount()
             if count > 0:
@@ -151,4 +153,5 @@ class BookmarkController(QObject):
             return
         self.tab.bookmarks.clear()
         self._refresh_bookmarks_tree()
-        self.tab._reload_current_view()
+        self.tab.viewport_controller._rebuild_extra_selections()
+        self.tab.viewport_controller._update_current_line_highlight()
