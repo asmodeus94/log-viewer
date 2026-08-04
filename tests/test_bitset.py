@@ -82,3 +82,16 @@ def test_bitset_context_crossing_block_boundary():
     # 62 -> 62, 63, 64, 65, 66
     assert list(view) == [62, 63, 64, 65, 66]
     assert len(view) == 5
+
+def test_bitset_resize():
+    hits = array.array('Q', [10, 20])
+    view = Bitset(50)
+    view.update_indices(hits)
+    
+    assert list(view) == [10, 20]
+    
+    view.resize(150)
+    hits_new = array.array('Q', [60, 100])
+    view.update_indices(hits_new)
+    
+    assert list(view) == [10, 20, 60, 100]
