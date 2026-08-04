@@ -408,6 +408,23 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count += items_to_fetch
         self.endInsertRows()
 
+    def ensure_visible(self, target_row: int) -> None:
+        """Wymusza wirtualne wyrenderowanie zasięgu aż do podanego wiersza w czasie O(1)."""
+        if target_row < self._visible_count:
+            return
+            
+        if target_row >= len(self._all_results):
+            target_row = len(self._all_results) - 1
+            if target_row < self._visible_count:
+                return
+
+        new_visible = min(target_row + self._batch_size, len(self._all_results))
+        items_to_fetch = new_visible - self._visible_count
+
+        self.beginInsertRows(QModelIndex(), self._visible_count, self._visible_count + items_to_fetch - 1)
+        self._visible_count = new_visible
+        self.endInsertRows()
+
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
         if not index.isValid() or index.row() >= self._visible_count:
             return None
