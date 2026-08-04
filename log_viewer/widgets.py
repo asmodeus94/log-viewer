@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Set
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, Signal, QSize, QAbstractListModel, QModelIndex, QPoint, QRectF
 from PySide6.QtGui import (
     QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase, QTextCursor,
-    QPainter, QFontMetrics, QDragEnterEvent, QDropEvent,
+    QPainter, QFontMetrics, QDragEnterEvent, QDropEvent, QPen, QBrush,
 )
 from PySide6.QtWidgets import (
     QMenu, QApplication,
@@ -29,7 +29,13 @@ class LineNumberArea(QWidget):
         super().__init__(editor)
         self._editor = editor
         self._line_map: List[int] = []
+        self._bookmarks: Set[int] = set()
         self._width_digits = 5
+        # Pocache'owane obiekty rysujące do eliminacji alokacji w paintEvent
+        self._bg_color = QColor("#f0f0f0")
+        self._text_pen = QPen(QColor("#666666"))
+        self._bookmark_brush = QBrush(QColor("#6a9955"))
+        self._bookmark_pen = QPen(Qt.NoPen)
         self.update_width()
 
     def set_line_map(self, line_map: List[int]) -> None:
@@ -42,6 +48,11 @@ class LineNumberArea(QWidget):
                 self.update_width()
         self.update()
 
+    def set_bookmarks(self, bookmarks: Set[int]) -> None:
+        if self._bookmarks != bookmarks:
+            self._bookmarks = set(bookmarks)
+            self.update()
+
     def update_width(self) -> None:
         fm = QFontMetrics(self._editor.font())
         sample_text = f"{10**self._width_digits - 1:,}"
@@ -53,23 +64,36 @@ class LineNumberArea(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.fillRect(event.rect(), QColor("#f0f0f0"))
-        painter.setPen(QColor("#666666"))
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.fillRect(event.rect(), self._bg_color)
+        painter.setPen(self._text_pen)
         painter.setFont(self._editor.font())
 
         block = self._editor.firstVisibleBlock()
         block_number = block.blockNumber()
         top = round(self._editor.blockBoundingGeometry(block).translated(self._editor.contentOffset()).top())
         bottom = top + round(self._editor.blockBoundingRect(block).height())
+        font_height = self._editor.fontMetrics().height()
+
+        has_bookmarks = len(self._bookmarks) > 0
 
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 if block_number < len(self._line_map):
-                    file_line = self._line_map[block_number] + 1
-                    file_line_str = f"{file_line:,}"
+                    raw_file_line = self._line_map[block_number]
+                    file_line_str = f"{raw_file_line + 1:,}"
+
+                    # Rysuj kropkę wskaźnika zakładek na marginesie
+                    if has_bookmarks and raw_file_line in self._bookmarks:
+                        painter.setPen(self._bookmark_pen)
+                        painter.setBrush(self._bookmark_brush)
+                        cy = top + (font_height // 2)
+                        painter.drawEllipse(QPoint(6, cy), 3, 3)
+                        painter.setPen(self._text_pen)
+
                     painter.drawText(
                         0, top, self.width() - 8,
-                        self._editor.fontMetrics().height(),
+                        font_height,
                         Qt.AlignRight | Qt.AlignVCenter,
                         file_line_str,
                     )
@@ -185,6 +209,9 @@ class LogPlainTextEdit(QPlainTextEdit):
 
     def set_line_map(self, line_map: List[int]) -> None:
         self._line_number_area.set_line_map(line_map)
+
+    def set_bookmarks(self, bookmarks: Set[int]) -> None:
+        self._line_number_area.set_bookmarks(bookmarks)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

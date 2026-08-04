@@ -906,3 +906,30 @@ class TestI18nKeys:
         formatted = f"{file_line + 1:,}"
         assert formatted == "1,235"
 
+
+class TestLineNumberAreaBookmarks:
+    def test_line_number_area_set_bookmarks(self, app_instance):
+        """LineNumberArea zapamiętuje zbiór zakładek i odświeża widok."""
+        window, _ = app_instance
+        window.text.set_bookmarks({0, 5, 10})
+        assert window.text._line_number_area._bookmarks == {0, 5, 10}
+
+
+class TestSearchHighlightColor:
+    def test_search_active_color_distinct_from_filter(self, app_instance):
+        """Aktywny wynik wyszukiwania używa koloru search_active (#ff8c00), który różni się od koloru filtra."""
+        window, _ = app_instance
+        orange_color = QtGui.QColor(window._theme_colors["search_active"]).name()
+        yellow_color = QtGui.QColor(window._theme_colors["highlight"]).name()
+
+        assert orange_color != yellow_color, "Kolor aktywnego wyniku szukania powinien odróżniać się od koloru filtra"
+
+        window._highlight_and_scroll(0)
+        sels = window.text.extraSelections()
+
+        has_orange_sel = any(
+            s.format.background().color().name() == orange_color for s in sels
+        )
+        assert has_orange_sel, "Wyszukiwany wynik powinien otrzymać pomarańczowe tło (search_active)"
+
+

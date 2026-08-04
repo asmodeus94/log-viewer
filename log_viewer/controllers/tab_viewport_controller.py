@@ -502,7 +502,7 @@ class ViewportController(QObject):
 
         sel = QtWidgets.QTextEdit.ExtraSelection()
         sel.cursor = sel_cursor
-        sel.format.setBackground(self.tab._theme_colors.get("highlight", QColor("#fff176")))
+        sel.format.setBackground(self.tab._theme_colors.get("search_active", QColor("#ff8c00")))
         sel.format.setForeground(self.tab._theme_colors.get("black", QColor("#000000")))
         sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
         self.tab._search_extra_sel = sel
@@ -516,6 +516,9 @@ class ViewportController(QObject):
     def _update_current_line_highlight(self) -> None:
         if self.tab._is_loading:
             return
+
+        if hasattr(self.tab.text, "set_bookmarks"):
+            self.tab.text.set_bookmarks(set(self.tab.bookmarks.keys()))
 
         sels: List[QtWidgets.QTextEdit.ExtraSelection] = list(getattr(self.tab, "_static_extra_sels", []))
 
