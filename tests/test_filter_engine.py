@@ -334,9 +334,9 @@ class TestParallelSearch:
             )
             done_p.wait(timeout=60)
 
-            assert done_s.is_set(), "Single-thread nie zakończył w czasie"
-            assert done_p.is_set(), "Parallel nie zakończył w czasie"
-            assert len(results_single) > 0, "Brak wyników single-thread"
+            assert done_s.is_set(), "Single-thread search did not finish in time"
+            assert done_p.is_set(), "Parallel search did not finish in time"
+            assert len(results_single) > 0, "Missing single-thread results"
             # Proporcja ERROR: 1/4 linii → 50k linii = 12500, 300k linii = 75000
             assert len(results_single) == 12_500, (
                 f"Single: oczekiwano 12500, dostano {len(results_single)}"
@@ -371,7 +371,7 @@ class TestParallelSearch:
             )
             done.wait(timeout=60)
 
-            assert done.is_set(), "Parallel regex nie zakończył w czasie"
+            assert done.is_set(), "Parallel regex search did not finish in time"
             assert len(results) == 75_000, (  # 1/4 linii to ERROR
                 f"Oczekiwano 75000, dostano {len(results)}"
             )
@@ -409,7 +409,7 @@ class TestParallelSearch:
             )
             done.wait(timeout=60)
 
-            assert done.is_set(), "Auto-dispatch parallel nie zakończył w czasie"
+            assert done.is_set(), "Auto-dispatch parallel search did not finish in time"
             assert len(results) == 75_000, (
                 f"Oczekiwano 75000, dostano {len(results)}"
             )
@@ -429,12 +429,12 @@ class TestParallelSearch:
 
         ranges = engine._compute_search_ranges(n_workers=4)
 
-        assert len(ranges) >= 1, "Musi być co najmniej jeden zakres"
+        assert len(ranges) >= 1, "Must have at least one range"
         for i, (start, end, line) in enumerate(ranges):
-            assert start < end, f"Zakres [{i}] ma pusty przedział: {start}..{end}"
+            assert start < end, f"Range [{i}] has empty interval: {start}..{end}"
             assert start >= 0
             assert end <= idx.size + 1
 
-        assert ranges[0][0] == 0, "Pierwszy zakres musi zaczynać od offset 0"
-        assert ranges[-1][1] == idx.size, "Ostatni zakres musi sięgać końca pliku"
+        assert ranges[0][0] == 0, "First range must start at offset 0"
+        assert ranges[-1][1] == idx.size, "Last range must reach end of file"
         idx.close()

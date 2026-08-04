@@ -356,4 +356,4 @@ class TestSearchFlow:
         assert len(sels) >= 1
         search_active_color = QtGui.QColor(window._theme_colors["search_active"]).name()
         has_orange = any(s.format.background().color().name() == search_active_color for s in sels)
-        assert has_orange, "Bieżący wynik wyszukiwania powinien mieć pomarańczowe tło (search_active)"
+        assert has_orange, "Current search result should have orange background (search_active)"
