@@ -304,3 +304,38 @@ class ExportWorker(QObject):
             self.finished.emit(count)
         except BaseException as e:
             self.error.emit(str(e))
+
+class IncrementalFilterWorker(QObject):
+    """Worker wykonujący szybkie, inkrementalne wyszukiwanie w locie (dla nowych danych w Follow)."""
+    finished = Signal(object)  # zwraca: array.array('Q') (trafienia) lub pusta array.array w przypadku braku.
+
+    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str):
+        super().__init__()
+        self._indexer = indexer
+        self._start_line = start_line
+        self._end_line = end_line
+        self._pattern = pattern
+        self._use_regex = use_regex
+        self._case_sensitive = case_sensitive
+        self._negate = negate
+        self._encoding = encoding
+
+    @Slot()
+    def run(self):
+        import array
+        results = array.array('Q')
+        try:
+            from .filter_engine import RegexStrategy, PlainTextStrategy
+            if self._use_regex:
+                strategy = RegexStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
+            else:
+                strategy = PlainTextStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
+            
+            lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
+            for (line_no, text) in lines:
+                text_bytes = text.encode(self._encoding, errors='replace')
+                if strategy.match(text_bytes):
+                    results.append(line_no)
+        except Exception:
+            pass
+        self.finished.emit(results)

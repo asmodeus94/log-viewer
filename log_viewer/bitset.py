@@ -37,6 +37,16 @@ class Bitset(Sequence[int]):
         self._total_count = counts.pop()
         self._counts = counts
 
+    def resize(self, new_size: int) -> None:
+        if new_size <= self._size:
+            return
+        new_num_words = (new_size + 63) // 64
+        if new_num_words > self._num_words:
+            self._words.extend([0] * (new_num_words - self._num_words))
+            self._num_words = new_num_words
+        self._size = new_size
+        self._counts = None
+
     def __len__(self) -> int:
         self._build_cache()
         return self._total_count
