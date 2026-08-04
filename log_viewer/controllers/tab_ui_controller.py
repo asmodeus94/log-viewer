@@ -69,6 +69,8 @@ class UIController(QObject):
 
         self.tab._search_model = SearchResultsModel()
         self.tab.search_results_view.setModel(self.tab._search_model)
+        self.tab.search_results_view.setLayoutMode(QtWidgets.QListView.LayoutMode.Batched)
+        self.tab.search_results_view.setBatchSize(100)
         mono_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
         mono_font.setPointSize(9)
 
