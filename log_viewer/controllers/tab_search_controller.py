@@ -50,7 +50,8 @@ class SearchController(QObject):
             return True
         return False
 
-    def _start_background_search(self) -> None:
+    def _start_background_search(self, start_from_end: bool = False) -> None:
+        self._search_start_from_end = start_from_end
         if not self.tab.indexer or not self.tab.file_path:
             return
         pattern = self.tab._compile_search()
@@ -170,9 +171,13 @@ class SearchController(QObject):
             self.tab._search_results_label.setText(self.tab.t("lbl_search_results_empty"))
             return
 
-        # Skocz do pierwszego wyniku — odroczone przez QTimer.singleShot
-        self.tab._search_result_index = 0
-        QTimer.singleShot(0, lambda: self.tab._navigate_to_search_result(0))
+        # Skocz do odpowiedniego wyniku — odroczone przez QTimer.singleShot
+        if getattr(self, '_search_start_from_end', False):
+            self.tab._search_result_index = total_hits - 1
+            QTimer.singleShot(0, lambda: self.tab._navigate_to_search_result(total_hits - 1))
+        else:
+            self.tab._search_result_index = 0
+            QTimer.singleShot(0, lambda: self.tab._navigate_to_search_result(0))
 
         self.tab._update_search_results_label()
 
@@ -189,8 +194,8 @@ class SearchController(QObject):
     def cmd_find_next(self) -> None:
         if not self.tab.indexer:
             return
-        if self.tab._search_pattern_changed() or not self.tab._search_results_all:
-            self.tab._start_background_search()
+        if self._search_pattern_changed() or not self.tab._search_results_all:
+            self._start_background_search(start_from_end=False)
             return
         if self.tab._search_result_index < len(self.tab._search_results_all) - 1:
             self.tab._navigate_to_search_result(self.tab._search_result_index + 1)
@@ -200,8 +205,8 @@ class SearchController(QObject):
     def cmd_find_prev(self) -> None:
         if not self.tab.indexer:
             return
-        if self.tab._search_pattern_changed() or not self.tab._search_results_all:
-            self.tab._start_background_search()
+        if self._search_pattern_changed() or not self.tab._search_results_all:
+            self._start_background_search(start_from_end=True)
             return
         if self.tab._search_result_index > 0:
             self.tab._navigate_to_search_result(self.tab._search_result_index - 1)
