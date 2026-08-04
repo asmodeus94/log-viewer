@@ -732,18 +732,28 @@ class ViewportController(QObject):
         if not self.tab.indexer:
             return
         scrollbar = self.tab.text.verticalScrollBar()
-        old_val = scrollbar.value()
 
+        # Odtwórz aktualnie *widoczną* pierwszą linię na ekranie (a nie line_map[0] jeśli ekran jest przewinięty)
+        # Zamiast polegać na old_val (które ucina się przy limitach bufora), po prostu startujemy okno od widocznego top_line.
         top_line = self.tab.window_start
         if self.tab.line_map:
-            if self.tab.filter_active and self.tab._filter_all_lines:
-                try:
-                    idx = bisect_left_custom(self.tab._filter_all_lines, self.tab.line_map[0])
-                    top_line = idx
-                except Exception:
-                    pass
-            else:
-                top_line = self.tab.line_map[0]
+            cursor = self.tab.text.cursorForPosition(QPoint(0, 5))
+            widget_line = cursor.blockNumber()
+            if widget_line < 0 or widget_line >= len(self.tab.line_map):
+                widget_line = scrollbar.value() # Fallback
+
+            if 0 <= widget_line < len(self.tab.line_map):
+                file_line = self.tab.line_map[widget_line]
+                if self.tab.filter_active and self.tab._filter_all_lines:
+                    try:
+                        idx = bisect_left_custom(self.tab._filter_all_lines, file_line)
+                        top_line = idx
+                    except Exception:
+                        pass
+                else:
+                    top_line = file_line
 
         self._load_window(at_line=top_line, force_reload=True)
-        scrollbar.setValue(old_val)
+        # Ponieważ okno zaczyna się dokładnie w miejscu widocznej wcześniej linii,
+        # suwak wewnątrz nowo utworzonego widoku powinien być na samej górze.
+        scrollbar.setValue(0)
