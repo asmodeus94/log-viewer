@@ -185,7 +185,7 @@ class TestThemeDetection:
             "fg_main", "fg_dim", "fg_bright", "border", "border_light",
             "error", "warn", "info", "debug", "accent", "accent_hover",
             "highlight", "bookmark", "edited", "truncated", "current_line",
-            "context",
+            "context", "search_active",
             "minimap_bg", "minimap_error", "minimap_warn", "minimap_info",
             "minimap_debug", "minimap_viewport",
         ]
@@ -199,7 +199,7 @@ class TestThemeDetection:
             "fg_main", "fg_dim", "fg_bright", "border", "border_light",
             "error", "warn", "info", "debug", "accent", "accent_hover",
             "highlight", "bookmark", "edited", "truncated", "current_line",
-            "context",
+            "context", "search_active",
             "minimap_bg", "minimap_error", "minimap_warn", "minimap_info",
             "minimap_debug", "minimap_viewport",
         ]

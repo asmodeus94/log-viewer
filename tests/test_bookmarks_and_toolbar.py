@@ -244,7 +244,7 @@ class TestBookmarkPanelDelete:
         # Po usunięciu elementu na indeksie 1, na tej pozycji jest teraz
         # linia 30 (wcześniej indeks 2). Sprawdzamy że coś jest zaznaczone.
         selected = window.bm_tree.selectedItems()
-        assert len(selected) == 1, "Po usunięciu powinien być zaznaczony następny element"
+        assert len(selected) == 1, "Next item should be selected after deletion"
         # Zaznaczony element ma numer linii 30 (bo 20 usunięto, 30 spadło na indeks 1).
         assert selected[0].data(0, QtCore.Qt.UserRole) == 30
 
@@ -350,7 +350,7 @@ class TestCurrentLineHighlightAndFormatting:
             for s in sels
             if s.format.background().color().name() == bookmark_color
         }
-        assert 5 in bookmark_blocks, "Linia 5 powinna mieć zielone tło zakładki"
+        assert 5 in bookmark_blocks, "Line 5 should have green bookmark background"
         assert 6 not in bookmark_blocks, (
             f"Sąsiednia linia 6 dostała zielone tło — to bug propagacji. "
            "Zakładkowane bloki: {bookmark_blocks}"
@@ -453,7 +453,7 @@ class TestCurrentLineHighlightAndFormatting:
             and s.format.background().color().name() == bookmark_color
             for s in sels
         )
-        assert bookmark_sel_exists, "Brak zielonej selekcji zakładki w linii 7"
+        assert bookmark_sel_exists, "Missing green bookmark selection on line 7"
 
         # NIE powinna być selekcja current_line w linii 7 — bo by przykryła
         # zakładkę i użytkownik widziałby szare zamiast zielonego.
@@ -492,7 +492,7 @@ class TestCurrentLineHighlightAndFormatting:
             and s.format.background().color().name() == current_color
             for s in sels
         )
-        assert current_sel_exists, "Brak szarej selekcji current_line w linii 8"
+        assert current_sel_exists, "Missing gray current_line selection on line 8"
 
 
 # =============================================================================
@@ -541,7 +541,7 @@ class TestEditLineAfterScroll:
 
             # Sprawdź: firstVisibleBlock to NIE blok 0.
             fvb = window.text.firstVisibleBlock()
-            assert fvb.blockNumber() > 0, "firstVisibleBlock powinien być > 0 po przewinięciu"
+            assert fvb.blockNumber() > 0, "firstVisibleBlock should be > 0 after scrolling"
 
             # Wywołaj cmd_edit_line. Ponieważ kursor (blok 0) jest poza
             # widokiem, powinien użyć firstVisibleBlock.
@@ -559,7 +559,7 @@ class TestEditLineAfterScroll:
                 f"({fvb.blockNumber()}) gdy kursor jest poza widokiem, "
                 f"ale użył {widget_line}"
             )
-            assert widget_line > 0, "Nie powinien edytować linii 0 gdy user widzi inną"
+            assert widget_line > 0, "Should not edit line 0 when user sees a different line"
         finally:
             try:
                 os.unlink(test_file)
@@ -704,7 +704,7 @@ class TestFilterContext:
             and s.format.background().color().name() == highlight_color
             for s in sels
         )
-        assert hit_has_yellow, "Trafienie filtra powinno mieć żółte tło (highlight)"
+        assert hit_has_yellow, "Filter hit should have yellow background (highlight)"
 
         # Kontekst (bloki 1, 2) powinien mieć szare tło.
         context_blocks = {
@@ -712,8 +712,8 @@ class TestFilterContext:
             for s in sels
             if s.format.background().color().name() == context_color
         }
-        assert 1 in context_blocks, "Linia 1 powinna być kontekstem (szare tło)"
-        assert 2 in context_blocks, "Linia 2 powinna być kontekstem (szare tło)"
+        assert 1 in context_blocks, "Line 1 should be context (gray background)"
+        assert 2 in context_blocks, "Line 2 should be context (gray background)"
 
 
 # =============================================================================
@@ -740,7 +740,7 @@ class TestIndexingProgress:
                 for _ in range(lines_needed):
                     f.write(line)
             actual_size = os.path.getsize(test_file)
-            assert actual_size > 100 * 1024 * 1024, "Plik testowy za mały"
+            assert actual_size > 100 * 1024 * 1024, "Test file size is too small"
 
             progress_values = []
             def progress_cb(pct: float):
@@ -749,8 +749,8 @@ class TestIndexingProgress:
             from log_viewer.indexer import LineIndexer
             idx = LineIndexer(test_file, progress_cb=progress_cb, encoding="utf-8")
             try:
-                assert len(progress_values) > 0, "Brak odczytów postępu"
-                assert 100.0 in progress_values, "Brak finalnego 100%"
+                assert len(progress_values) > 0, "Missing progress readings"
+                assert 100.0 in progress_values, "Missing final 100% progress"
             finally:
                 idx.close()
         finally:
@@ -905,4 +905,31 @@ class TestI18nKeys:
         file_line = 1234
         formatted = f"{file_line + 1:,}"
         assert formatted == "1,235"
+
+
+class TestLineNumberAreaBookmarks:
+    def test_line_number_area_set_bookmarks(self, app_instance):
+        """LineNumberArea zapamiętuje zbiór zakładek i odświeża widok."""
+        window, _ = app_instance
+        window.text.set_bookmarks({0, 5, 10})
+        assert window.text._line_number_area._bookmarks == {0, 5, 10}
+
+
+class TestSearchHighlightColor:
+    def test_search_active_color_distinct_from_filter(self, app_instance):
+        """Aktywny wynik wyszukiwania używa koloru search_active (#ff8c00), który różni się od koloru filtra."""
+        window, _ = app_instance
+        orange_color = QtGui.QColor(window._theme_colors["search_active"]).name()
+        yellow_color = QtGui.QColor(window._theme_colors["highlight"]).name()
+
+        assert orange_color != yellow_color, "Active search result color should differ from filter color"
+
+        window._highlight_and_scroll(0)
+        sels = window.text.extraSelections()
+
+        has_orange_sel = any(
+            s.format.background().color().name() == orange_color for s in sels
+        )
+        assert has_orange_sel, "Search result should have orange background (search_active)"
+
 

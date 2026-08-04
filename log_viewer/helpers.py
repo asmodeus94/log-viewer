@@ -81,6 +81,7 @@ THEME_DARK = {
     "truncated": "#6a6a6a",
     "current_line": "#2a2d2e",
     "context": "#3a3d3a",
+    "search_active": "#ff8c00",
     # Mini-map
     "minimap_bg": "#1e1e1e",
     "minimap_error": "#f44747",
@@ -120,6 +121,7 @@ THEME_LIGHT = {
     "truncated": "#9e9e9e",
     "current_line": "#f0f0f0",
     "context": "#e8f5e9",
+    "search_active": "#ff8c00",
     # Mini-map
     "minimap_bg": "#ffffff",
     "minimap_error": "#d73a49",

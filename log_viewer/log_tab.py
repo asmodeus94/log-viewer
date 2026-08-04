@@ -247,6 +247,7 @@ class LogTab(QWidget):
             "bookmark": QColor(t.get("bookmark", "#6a9955")),
             "edited": QColor(t.get("edited", "#ce9178")),
             "current_line": QColor(t.get("current_line", "#2a2d2e")),
+            "search_active": QColor(t.get("search_active", "#ff8c00")),
             "black": QColor("#000000"),
         }
         return self.ui_controller._apply_theme()
