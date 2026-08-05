@@ -487,6 +487,8 @@ class LogViewerWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, self.search_toolbar)
 
         self.lbl_search = QLabel(self.t("lbl_search"))
+        self.lbl_search.setMinimumWidth(65)
+        self.lbl_search.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.search_toolbar.addWidget(self.lbl_search)
         self.search_entry = ExpandingLineEdit()
         self.search_entry.returnPressed.connect(self.cmd_find_next)
@@ -523,6 +525,8 @@ class LogViewerWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, self.filter_toolbar)
 
         self.lbl_filter = QLabel(self.t("lbl_filter"))
+        self.lbl_filter.setMinimumWidth(65)
+        self.lbl_filter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.filter_toolbar.addWidget(self.lbl_filter)
         self.filter_entry = ExpandingLineEdit()
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
