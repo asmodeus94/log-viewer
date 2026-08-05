@@ -21,6 +21,8 @@ class SearchController(QObject):
         use_regex = self.tab._main.search_regex_cb.isChecked()
         case = self.tab._main.search_case_cb.isChecked()
         negate = self.tab._main.search_negate_cb.isChecked()
+        search_in_filter = getattr(self.tab._main, "search_in_filter_cb", None) is not None and self.tab._main.search_in_filter_cb.isChecked()
+
         if use_regex:
             try:
                 flags = re.MULTILINE if case else (re.IGNORECASE | re.MULTILINE)
@@ -33,6 +35,7 @@ class SearchController(QObject):
         self.tab.search_pattern = pattern
         self.tab._search_case = case
         self.tab._search_negate = negate
+        self.tab._search_in_filter = search_in_filter
         return pattern
 
     def _search_pattern_changed(self) -> bool:
@@ -40,6 +43,8 @@ class SearchController(QObject):
         use_regex = self.tab._main.search_regex_cb.isChecked()
         case = self.tab._main.search_case_cb.isChecked()
         negate = self.tab._main.search_negate_cb.isChecked()
+        search_in_filter = getattr(self.tab._main, "search_in_filter_cb", None) is not None and self.tab._main.search_in_filter_cb.isChecked()
+
         if pattern != self.tab.search_pattern:
             return True
         if use_regex != self.tab._last_search_regex:
@@ -47,6 +52,8 @@ class SearchController(QObject):
         if case != self.tab._last_search_case:
             return True
         if negate != self.tab._last_search_negate:
+            return True
+        if search_in_filter != getattr(self.tab, "_last_search_in_filter", False):
             return True
         return False
 
@@ -61,6 +68,7 @@ class SearchController(QObject):
         self.tab._last_search_regex = self.tab._main.search_regex_cb.isChecked()
         self.tab._last_search_case = self.tab._main.search_case_cb.isChecked()
         self.tab._last_search_negate = self.tab._main.search_negate_cb.isChecked()
+        self.tab._last_search_in_filter = getattr(self.tab._main, "search_in_filter_cb", None) is not None and self.tab._main.search_in_filter_cb.isChecked()
 
         # Anuluj poprzednie wyszukiwanie
         if self.tab._search_engine and self.tab._search_engine.is_running():
@@ -93,7 +101,9 @@ class SearchController(QObject):
         self.tab._search_worker = FilterWorker(
             self.tab._search_engine, pattern,
             self.tab._last_search_regex, self.tab._last_search_case, self.tab._last_search_negate,
-            context_after=0
+            context_after=0,
+            search_in_filter=self.tab._last_search_in_filter and self.tab.filter_active,
+            filtered_lines=self.tab._filter_all_lines if self.tab.filter_active else None
         )
         self.tab._search_worker.moveToThread(self.tab._search_thread)
         self.tab._search_thread.started.connect(self.tab._search_worker.run)

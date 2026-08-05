@@ -69,7 +69,9 @@ class FilterWorker(QObject):
 
     def __init__(self, engine: FilterEngine, pattern: str, use_regex: bool,
                  case_sensitive: bool, negate: bool,
-                 context_after: int = 0):
+                 context_after: int = 0,
+                 search_in_filter: bool = False,
+                 filtered_lines: object = None):
         super().__init__()
         self._engine = engine
         self._pattern = pattern
@@ -77,6 +79,8 @@ class FilterWorker(QObject):
         self._case_sensitive = case_sensitive
         self._negate = negate
         self._context_after = context_after
+        self._search_in_filter = search_in_filter
+        self._filtered_lines = filtered_lines
 
     @Slot()
     def run(self):
@@ -102,6 +106,7 @@ class FilterWorker(QObject):
         self._engine.start(
             self._pattern, self._use_regex, self._case_sensitive, self._negate,
             on_progress, on_done,
+            search_in_filter=self._search_in_filter, filtered_lines=self._filtered_lines
         )
 
 

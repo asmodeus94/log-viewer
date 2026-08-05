@@ -482,74 +482,84 @@ class LogViewerWindow(QMainWindow):
                 tab._apply_theme()
 
     def _build_toolbar(self) -> None:
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
+        self.search_toolbar = QToolBar()
+        self.search_toolbar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, self.search_toolbar)
 
         self.lbl_search = QLabel(self.t("lbl_search"))
-        toolbar.addWidget(self.lbl_search)
+        self.search_toolbar.addWidget(self.lbl_search)
         self.search_entry = ExpandingLineEdit()
         self.search_entry.returnPressed.connect(self.cmd_find_next)
-        toolbar.addWidget(self.search_entry)
+        self.search_toolbar.addWidget(self.search_entry)
 
         self.search_regex_cb = QCheckBox(self.t("cb_regex"))
         self.search_case_cb = QCheckBox(self.t("cb_case"))
         self.search_negate_cb = QCheckBox(self.t("cb_negate"))
-        toolbar.addWidget(self.search_regex_cb)
-        toolbar.addWidget(self.search_case_cb)
-        toolbar.addWidget(self.search_negate_cb)
+        self.search_in_filter_cb = QCheckBox(self.t("cb_search_in_filter"))
+
+        self.search_toolbar.addWidget(self.search_regex_cb)
+        self.search_toolbar.addWidget(self.search_case_cb)
+        self.search_toolbar.addWidget(self.search_negate_cb)
+        self.search_toolbar.addSeparator()
+        self.search_toolbar.addWidget(self.search_in_filter_cb)
+        self.search_toolbar.addSeparator()
 
         # Kolejność: Następny po lewej, Poprzedni po prawej (wg preferencji
         # użytkownika) — Enter w polu wyszukiwania nadal = Następny.
         self.btn_find_next = QPushButton(self.t("btn_find_next"))
         self.btn_find_next.clicked.connect(self.cmd_find_next)
-        toolbar.addWidget(self.btn_find_next)
+        self.search_toolbar.addWidget(self.btn_find_next)
         self.btn_find_prev = QPushButton(self.t("btn_find_prev"))
         self.btn_find_prev.clicked.connect(self.cmd_find_prev)
-        toolbar.addWidget(self.btn_find_prev)
+        self.search_toolbar.addWidget(self.btn_find_prev)
         self.btn_clear_search = QPushButton(self.t("btn_clear_search"))
         self.btn_clear_search.clicked.connect(self.cmd_clear_search)
-        toolbar.addWidget(self.btn_clear_search)
+        self.search_toolbar.addWidget(self.btn_clear_search)
 
-        toolbar.addSeparator()
+        self.addToolBarBreak()
+
+        self.filter_toolbar = QToolBar()
+        self.filter_toolbar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, self.filter_toolbar)
 
         self.lbl_filter = QLabel(self.t("lbl_filter"))
-        toolbar.addWidget(self.lbl_filter)
+        self.filter_toolbar.addWidget(self.lbl_filter)
         self.filter_entry = ExpandingLineEdit()
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
-        toolbar.addWidget(self.filter_entry)
+        self.filter_toolbar.addWidget(self.filter_entry)
 
         self.filter_regex_cb = QCheckBox(self.t("cb_regex"))
         self.filter_case_cb = QCheckBox(self.t("cb_case"))
         self.filter_negate_cb = QCheckBox(self.t("cb_negate"))
-        toolbar.addWidget(self.filter_regex_cb)
-        toolbar.addWidget(self.filter_case_cb)
-        toolbar.addWidget(self.filter_negate_cb)
+        self.filter_toolbar.addWidget(self.filter_regex_cb)
+        self.filter_toolbar.addWidget(self.filter_case_cb)
+        self.filter_toolbar.addWidget(self.filter_negate_cb)
 
         # Separator — oddziela opcje filtru (regex/case/negacja) od kontekstu.
-        toolbar.addSeparator()
+        self.filter_toolbar.addSeparator()
 
         # Ile linii kontekstu po każdym trafieniu filtru (dla stack trace).
         self.lbl_filter_context = QLabel(self.t("lbl_filter_context"))
-        toolbar.addWidget(self.lbl_filter_context)
+        self.filter_toolbar.addWidget(self.lbl_filter_context)
         self.filter_context_spin = QSpinBox()
         self.filter_context_spin.setRange(0, 50)
         self.filter_context_spin.setValue(0)
         self.filter_context_spin.setFixedWidth(56)
         self.filter_context_spin.setToolTip(self.t("tt_filter_context"))
-        toolbar.addWidget(self.filter_context_spin)
+        self.filter_toolbar.addWidget(self.filter_context_spin)
 
         self.btn_apply_filter = QPushButton(self.t("btn_apply_filter"))
         self.btn_apply_filter.clicked.connect(self.cmd_apply_filter)
-        toolbar.addWidget(self.btn_apply_filter)
+        self.filter_toolbar.addWidget(self.btn_apply_filter)
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
-        toolbar.addWidget(self.btn_clear_filter)
+        self.filter_toolbar.addWidget(self.btn_clear_filter)
 
         self.search_entry.textChanged.connect(self._save_toolbar_to_tab)
         self.search_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
         self.search_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
         self.search_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        self.search_in_filter_cb.stateChanged.connect(self._save_toolbar_to_tab)
 
         self.filter_entry.textChanged.connect(self._save_toolbar_to_tab)
         self.filter_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
@@ -799,6 +809,7 @@ class LogViewerWindow(QMainWindow):
                 self.search_regex_cb.setChecked(False)
                 self.search_case_cb.setChecked(False)
                 self.search_negate_cb.setChecked(False)
+                self.search_in_filter_cb.setChecked(False)
                 self.filter_entry.clear()
                 self.filter_regex_cb.setChecked(False)
                 self.filter_case_cb.setChecked(False)
@@ -834,6 +845,7 @@ class LogViewerWindow(QMainWindow):
         tab.tb_search_regex = self.search_regex_cb.isChecked()
         tab.tb_search_case = self.search_case_cb.isChecked()
         tab.tb_search_negate = self.search_negate_cb.isChecked()
+        tab.tb_search_in_filter = getattr(self, 'search_in_filter_cb', None) is not None and self.search_in_filter_cb.isChecked()
 
         tab.tb_filter_text = self.filter_entry.text()
         tab.tb_filter_regex = self.filter_regex_cb.isChecked()
@@ -848,6 +860,10 @@ class LogViewerWindow(QMainWindow):
             self.search_regex_cb.setChecked(tab.tb_search_regex)
             self.search_case_cb.setChecked(tab.tb_search_case)
             self.search_negate_cb.setChecked(tab.tb_search_negate)
+            if hasattr(tab, 'tb_search_in_filter'):
+                self.search_in_filter_cb.setChecked(tab.tb_search_in_filter)
+            else:
+                self.search_in_filter_cb.setChecked(False)
 
             self.filter_entry.setText(tab.tb_filter_text)
             self.filter_regex_cb.setChecked(tab.tb_filter_regex)
@@ -868,6 +884,7 @@ class LogViewerWindow(QMainWindow):
             getattr(self, "search_regex_cb", None),
             getattr(self, "search_case_cb", None),
             getattr(self, "search_negate_cb", None),
+            getattr(self, "search_in_filter_cb", None),
             getattr(self, "btn_find_next", None),
             getattr(self, "btn_find_prev", None),
             getattr(self, "btn_clear_search", None),

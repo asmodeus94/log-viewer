@@ -357,7 +357,9 @@ class FilterEngine:
               case_sensitive: bool,
               negate: bool,
               on_progress: Callable[[float, int], None],
-              on_done: Callable[[List[Tuple[int, int, str]], Optional[str]], None]) -> None:
+              on_done: Callable[[List[Tuple[int, int, str]], Optional[str]], None],
+              search_in_filter: bool = False,
+              filtered_lines: object = None) -> None:
         if self._thread is not None and self._thread.is_alive():
             self._cancel.set()
             self._thread.join(timeout=5.0)
@@ -367,7 +369,7 @@ class FilterEngine:
             self._cancel.clear()
             self._thread = threading.Thread(
                 target=self._run,
-                args=(session, pattern, use_regex, case_sensitive, negate, on_progress, on_done),
+                args=(session, pattern, use_regex, case_sensitive, negate, on_progress, on_done, search_in_filter, filtered_lines),
                 daemon=True,
             )
             self._thread.start()
@@ -420,7 +422,9 @@ class FilterEngine:
     def _run(self, session: int, pattern: str, use_regex: bool,
              case_sensitive: bool, negate: bool,
              on_progress: Callable[[float, int], None],
-             on_done: Callable) -> None:
+             on_done: Callable,
+             search_in_filter: bool = False,
+             filtered_lines: object = None) -> None:
         """
         Dyspozytor — wybiera tryb równoległy lub single-thread i deleguje pracę.
 
@@ -450,7 +454,7 @@ class FilterEngine:
         if use_parallel:
             try:
                 self._run_parallel(session, pattern, use_regex, case_sensitive,
-                                   negate, on_progress, on_done)
+                                   negate, on_progress, on_done, search_in_filter, filtered_lines)
                 return
             except Exception as e:
                 # Fallback do single-thread przy błędzie multiprocessing
@@ -458,12 +462,14 @@ class FilterEngine:
                       file=sys.stderr)
 
         self._run_single(session, pattern, use_regex, case_sensitive,
-                         negate, on_progress, on_done)
+                         negate, on_progress, on_done, search_in_filter, filtered_lines)
 
     def _run_parallel(self, session: int, pattern: str, use_regex: bool,
                       case_sensitive: bool, negate: bool,
                       on_progress: Callable[[float, int], None],
-                      on_done: Callable) -> None:
+                      on_done: Callable,
+                      search_in_filter: bool = False,
+                      filtered_lines: object = None) -> None:
         """
         Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
 
@@ -569,6 +575,11 @@ class FilterEngine:
         if negate:
             merged_bitset = ~merged_bitset
 
+        if search_in_filter and filtered_lines is not None:
+            merged_bitset = merged_bitset & filtered_lines
+            merged_bitset._total_count = -1
+            _ = len(merged_bitset)
+
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
                 on_done(merged_bitset, None)
@@ -578,7 +589,9 @@ class FilterEngine:
     def _run_single(self, session: int, pattern: str, use_regex: bool,
                     case_sensitive: bool, negate: bool,
                     on_progress: Callable[[float, int], None],
-                    on_done: Callable) -> None:
+                    on_done: Callable,
+                    search_in_filter: bool = False,
+                    filtered_lines: object = None) -> None:
         """
         Sekwencyjne przeszukiwanie pliku w jednym wątku.
 
@@ -654,6 +667,11 @@ class FilterEngine:
 
         if negate and error is None:
             merged_bitset = ~merged_bitset
+
+        if error is None and search_in_filter and filtered_lines is not None:
+            merged_bitset = merged_bitset & filtered_lines
+            merged_bitset._total_count = -1
+            _ = len(merged_bitset)
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
