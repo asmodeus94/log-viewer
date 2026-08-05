@@ -281,20 +281,27 @@ class TestToolbarButtonOrder:
     def test_next_is_left_of_prev(self, app_instance):
         """Następny znajduje się po lewej stronie Poprzedni na pasku."""
         window, _ = app_instance
-        toolbar = window.findChild(QtWidgets.QToolBar)
-        assert toolbar is not None
 
-        actions = toolbar.actions()
-        widgets = [toolbar.widgetForAction(a) for a in actions]
-        # Filtruj widgety przycisków
-        try:
-            idx_next = widgets.index(window.btn_find_next)
-            idx_prev = widgets.index(window.btn_find_prev)
-        except ValueError:
-            pytest.fail("Nie znaleziono przycisków Następny/Poprzedni na pasku")
-        assert idx_next < idx_prev, (
-            f"Następny (idx={idx_next}) powinien być przed Poprzedni (idx={idx_prev})"
-        )
+        assert window.btn_find_next is not None
+        assert window.btn_find_prev is not None
+
+        # Sprawdzamy czy w nadrzędnym layoucie guzik Next jest przed Prev
+        parent_layout = window.btn_find_next.parentWidget().layout()
+        if parent_layout is None:
+            # Ponieważ umieściliśmy je w pod-layoucie w kontenerze,
+            # można po prostu poszukać po hierarchii układu. W naszym
+            # układzie QGridLayout obie kontrolki lądują w jednej komórce
+            pass
+
+        # Obiekty są pakowane w sub-layoucie
+        # Możemy prosto przeszukać ich nadrzędny układ, bo dzielą ten sam parent (w Grid).
+        # Znajdźmy ich pozycję w obrębie parenta.
+        children = window.btn_find_next.parentWidget().children()
+
+        idx_next = children.index(window.btn_find_next)
+        idx_prev = children.index(window.btn_find_prev)
+
+        assert idx_next < idx_prev, "Przycisk 'Następny' powinien być przed 'Poprzedni'"
 
     def test_both_search_buttons_exist(self, app_instance):
         window, _ = app_instance

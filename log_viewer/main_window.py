@@ -482,90 +482,109 @@ class LogViewerWindow(QMainWindow):
                 tab._apply_theme()
 
     def _build_toolbar(self) -> None:
-        self.search_toolbar = QToolBar()
-        self.search_toolbar.setMovable(False)
-        self.addToolBar(Qt.TopToolBarArea, self.search_toolbar)
+        self.main_toolbar = QToolBar()
+        self.main_toolbar.setMovable(False)
+        self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
+        # Używamy jednego widżetu z gridLayout do utrzymania wszystkich w równej siatce
+        container = QWidget()
+        layout = QGridLayout(container)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(6)
+
+        # ----- ROW 0: Wyszukiwanie -----
         self.lbl_search = QLabel(self.t("lbl_search"))
-        self.lbl_search.setMinimumWidth(65)
         self.lbl_search.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.search_toolbar.addWidget(self.lbl_search)
+        layout.addWidget(self.lbl_search, 0, 0)
+
         self.search_entry = ExpandingLineEdit()
         self.search_entry.returnPressed.connect(self.cmd_find_next)
-        self.search_toolbar.addWidget(self.search_entry)
+        layout.addWidget(self.search_entry, 0, 1)
 
         self.search_regex_cb = QCheckBox(self.t("cb_regex"))
         self.search_case_cb = QCheckBox(self.t("cb_case"))
         self.search_negate_cb = QCheckBox(self.t("cb_negate"))
         self.search_in_filter_cb = QCheckBox(self.t("cb_search_in_filter"))
 
-        self.search_toolbar.addWidget(self.search_regex_cb)
-        self.search_toolbar.addWidget(self.search_case_cb)
-        self.search_toolbar.addWidget(self.search_negate_cb)
-        self.search_toolbar.addSeparator()
-        self.search_toolbar.addWidget(self.search_in_filter_cb)
-        self.search_toolbar.addSeparator()
+        layout.addWidget(self.search_regex_cb, 0, 2)
+        layout.addWidget(self.search_case_cb, 0, 3)
+        layout.addWidget(self.search_negate_cb, 0, 4)
 
-        # Kolejność: Następny po lewej, Poprzedni po prawej (wg preferencji
-        # użytkownika) — Enter w polu wyszukiwania nadal = Następny.
+        # Elementy za separatorami zgrupujemy w layouty poziome do komórek
+        search_right_layout = QHBoxLayout()
+        search_right_layout.setContentsMargins(0, 0, 0, 0)
+        search_right_layout.setSpacing(4)
+
+        sep1 = QFrame(); sep1.setFrameShape(QFrame.VLine); sep1.setFrameShadow(QFrame.Sunken)
+        search_right_layout.addWidget(sep1)
+        search_right_layout.addWidget(self.search_in_filter_cb)
+
+        sep2 = QFrame(); sep2.setFrameShape(QFrame.VLine); sep2.setFrameShadow(QFrame.Sunken)
+        search_right_layout.addWidget(sep2)
+
         self.btn_find_next = QPushButton(self.t("btn_find_next"))
         self.btn_find_next.clicked.connect(self.cmd_find_next)
-        self.search_toolbar.addWidget(self.btn_find_next)
+        search_right_layout.addWidget(self.btn_find_next)
+
         self.btn_find_prev = QPushButton(self.t("btn_find_prev"))
         self.btn_find_prev.clicked.connect(self.cmd_find_prev)
-        self.search_toolbar.addWidget(self.btn_find_prev)
+        search_right_layout.addWidget(self.btn_find_prev)
+
         self.btn_clear_search = QPushButton(self.t("btn_clear_search"))
         self.btn_clear_search.clicked.connect(self.cmd_clear_search)
-        self.search_toolbar.addWidget(self.btn_clear_search)
+        search_right_layout.addWidget(self.btn_clear_search)
 
-        spacer1 = QWidget()
-        spacer1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.search_toolbar.addWidget(spacer1)
+        search_right_layout.addStretch()
+        layout.addLayout(search_right_layout, 0, 5)
 
-        self.addToolBarBreak()
-
-        self.filter_toolbar = QToolBar()
-        self.filter_toolbar.setMovable(False)
-        self.addToolBar(Qt.TopToolBarArea, self.filter_toolbar)
-
+        # ----- ROW 1: Filtrowanie -----
         self.lbl_filter = QLabel(self.t("lbl_filter"))
-        self.lbl_filter.setMinimumWidth(65)
         self.lbl_filter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.filter_toolbar.addWidget(self.lbl_filter)
+        layout.addWidget(self.lbl_filter, 1, 0)
+
         self.filter_entry = ExpandingLineEdit()
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
-        self.filter_toolbar.addWidget(self.filter_entry)
+        layout.addWidget(self.filter_entry, 1, 1)
 
         self.filter_regex_cb = QCheckBox(self.t("cb_regex"))
         self.filter_case_cb = QCheckBox(self.t("cb_case"))
         self.filter_negate_cb = QCheckBox(self.t("cb_negate"))
-        self.filter_toolbar.addWidget(self.filter_regex_cb)
-        self.filter_toolbar.addWidget(self.filter_case_cb)
-        self.filter_toolbar.addWidget(self.filter_negate_cb)
 
-        # Separator — oddziela opcje filtru (regex/case/negacja) od kontekstu.
-        self.filter_toolbar.addSeparator()
+        layout.addWidget(self.filter_regex_cb, 1, 2)
+        layout.addWidget(self.filter_case_cb, 1, 3)
+        layout.addWidget(self.filter_negate_cb, 1, 4)
 
-        # Ile linii kontekstu po każdym trafieniu filtru (dla stack trace).
+        filter_right_layout = QHBoxLayout()
+        filter_right_layout.setContentsMargins(0, 0, 0, 0)
+        filter_right_layout.setSpacing(4)
+
+        sep3 = QFrame(); sep3.setFrameShape(QFrame.VLine); sep3.setFrameShadow(QFrame.Sunken)
+        filter_right_layout.addWidget(sep3)
+
         self.lbl_filter_context = QLabel(self.t("lbl_filter_context"))
-        self.filter_toolbar.addWidget(self.lbl_filter_context)
+        filter_right_layout.addWidget(self.lbl_filter_context)
+
         self.filter_context_spin = QSpinBox()
         self.filter_context_spin.setRange(0, 50)
         self.filter_context_spin.setValue(0)
         self.filter_context_spin.setFixedWidth(56)
         self.filter_context_spin.setToolTip(self.t("tt_filter_context"))
-        self.filter_toolbar.addWidget(self.filter_context_spin)
+        filter_right_layout.addWidget(self.filter_context_spin)
 
         self.btn_apply_filter = QPushButton(self.t("btn_apply_filter"))
         self.btn_apply_filter.clicked.connect(self.cmd_apply_filter)
-        self.filter_toolbar.addWidget(self.btn_apply_filter)
+        filter_right_layout.addWidget(self.btn_apply_filter)
+
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
-        self.filter_toolbar.addWidget(self.btn_clear_filter)
+        filter_right_layout.addWidget(self.btn_clear_filter)
 
-        spacer2 = QWidget()
-        spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.filter_toolbar.addWidget(spacer2)
+        filter_right_layout.addStretch()
+        layout.addLayout(filter_right_layout, 1, 5)
+
+        layout.setColumnStretch(1, 1)  # Wymuś by kolumna Inputów wypełniała wolne miejsce
+
+        self.main_toolbar.addWidget(container)
 
         self.search_entry.textChanged.connect(self._save_toolbar_to_tab)
         self.search_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
