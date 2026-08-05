@@ -518,6 +518,10 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_search.clicked.connect(self.cmd_clear_search)
         self.search_toolbar.addWidget(self.btn_clear_search)
 
+        spacer1 = QWidget()
+        spacer1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.search_toolbar.addWidget(spacer1)
+
         self.addToolBarBreak()
 
         self.filter_toolbar = QToolBar()
@@ -558,6 +562,10 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
         self.filter_toolbar.addWidget(self.btn_clear_filter)
+
+        spacer2 = QWidget()
+        spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.filter_toolbar.addWidget(spacer2)
 
         self.search_entry.textChanged.connect(self._save_toolbar_to_tab)
         self.search_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
