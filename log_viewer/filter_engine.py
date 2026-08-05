@@ -239,7 +239,7 @@ class RegexStrategy(FilterStrategy):
     def __init__(self, pattern: str, case_sensitive: bool, negate: bool, encoding: str):
         super().__init__(negate, encoding)
         self.pattern = pattern
-        self.flags = 0 if case_sensitive else re.IGNORECASE
+        self.flags = re.MULTILINE if case_sensitive else (re.IGNORECASE | re.MULTILINE)
         self.matcher_str = re.compile(pattern, self.flags)
 
         self.matcher_bytes = None
@@ -430,7 +430,7 @@ class FilterEngine:
         # Wstępna walidacja wyrażenia regularnego przed uruchomieniem workerów
         if use_regex:
             try:
-                re.compile(pattern, 0 if case_sensitive else re.IGNORECASE)
+                re.compile(pattern, re.MULTILINE if case_sensitive else (re.IGNORECASE | re.MULTILINE))
             except re.error as e:
                 if self._is_current_session(session) and not self._cancel.is_set():
                     try:

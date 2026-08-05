@@ -34,7 +34,7 @@ class FilterController(QObject):
 
         if use_regex:
             try:
-                flags = 0 if case else re.IGNORECASE
+                flags = re.MULTILINE if case else (re.IGNORECASE | re.MULTILINE)
                 re.compile(pattern, flags)
             except re.error as e:
                 QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_filter_error").format(e=e))
