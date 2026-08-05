@@ -23,7 +23,7 @@ class SearchController(QObject):
         negate = self.tab._main.search_negate_cb.isChecked()
         if use_regex:
             try:
-                flags = 0 if case else re.IGNORECASE
+                flags = re.MULTILINE if case else (re.IGNORECASE | re.MULTILINE)
                 self.tab._search_compiled = re.compile(pattern, flags)
             except re.error as e:
                 QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_filter_error").format(e=e))
