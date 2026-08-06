@@ -486,7 +486,6 @@ class LogViewerWindow(QMainWindow):
         self.main_toolbar.setMovable(False)
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
-        # Używamy jednego centralnego widgetu z poziomym podziałem na dwie połówki (Search i Filter)
         container = QWidget()
         main_layout = QHBoxLayout(container)
         main_layout.setContentsMargins(4, 4, 4, 4)
@@ -494,32 +493,22 @@ class LogViewerWindow(QMainWindow):
 
         # ----------------- LEWA STRONA (Wyszukiwanie) -----------------
         search_panel = QWidget()
-        search_layout = QVBoxLayout(search_panel)
+        search_layout = QGridLayout(search_panel)
         search_layout.setContentsMargins(0, 0, 0, 0)
         search_layout.setSpacing(4)
 
-        # Górny wiersz (Input)
-        search_top_layout = QHBoxLayout()
-        search_top_layout.setContentsMargins(0, 0, 0, 0)
-        search_top_layout.setSpacing(4)
-
         self.lbl_search = QLabel(self.t("lbl_search"))
         self.lbl_search.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        search_top_layout.addWidget(self.lbl_search)
+        search_layout.addWidget(self.lbl_search, 0, 0)
 
         self.search_entry = ExpandingLineEdit()
+        self.search_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_entry.returnPressed.connect(self.cmd_find_next)
-        search_top_layout.addWidget(self.search_entry)
+        search_layout.addWidget(self.search_entry, 0, 1)
 
-        search_layout.addLayout(search_top_layout)
-
-        # Wiersz 2 (Opcje)
         search_options_layout = QHBoxLayout()
         search_options_layout.setContentsMargins(0, 0, 0, 0)
         search_options_layout.setSpacing(8)
-
-        # Odstęp wyrównujący z lewą krawędzią pola tekstowego (odpowiada szerokości etykiety + spacing)
-        search_options_layout.addSpacing(65 + search_top_layout.spacing())
 
         self.search_regex_cb = QCheckBox(self.t("cb_regex"))
         self.search_case_cb = QCheckBox(self.t("cb_case"))
@@ -531,14 +520,11 @@ class LogViewerWindow(QMainWindow):
         search_options_layout.addWidget(self.search_negate_cb)
         search_options_layout.addWidget(self.search_in_filter_cb)
         search_options_layout.addStretch()
-        search_layout.addLayout(search_options_layout)
+        search_layout.addLayout(search_options_layout, 1, 1)
 
-        # Wiersz 3 (Przyciski)
         search_buttons_layout = QHBoxLayout()
         search_buttons_layout.setContentsMargins(0, 0, 0, 0)
         search_buttons_layout.setSpacing(4)
-
-        search_buttons_layout.addSpacing(65 + search_top_layout.spacing())
 
         self.btn_find_next = QPushButton(self.t("btn_find_next"))
         self.btn_find_next.clicked.connect(self.cmd_find_next)
@@ -551,11 +537,13 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_search = QPushButton(self.t("btn_clear_search"))
         self.btn_clear_search.clicked.connect(self.cmd_clear_search)
         search_buttons_layout.addWidget(self.btn_clear_search)
-
         search_buttons_layout.addStretch()
-        search_layout.addLayout(search_buttons_layout)
 
-        main_layout.addWidget(search_panel)
+        search_layout.addLayout(search_buttons_layout, 2, 1)
+        search_layout.setColumnStretch(0, 0)
+        search_layout.setColumnStretch(1, 1)
+
+        main_layout.addWidget(search_panel, 1)
 
         # Pionowy separator między panelem Search a Filter
         main_sep = QFrame(); main_sep.setFrameShape(QFrame.VLine); main_sep.setFrameShadow(QFrame.Sunken)
@@ -563,31 +551,22 @@ class LogViewerWindow(QMainWindow):
 
         # ----------------- PRAWA STRONA (Filtrowanie) -----------------
         filter_panel = QWidget()
-        filter_layout = QVBoxLayout(filter_panel)
+        filter_layout = QGridLayout(filter_panel)
         filter_layout.setContentsMargins(0, 0, 0, 0)
         filter_layout.setSpacing(4)
 
-        # Górny wiersz (Input)
-        filter_top_layout = QHBoxLayout()
-        filter_top_layout.setContentsMargins(0, 0, 0, 0)
-        filter_top_layout.setSpacing(4)
-
         self.lbl_filter = QLabel(self.t("lbl_filter"))
         self.lbl_filter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        filter_top_layout.addWidget(self.lbl_filter)
+        filter_layout.addWidget(self.lbl_filter, 0, 0)
 
         self.filter_entry = ExpandingLineEdit()
+        self.filter_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
-        filter_top_layout.addWidget(self.filter_entry)
+        filter_layout.addWidget(self.filter_entry, 0, 1)
 
-        filter_layout.addLayout(filter_top_layout)
-
-        # Wiersz 2 (Opcje)
         filter_options_layout = QHBoxLayout()
         filter_options_layout.setContentsMargins(0, 0, 0, 0)
         filter_options_layout.setSpacing(8)
-
-        filter_options_layout.addSpacing(65 + filter_top_layout.spacing())
 
         self.filter_regex_cb = QCheckBox(self.t("cb_regex"))
         self.filter_case_cb = QCheckBox(self.t("cb_case"))
@@ -606,16 +585,13 @@ class LogViewerWindow(QMainWindow):
         self.filter_context_spin.setFixedWidth(56)
         self.filter_context_spin.setToolTip(self.t("tt_filter_context"))
         filter_options_layout.addWidget(self.filter_context_spin)
-
         filter_options_layout.addStretch()
-        filter_layout.addLayout(filter_options_layout)
 
-        # Wiersz 3 (Przyciski)
+        filter_layout.addLayout(filter_options_layout, 1, 1)
+
         filter_buttons_layout = QHBoxLayout()
         filter_buttons_layout.setContentsMargins(0, 0, 0, 0)
         filter_buttons_layout.setSpacing(4)
-
-        filter_buttons_layout.addSpacing(65 + filter_top_layout.spacing())
 
         self.btn_apply_filter = QPushButton(self.t("btn_apply_filter"))
         self.btn_apply_filter.clicked.connect(self.cmd_apply_filter)
@@ -624,12 +600,13 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
         filter_buttons_layout.addWidget(self.btn_clear_filter)
-
         filter_buttons_layout.addStretch()
-        filter_layout.addLayout(filter_buttons_layout)
 
-        main_layout.addWidget(filter_panel)
-        main_layout.addStretch()
+        filter_layout.addLayout(filter_buttons_layout, 2, 1)
+        filter_layout.setColumnStretch(0, 0)
+        filter_layout.setColumnStretch(1, 1)
+
+        main_layout.addWidget(filter_panel, 1)
 
         self.main_toolbar.addWidget(container)
 
@@ -644,7 +621,6 @@ class LogViewerWindow(QMainWindow):
         self.filter_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
         self.filter_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
         self.filter_context_spin.valueChanged.connect(self._save_toolbar_to_tab)
-
 
     def _rebuild_menubar(self) -> None:
         menubar = self.menuBar()
