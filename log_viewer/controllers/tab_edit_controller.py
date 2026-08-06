@@ -33,6 +33,7 @@ class EditController(QObject):
 
         # Zapisz na przyszłość (tylko w sesji) wybór formattera
         self.tab._last_formatter = dialog.get_selected_formatter()
+        dialog.deleteLater()
 
     def cmd_edit_line(self) -> None:
         if not self.tab.indexer:

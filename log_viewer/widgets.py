@@ -206,6 +206,8 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         if tab and hasattr(tab, "_last_formatter"):
             tab._last_formatter = dialog.get_selected_formatter()
+            
+        dialog.deleteLater()
 
     def set_line_map(self, line_map: List[int]) -> None:
         self._line_number_area.set_line_map(line_map)
@@ -616,6 +618,12 @@ class FormatDialog(QDialog):
         self.app = parent.window() if hasattr(parent, 'window') else parent
         self.t = self.app.t if hasattr(self.app, 't') else lambda k: k
 
+        self.editor = None
+        if hasattr(parent, "textCursor"):
+            self.editor = parent
+        elif hasattr(parent, "text"):
+            self.editor = parent.text
+
         self.setWindowTitle(self.t("dlg_format_title"))
         self.ui.lbl_formatter.setText(self.t("lbl_formatter"))
 
@@ -632,6 +640,13 @@ class FormatDialog(QDialog):
 
         self.ui.btn_reformat.setText(self.t("btn_reformat"))
         self.ui.btn_reformat.clicked.connect(self._reformat_current_text)
+        self.ui.btn_prev.setText(self.t("btn_prev_line"))
+        self.ui.btn_prev.clicked.connect(self._on_prev_line)
+        self.ui.btn_next.setText(self.t("btn_next_line"))
+        self.ui.btn_next.clicked.connect(self._on_next_line)
+
+        # Tłumaczenie systemowego przycisku 'Close'
+        self.ui.buttons.button(QDialogButtonBox.Close).setText(self.t("btn_close"))
 
         self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
@@ -665,6 +680,33 @@ class FormatDialog(QDialog):
     def get_selected_formatter(self) -> str:
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
         return self.formatter_combo.currentText()
+
+    def _on_prev_line(self) -> None:
+        if not self.editor:
+            return
+        cursor = self.editor.textCursor()
+        if not cursor.movePosition(QtGui.QTextCursor.Up):
+            cursor.movePosition(QtGui.QTextCursor.End)
+        cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        self.editor.setTextCursor(cursor)
+        self.editor.ensureCursorVisible()
+        self._load_cursor_text(cursor)
+
+    def _on_next_line(self) -> None:
+        if not self.editor:
+            return
+        cursor = self.editor.textCursor()
+        if not cursor.movePosition(QtGui.QTextCursor.Down):
+            cursor.movePosition(QtGui.QTextCursor.Start)
+        cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        self.editor.setTextCursor(cursor)
+        self.editor.ensureCursorVisible()
+        self._load_cursor_text(cursor)
+
+    def _load_cursor_text(self, cursor: QtGui.QTextCursor) -> None:
+        selected_text = cursor.selectedText().replace("\u2029", "\n")
+        self.original_text = selected_text
+        self._apply_format(self.formatter_combo.currentText())
 
 class ExpandingLineEdit(QTextEdit):
     """
