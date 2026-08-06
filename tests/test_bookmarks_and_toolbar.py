@@ -294,14 +294,24 @@ class TestToolbarButtonOrder:
             pass
 
         # Obiekty są pakowane w sub-layoucie
-        # Możemy prosto przeszukać ich nadrzędny układ, bo dzielą ten sam parent (w Grid).
-        # Znajdźmy ich pozycję w obrębie parenta.
-        children = window.btn_find_next.parentWidget().children()
+        # Pobieramy nadrzędny QHBoxLayout z kontenera w którym siedzą te przyciski
+        layout = window.btn_find_next.parentWidget().layout()
+        idx_next = -1
+        idx_prev = -1
 
-        idx_next = children.index(window.btn_find_next)
-        idx_prev = children.index(window.btn_find_prev)
+        # W nowym layoucie używamy addLayout(search_bottom_layout), więc przyciski
+        # są głębiej, ale ich parentem nadal jest wewnętrzny QWidget lub główny container.
+        # Bezpieczniej po prostu pojechać po współrzędnych ekranu. Wymagamy
+        # QApplication.processEvents() lub show(), aby to wymusić w teście okna w PySide6.
+        window.show()
+        QtWidgets.QApplication.processEvents()
 
-        assert idx_next < idx_prev, "Przycisk 'Następny' powinien być przed 'Poprzedni'"
+        from PySide6.QtCore import QPoint
+        x_next = window.btn_find_next.mapToGlobal(QPoint(0, 0)).x()
+        x_prev = window.btn_find_prev.mapToGlobal(QPoint(0, 0)).x()
+
+        assert x_next < x_prev, "Przycisk 'Następny' powinien być przed 'Poprzedni'"
+        window.hide()
 
     def test_both_search_buttons_exist(self, app_instance):
         window, _ = app_instance
