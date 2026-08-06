@@ -206,6 +206,8 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         if tab and hasattr(tab, "_last_formatter"):
             tab._last_formatter = dialog.get_selected_formatter()
+            
+        dialog.deleteLater()
 
     def set_line_map(self, line_map: List[int]) -> None:
         self._line_number_area.set_line_map(line_map)
