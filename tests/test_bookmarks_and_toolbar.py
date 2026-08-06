@@ -281,20 +281,37 @@ class TestToolbarButtonOrder:
     def test_next_is_left_of_prev(self, app_instance):
         """Następny znajduje się po lewej stronie Poprzedni na pasku."""
         window, _ = app_instance
-        toolbar = window.findChild(QtWidgets.QToolBar)
-        assert toolbar is not None
 
-        actions = toolbar.actions()
-        widgets = [toolbar.widgetForAction(a) for a in actions]
-        # Filtruj widgety przycisków
-        try:
-            idx_next = widgets.index(window.btn_find_next)
-            idx_prev = widgets.index(window.btn_find_prev)
-        except ValueError:
-            pytest.fail("Nie znaleziono przycisków Następny/Poprzedni na pasku")
-        assert idx_next < idx_prev, (
-            f"Następny (idx={idx_next}) powinien być przed Poprzedni (idx={idx_prev})"
-        )
+        assert window.btn_find_next is not None
+        assert window.btn_find_prev is not None
+
+        # Sprawdzamy czy w nadrzędnym layoucie guzik Next jest przed Prev
+        parent_layout = window.btn_find_next.parentWidget().layout()
+        if parent_layout is None:
+            # Ponieważ umieściliśmy je w pod-layoucie w kontenerze,
+            # można po prostu poszukać po hierarchii układu. W naszym
+            # układzie QGridLayout obie kontrolki lądują w jednej komórce
+            pass
+
+        # Obiekty są pakowane w sub-layoucie
+        # Pobieramy nadrzędny QHBoxLayout z kontenera w którym siedzą te przyciski
+        layout = window.btn_find_next.parentWidget().layout()
+        idx_next = -1
+        idx_prev = -1
+
+        # W nowym layoucie używamy addLayout(search_bottom_layout), więc przyciski
+        # są głębiej, ale ich parentem nadal jest wewnętrzny QWidget lub główny container.
+        # Bezpieczniej po prostu pojechać po współrzędnych ekranu. Wymagamy
+        # QApplication.processEvents() lub show(), aby to wymusić w teście okna w PySide6.
+        window.show()
+        QtWidgets.QApplication.processEvents()
+
+        from PySide6.QtCore import QPoint
+        x_next = window.btn_find_next.mapToGlobal(QPoint(0, 0)).x()
+        x_prev = window.btn_find_prev.mapToGlobal(QPoint(0, 0)).x()
+
+        assert x_next < x_prev, "Przycisk 'Następny' powinien być przed 'Poprzedni'"
+        window.hide()
 
     def test_both_search_buttons_exist(self, app_instance):
         window, _ = app_instance

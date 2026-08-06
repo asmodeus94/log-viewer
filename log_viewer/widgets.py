@@ -681,7 +681,7 @@ class ExpandingLineEdit(QTextEdit):
         super().__init__(*args, **kwargs)
         self.base_min_width = 80
         self.focused_min_width = 150
-        self.max_width_limit = 500
+        self.max_width_limit = 16777215
 
         self.setMinimumWidth(self.base_min_width)
         self.setMaximumWidth(self.max_width_limit)

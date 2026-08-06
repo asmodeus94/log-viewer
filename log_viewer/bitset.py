@@ -209,6 +209,31 @@ class Bitset(Sequence[int]):
             
         return new_bs
 
+    def __and__(self, other: "Bitset") -> "Bitset":
+        if not isinstance(other, Bitset):
+            raise TypeError("Unsupported operand type(s) for &: 'Bitset' and '{}'".format(type(other).__name__))
+
+        # Ograniczamy do mniejszego rozmiaru
+        min_size = min(self._size, other._size)
+        new_bs = Bitset(min_size)
+
+        num_words = min(self._num_words, other._num_words)
+        new_words = new_bs._words
+        w1 = self._words
+        w2 = other._words
+
+        for i in range(num_words):
+            new_words[i] = w1[i] & w2[i]
+
+        if min_size > 0:
+            last_valid_bit = (min_size - 1) % 64
+            mask = (1 << (last_valid_bit + 1)) - 1
+            if last_valid_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            new_words[-1] &= mask
+
+        return new_bs
+
     def __invert__(self) -> "Bitset":
         new_bs = Bitset(self._size)
         new_words = new_bs._words
