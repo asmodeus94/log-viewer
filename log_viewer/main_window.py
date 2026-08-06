@@ -277,9 +277,6 @@ class LogViewerWindow(QMainWindow):
             QCheckBox:disabled {{
                 color: #555555;
             }}
-            QLabel:disabled {{
-                color: #555555;
-            }}
             QSpinBox:disabled {{
                 color: #555555;
                 background-color: {t["bg_panel"]};
@@ -294,6 +291,9 @@ class LogViewerWindow(QMainWindow):
                 color: {t["fg_main"]};
                 background: transparent;
             }}
+            QLabel#lbl_filter_context {{
+                color: {t["fg_main"]};
+            }}
             QLineEdit {{
                 background-color: {t["bg_input"]};
                 color: {t["fg_main"]};
@@ -307,6 +307,10 @@ class LogViewerWindow(QMainWindow):
             QCheckBox {{
                 color: {t["fg_main"]};
                 spacing: 4px;
+                padding-right: 4px;
+            }}
+            QCheckBox::indicator {{
+                margin-right: 2px;
             }}
             QPushButton {{
                 background-color: {t["bg_input"]};
@@ -511,9 +515,13 @@ class LogViewerWindow(QMainWindow):
         search_options_layout.setSpacing(8)
 
         self.search_regex_cb = QCheckBox(self.t("cb_regex"))
+        self.search_regex_cb.setMinimumWidth(self.search_regex_cb.sizeHint().width() + 10)
         self.search_case_cb = QCheckBox(self.t("cb_case"))
+        self.search_case_cb.setMinimumWidth(self.search_case_cb.sizeHint().width() + 10)
         self.search_negate_cb = QCheckBox(self.t("cb_negate"))
+        self.search_negate_cb.setMinimumWidth(self.search_negate_cb.sizeHint().width() + 10)
         self.search_in_filter_cb = QCheckBox(self.t("cb_search_in_filter"))
+        self.search_in_filter_cb.setMinimumWidth(self.search_in_filter_cb.sizeHint().width() + 10)
 
         search_options_layout.addWidget(self.search_regex_cb)
         search_options_layout.addWidget(self.search_case_cb)
@@ -569,14 +577,18 @@ class LogViewerWindow(QMainWindow):
         filter_options_layout.setSpacing(8)
 
         self.filter_regex_cb = QCheckBox(self.t("cb_regex"))
+        self.filter_regex_cb.setMinimumWidth(self.filter_regex_cb.sizeHint().width() + 10)
         self.filter_case_cb = QCheckBox(self.t("cb_case"))
+        self.filter_case_cb.setMinimumWidth(self.filter_case_cb.sizeHint().width() + 10)
         self.filter_negate_cb = QCheckBox(self.t("cb_negate"))
+        self.filter_negate_cb.setMinimumWidth(self.filter_negate_cb.sizeHint().width() + 10)
 
         filter_options_layout.addWidget(self.filter_regex_cb)
         filter_options_layout.addWidget(self.filter_case_cb)
         filter_options_layout.addWidget(self.filter_negate_cb)
 
         self.lbl_filter_context = QLabel(self.t("lbl_filter_context"))
+        self.lbl_filter_context.setObjectName("lbl_filter_context")
         filter_options_layout.addWidget(self.lbl_filter_context)
 
         self.filter_context_spin = QSpinBox()
