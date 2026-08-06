@@ -645,6 +645,9 @@ class FormatDialog(QDialog):
         self.ui.btn_next.setText(self.t("btn_next_line"))
         self.ui.btn_next.clicked.connect(self._on_next_line)
 
+        # Tłumaczenie systemowego przycisku 'Close'
+        self.ui.buttons.button(QDialogButtonBox.Close).setText(self.t("btn_close"))
+
         self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
         font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
