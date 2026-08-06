@@ -37,6 +37,20 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="btn_prev">
+       <property name="text">
+        <string>Poprzednia</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_next">
+       <property name="text">
+        <string>Następna</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>

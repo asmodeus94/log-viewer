@@ -31,6 +31,7 @@ class TestI18N:
             "mi_next_tab", "mi_prev_tab", "mi_close_tab",
             "st_ready", "st_indexing", "st_done",
             "msg_no_file", "msg_about",
+            "btn_prev_line", "btn_next_line",
         ]
         for key in required:
             assert key in I18N["pl"], f"Missing PL key: {key}"
