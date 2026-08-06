@@ -555,7 +555,7 @@ class LogViewerWindow(QMainWindow):
         search_buttons_layout.addStretch()
         search_layout.addLayout(search_buttons_layout)
 
-        main_layout.addWidget(search_panel, 1)
+        main_layout.addWidget(search_panel)
 
         # Pionowy separator między panelem Search a Filter
         main_sep = QFrame(); main_sep.setFrameShape(QFrame.VLine); main_sep.setFrameShadow(QFrame.Sunken)
@@ -628,7 +628,8 @@ class LogViewerWindow(QMainWindow):
         filter_buttons_layout.addStretch()
         filter_layout.addLayout(filter_buttons_layout)
 
-        main_layout.addWidget(filter_panel, 1)
+        main_layout.addWidget(filter_panel)
+        main_layout.addStretch()
 
         self.main_toolbar.addWidget(container)
 
