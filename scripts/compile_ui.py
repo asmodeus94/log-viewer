@@ -34,9 +34,13 @@ def main():
         if needs_compile:
             print(f"Compiling {ui_file} -> {output_name}")
             try:
-                # We use pyside6-uic to generate python code
+                exec_dir = os.path.dirname(sys.executable)
+                uic_cmd = os.path.join(exec_dir, "pyside6-uic.exe" if os.name == "nt" else "pyside6-uic")
+                if not os.path.isfile(uic_cmd):
+                    uic_cmd = "pyside6-uic"
+
                 subprocess.run(
-                    ["pyside6-uic", input_path, "-o", output_path],
+                    [uic_cmd, input_path, "-o", output_path],
                     check=True
                 )
                 compiled_any = True

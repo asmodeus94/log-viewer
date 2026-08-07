@@ -148,3 +148,42 @@ def test_qthread_survives_tab_closure(temp_log_file):
     # Wątek mógł już zostać przerwany i zakończony przez Qt, co usunie go z _running_tasks
     # Zatem pomyślne zakończenie testu polega na tym, że aplikacja nie zgłosiła błędu Abort (Crash).
     # Proces w test-suite przechodzi dalej gładko.
+
+def test_tab_middle_click_closes_tab(temp_log_file):
+    """Weryfikuje, że kliknięcie środkowego przycisku myszy (kółka) na karcie zamyka tę kartę."""
+    from PySide6.QtCore import Qt, QPoint, QEvent
+    from PySide6.QtGui import QMouseEvent
+
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))
+    window = LogViewerWindow(config=cfg)
+
+    path = temp_log_file(num_lines=10)
+    with patch("log_viewer.log_tab.LogTab.open_file"):
+        tab1 = window.open_file_in_tab(path)
+        tab1.file_path = path
+
+    assert window.tabs.count() == 1
+
+    # Przycisk zamykania zakładki powinien być usunięty (None)
+    assert window.tabs.tabBar().tabButton(0, QtWidgets.QTabBar.ButtonPosition.RightSide) is None
+
+    # Symulacja kliknięcia środkowym przyciskiem myszy (kółkiem) na karcie 0
+    rect = window.tabs.tabBar().tabRect(0)
+    click_pos = rect.center()
+
+    from PySide6.QtCore import QPointF
+    mouse_event = QMouseEvent(
+        QEvent.MouseButtonRelease,
+        QPointF(click_pos),
+        Qt.MiddleButton,
+        Qt.MiddleButton,
+        Qt.NoModifier
+    )
+
+    # Wywołanie eventFilter na tabBar
+    window.eventFilter(window.tabs.tabBar(), mouse_event)
+
+    # Karta powinna zostać zamknięta
+    assert window.tabs.count() == 0
+

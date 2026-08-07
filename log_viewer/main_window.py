@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QSplitter, QTreeWidget, QTreeWidgetItem, QSlider,
     QDialog, QDialogButtonBox, QSpinBox, QComboBox, QFontComboBox,
     QSizePolicy, QToolBar, QFrame, QProgressDialog, QListView, QTabWidget,
+    QTabBar,
 )
 
 from .exceptions import FileChangedError, CompressedSaveError
@@ -94,6 +95,7 @@ class LogViewerWindow(QMainWindow):
         self.tabs = self.ui.tabs
         self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs.tabBar().installEventFilter(self)
 
         self._build_toolbar()
         self._rebuild_menubar()
@@ -105,6 +107,16 @@ class LogViewerWindow(QMainWindow):
 
         if initial_file:
             QTimer.singleShot(100, lambda: self.open_file_in_tab(initial_file))
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if watched == self.tabs.tabBar() and event.type() == QtCore.QEvent.MouseButtonRelease:
+            if isinstance(event, QtGui.QMouseEvent) and event.button() == Qt.MiddleButton:
+                pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                idx = self.tabs.tabBar().tabAt(pos)
+                if idx >= 0:
+                    self._on_tab_close_requested(idx)
+                    return True
+        return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------------ delegation
     def __getattr__(self, name: str):
@@ -400,14 +412,14 @@ class LogViewerWindow(QMainWindow):
             }}
             QTabBar::close-button {{
                 image: none;
-                subcontrol-position: right;
-                border: 1px solid {t["border"]};
-                border-radius: 2px;
-                padding: 2px;
-                margin: 2px;
+                width: 0px;
+                height: 0px;
+                padding: 0px;
+                margin: 0px;
+                border: none;
             }}
             QTabBar::close-button:hover {{
-                background-color: {t["accent"]};
+                background-color: transparent;
             }}
             QHeaderView::section {{
                 background-color: {t["bg_panel"]};
@@ -800,7 +812,9 @@ class LogViewerWindow(QMainWindow):
         # Połącz sygnały tab z oknem
         tab.status_changed.connect(self._on_tab_status_changed)
         tab.title_changed.connect(self._on_tab_title_changed_current)
-        self.tabs.addTab(tab, title or self.t("st_ready"))
+        idx = self.tabs.addTab(tab, title or self.t("st_ready"))
+        self.tabs.tabBar().setTabButton(idx, QTabBar.ButtonPosition.RightSide, None)
+        self.tabs.tabBar().setTabButton(idx, QTabBar.ButtonPosition.LeftSide, None)
         self.tabs.setCurrentWidget(tab)
         # Aplikuj motyw do nowej zakładki
         tab._apply_theme()
