@@ -85,6 +85,11 @@ class LogViewerWindow(QMainWindow):
         self._enc_action_group: Optional[QtGui.QActionGroup] = None
         self._is_restoring_toolbar: bool = False
 
+        self._dnd_queue: List[str] = []
+        self._dnd_progress_dialog: Optional[QProgressDialog] = None
+        self._dnd_current_tab: Optional[LogTab] = None
+        self._dnd_total_files = 0
+
         # Build UI
         self.tabs = self.ui.tabs
         self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
@@ -1152,22 +1157,104 @@ class LogViewerWindow(QMainWindow):
 
     @Slot(list)
     def _on_files_dropped(self, paths: List[str]) -> None:
-        """DnD otwiera każdy plik w nowej zakładce."""
+        """DnD otwiera każdy plik w nowej zakładce sekwencyjnie."""
         existing = [p for p in paths if os.path.isfile(p)]
         if not existing:
             QMessageBox.information(self, self.t("app_title"), self.t("msg_dnd_no_files"))
             return
-        if len(existing) == 1:
-            self.open_file_in_tab(existing[0])
-            self.statusBar().showMessage(self.t("msg_dnd_opened").format(path=existing[0]))
+
+        self._dnd_queue.extend(existing)
+        if self._dnd_progress_dialog is None:
+            self._dnd_total_files = len(self._dnd_queue)
+            self._process_next_dnd_file()
         else:
-            choice, ok = QInputDialog.getInt(
-                self, self.t("app_title"),
-                self.t("msg_dnd_multiple").format(n=len(existing)),
-                1, 1, len(existing), 1,
+            self._dnd_total_files += len(existing)
+
+    def _process_next_dnd_file(self) -> None:
+        if not self._dnd_queue:
+            self._cleanup_dnd_dialog()
+            return
+
+        path = self._dnd_queue.pop(0)
+        current_num = self._dnd_total_files - len(self._dnd_queue)
+
+        if self._dnd_progress_dialog is None:
+            self._dnd_progress_dialog = QProgressDialog(
+                self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}"),
+                self.t("btn_cancel"),
+                0, 100, self,
             )
-            if ok:
-                self.open_file_in_tab(existing[choice - 1])
+            self._dnd_progress_dialog.setWindowTitle(self.t("app_title"))
+            self._dnd_progress_dialog.setWindowModality(Qt.WindowModal)
+            self._dnd_progress_dialog.setAutoClose(False)
+            self._dnd_progress_dialog.setAutoReset(False)
+            self._dnd_progress_dialog.canceled.connect(self._cancel_dnd_queue)
+            self._dnd_progress_dialog.show()
+        else:
+            self._dnd_progress_dialog.setLabelText(self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}"))
+            self._dnd_progress_dialog.setValue(0)
+
+        self._dnd_current_tab = self.open_file_in_tab(path)
+        if self._dnd_current_tab:
+            # Upewniamy się, że nie wyświetli się wewnętrzny dialog ładowania pojedynczego pliku z tab_file_controller
+            # Zauważ że QProgressDialog jest inicjalizowany w _index_progress w LogTab
+            if getattr(self._dnd_current_tab, "_index_progress", None) is not None:
+                self._dnd_current_tab._index_progress.close()
+                self._dnd_current_tab._index_progress.deleteLater()
+                self._dnd_current_tab._index_progress = None
+
+            self._dnd_current_tab.file_loaded.connect(self._on_dnd_file_loaded, Qt.QueuedConnection)
+            self._dnd_current_tab.status_changed.connect(self._on_dnd_tab_status_changed, Qt.QueuedConnection)
+        else:
+            self._process_next_dnd_file()
+
+    @Slot(str)
+    def _on_dnd_tab_status_changed(self, msg: str) -> None:
+        if self._dnd_progress_dialog is not None:
+            # Msg to zwykle format typu: "Budowanie indeksu... X.X%"
+            # Próbujemy wyciągnąć %. Można to zrobić regexem.
+            import re
+            m = re.search(r"(\d+(\.\d+)?)%", msg)
+            if m:
+                val = float(m.group(1))
+                self._dnd_progress_dialog.setValue(int(val))
+
+    @Slot(bool)
+    def _on_dnd_file_loaded(self, success: bool) -> None:
+        if self._dnd_current_tab:
+            try:
+                self._dnd_current_tab.file_loaded.disconnect(self._on_dnd_file_loaded)
+                self._dnd_current_tab.status_changed.disconnect(self._on_dnd_tab_status_changed)
+            except (RuntimeError, TypeError):
+                pass
+            self._dnd_current_tab = None
+
+        if self._dnd_progress_dialog and self._dnd_progress_dialog.wasCanceled():
+            self._cleanup_dnd_dialog()
+            return
+
+        self._process_next_dnd_file()
+
+    def _cancel_dnd_queue(self) -> None:
+        self._dnd_queue.clear()
+        if self._dnd_current_tab:
+            self._dnd_current_tab._close_index_progress()
+        self._cleanup_dnd_dialog()
+
+    def _cleanup_dnd_dialog(self) -> None:
+        self._dnd_queue.clear()
+        if self._dnd_progress_dialog:
+            self._dnd_progress_dialog.blockSignals(True)
+            self._dnd_progress_dialog.close()
+            self._dnd_progress_dialog.deleteLater()
+            self._dnd_progress_dialog = None
+        if self._dnd_current_tab:
+            try:
+                self._dnd_current_tab.file_loaded.disconnect(self._on_dnd_file_loaded)
+                self._dnd_current_tab.status_changed.disconnect(self._on_dnd_tab_status_changed)
+            except (RuntimeError, TypeError):
+                pass
+            self._dnd_current_tab = None
 
     # ----------------------------------------------------------- misc ----
     def cmd_about(self) -> None:

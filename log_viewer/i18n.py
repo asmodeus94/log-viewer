@@ -120,6 +120,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_format_failed": "Błąd parsowania lub formatowania. Wyświetlam oryginalny tekst:",
         "msg_dnd_no_files": "Przeciągnięto plik(i), ale żaden nie istnieje lub nie jest odczytywalny.",
         "msg_dnd_opened": "Otwarto plik przez drag&drop: {path}",
+        "msg_dnd_loading": "Ładowanie plików {n}...",
+
         "msg_dnd_multiple": "Przeciągnięto {n:,} plików. Który otworzyć? (1-{n:,})",
         "col_line": "Linia",
         "lbl_bookmarks": "Zakładki",
@@ -254,6 +256,8 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_format_failed": "Failed to parse or format. Showing original text:",
         "msg_dnd_no_files": "Dropped file(s), but none exist or are readable.",
         "msg_dnd_opened": "Opened file via drag&drop: {path}",
+        "msg_dnd_loading": "Loading files {n}...",
+
         "msg_dnd_multiple": "Dropped {n:,} files. Which one to open? (1-{n:,})",
         "col_line": "Line",
         "lbl_bookmarks": "Bookmarks",

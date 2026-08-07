@@ -48,6 +48,7 @@ class LogTab(QWidget):
 
     status_changed = Signal(str)
     title_changed = Signal(str)
+    file_loaded = Signal(bool)  # emitowane po załadowaniu pliku z sukcesem (True) lub błędem (False)
 
 
     # UI elements type hints (from compiled UI)
@@ -271,11 +272,13 @@ class LogTab(QWidget):
 
     @Slot(object)
     def _on_index_error(self, err: str) -> None:
-        return self.file_controller._on_index_error(err)
+        self.file_controller._on_index_error(err)
+        self.file_loaded.emit(False)
 
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
-        return self.file_controller._on_index_done(idx)
+        self.file_controller._on_index_done(idx)
+        self.file_loaded.emit(True)
 
     # -------------------------------------------------- virtual window -----
     def _load_window(self, at_line: int, force_reload: bool = False) -> None:
