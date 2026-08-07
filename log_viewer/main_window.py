@@ -298,6 +298,9 @@ class LogViewerWindow(QMainWindow):
             QLabel#lbl_filter_context {{
                 color: {t["fg_main"]};
             }}
+            QLabel#lbl_filter_context:disabled {{
+                color: #555555;
+            }}
             QLineEdit {{
                 background-color: {t["bg_input"]};
                 color: {t["fg_main"]};
@@ -951,6 +954,7 @@ class LogViewerWindow(QMainWindow):
             getattr(self, "filter_regex_cb", None),
             getattr(self, "filter_case_cb", None),
             getattr(self, "filter_negate_cb", None),
+            getattr(self, "lbl_filter_context", None),
             getattr(self, "filter_context_spin", None),
             getattr(self, "btn_apply_filter", None),
             getattr(self, "btn_clear_filter", None),
