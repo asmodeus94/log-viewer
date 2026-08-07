@@ -169,12 +169,16 @@ class LogViewerWindow(QMainWindow):
             self.search_case_cb.setText(self.t("cb_case"))
         if hasattr(self, "search_negate_cb"):
             self.search_negate_cb.setText(self.t("cb_negate"))
+        if hasattr(self, "search_in_filter_cb"):
+            self.search_in_filter_cb.setText(self.t("cb_search_in_filter"))
         if hasattr(self, "filter_regex_cb"):
             self.filter_regex_cb.setText(self.t("cb_regex"))
         if hasattr(self, "filter_case_cb"):
             self.filter_case_cb.setText(self.t("cb_case"))
         if hasattr(self, "filter_negate_cb"):
             self.filter_negate_cb.setText(self.t("cb_negate"))
+        if hasattr(self, "filter_context_spin"):
+            self.filter_context_spin.setToolTip(self.t("tt_filter_context"))
 
         # Zaktualizuj każdy tab (labelki paneli bocznych, etc.)
         for i in range(self.tabs.count()):
@@ -685,13 +689,13 @@ class LogViewerWindow(QMainWindow):
         self._lang_action_group = QtGui.QActionGroup(self)
         self._lang_action_group.setExclusive(True)
 
-        act_pl = self._mkaction(self.t("mi_lang_pl"), "", lambda: self.set_language("pl"))
+        act_pl = self._mkaction(self.t("mi_lang_pl"), "", lambda checked=False: self.set_language("pl"))
         act_pl.setCheckable(True)
         act_pl.setChecked(self.lang == "pl")
         self._lang_action_group.addAction(act_pl)
         lang_menu.addAction(act_pl)
 
-        act_en = self._mkaction(self.t("mi_lang_en"), "", lambda: self.set_language("en"))
+        act_en = self._mkaction(self.t("mi_lang_en"), "", lambda checked=False: self.set_language("en"))
         act_en.setCheckable(True)
         act_en.setChecked(self.lang == "en")
         self._lang_action_group.addAction(act_en)
