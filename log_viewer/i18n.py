@@ -193,7 +193,7 @@ I18N: Dict[str, Dict[str, str]] = {
         "cb_regex": "Regex",
         "cb_case": "Case-sensitive",
         "cb_negate": "Negate",
-        "cb_search_in_filter": "Search in filter",
+        "cb_search_in_filter": "Search in filtered",
         "btn_find_next": "Next",
         "btn_find_prev": "Prev",
         "btn_clear_search": "Clear",
