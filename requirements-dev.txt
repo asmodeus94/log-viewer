@@ -5,3 +5,4 @@ Pillow>=10.0.0
 
 # Testy
 pytest>=7.0.0
+pytest-qt>=4.2.0
