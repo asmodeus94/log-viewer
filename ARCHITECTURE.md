@@ -51,6 +51,7 @@ Katalog obiektów wspierających asynchroniczność w Qt przy użyciu technologi
 Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejścia/Wyjścia (I/O) z głównego pętli UI:
 * `IndexerWorker` – emituje zdarzenia w miarę postępu tworzenia mapowania offsetów indeksu z `LineIndexer`.
 * `FilterWorker` – spina działania `FilterEngine` wywołując asynchroniczne postępy wyszukiwania oraz agreguje finalny obiekt `Bitset` dla modelu.
+* `IncrementalFilterWorker` – wyspecjalizowany wątek powiązany z trybem "Follow/Tail Mode", skanujący na bieżąco (inkrementalnie) i zwracający trafienia z nowododanych części logu.
 * `SaveWorker` – obsługuje tło zapisu zawartości po wniesieniu edycji na poszczególnych linijkach.
 * `SaveAsWorker` – obsługuje zapis zmodyfikowanej zawartości do nowego pliku asynchronicznie.
 * `ExportWorker` – obsługuje eksport wyników filtrowania i zaznaczeń do osobnego pliku.

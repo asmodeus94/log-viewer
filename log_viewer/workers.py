@@ -312,9 +312,9 @@ class ExportWorker(QObject):
 
 class IncrementalFilterWorker(QObject):
     """Worker wykonujący szybkie, inkrementalne wyszukiwanie w locie (dla nowych danych w Follow)."""
-    finished = Signal(object)  # zwraca: array.array('Q') (trafienia) lub pusta array.array w przypadku braku.
+    finished = Signal(object, object)  # zwraca: Bitset (trafienia) i Bitset (kontekst)
 
-    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str):
+    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str, context_after: int = 0):
         super().__init__()
         self._indexer = indexer
         self._start_line = start_line
@@ -324,11 +324,12 @@ class IncrementalFilterWorker(QObject):
         self._case_sensitive = case_sensitive
         self._negate = negate
         self._encoding = encoding
+        self._context_after = context_after
 
     @Slot()
     def run(self):
         import array
-        results = array.array('Q')
+        results_array = array.array('Q')
         try:
             from .filter_engine import RegexStrategy, PlainTextStrategy
             if self._use_regex:
@@ -340,7 +341,15 @@ class IncrementalFilterWorker(QObject):
             for (line_no, text) in lines:
                 text_bytes = text.encode(self._encoding, errors='replace')
                 if strategy.match(text_bytes):
-                    results.append(line_no)
+                    results_array.append(line_no)
         except Exception:
             pass
-        self.finished.emit(results)
+
+        from .bitset import Bitset
+        results_bitset = Bitset(self._end_line)
+        if len(results_array) > 0:
+            results_bitset.update_indices(results_array)
+            
+        filter_all_lines_bitset = results_bitset.expand_context(self._context_after)
+        
+        self.finished.emit(list(results_bitset[:]), list(filter_all_lines_bitset[:]))
