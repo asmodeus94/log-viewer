@@ -95,7 +95,13 @@ class FilterController(QObject):
         self.tab._filter_hit_text_map = hit_text_map
         self.tab._filter_hit_lines = hit_lines_set
 
-        self.tab._load_window(at_line=0, force_reload=True)
+        self.tab._ignore_scroll_events = True
+        try:
+            self.tab._load_window(at_line=0, force_reload=True)
+            self.tab.text.verticalScrollBar().setValue(0)
+        finally:
+            self.tab._ignore_scroll_events = False
+            
         self.tab._status(self.tab._fmt("st_filtered", hits=len(results), total=self.tab.indexer.line_count))
 
     def _update_filter_cache(self) -> None:

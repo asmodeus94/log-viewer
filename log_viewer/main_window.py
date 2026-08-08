@@ -604,7 +604,7 @@ class LogViewerWindow(QMainWindow):
         filter_options_layout.addWidget(self.lbl_filter_context)
 
         self.filter_context_spin = QSpinBox()
-        self.filter_context_spin.setRange(0, 50)
+        self.filter_context_spin.setRange(0, 100)
         self.filter_context_spin.setValue(0)
         self.filter_context_spin.setFixedWidth(56)
         self.filter_context_spin.setToolTip(self.t("tt_filter_context"))

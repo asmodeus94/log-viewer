@@ -66,7 +66,7 @@ def test_incremental_follow_with_filter_edge_cases():
             time.sleep(0.01)
             
         # Po przetworzeniu eventow, powinny sie pojawic zaaktualizowane wyniki bitset
-        assert len(tab.filter_results) > 0, "Wyniki filtra z IncrementalWorker nie zostaly prawidlowo polaczone"
+        assert len(tab.filter_results) > 0, "IncrementalWorker filter results were not correctly merged"
         
         # Sprawdzamy czy timer przewijania podbil suwak (QTimer.singleShot w GUI loopie)
         # Nastepnie odpalamy 100 krokow by timer wygasl
@@ -74,7 +74,7 @@ def test_incremental_follow_with_filter_edge_cases():
             QCoreApplication.processEvents()
             
         max_val = tab.text.verticalScrollBar().maximum()
-        assert tab.text.verticalScrollBar().value() == max_val, "Suwak po uplywie Timera nie wyladowal na dole okna!"
+        assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
         
         # Drugi natlok (test na thread leak i wczesniejsze zakonczenie optymalizatora)
         with open(tf.name, "ab") as f:
