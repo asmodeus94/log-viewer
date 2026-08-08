@@ -585,7 +585,8 @@ class LogTab(QWidget):
             self._status(self.t("st_ready"))
             return
         if self.filter_active:
-            left = self._fmt("st_filtered", hits=len(self.filter_results), total=self.indexer.line_count)
+            hits = len(self.filter_results) if getattr(self, "filter_results", None) is not None else 0
+            left = self._fmt("st_filtered", hits=hits, total=self.indexer.line_count)
         else:
             left = self._fmt("st_done", total=self.indexer.line_count, size=fmt_size(self.indexer.size))
         if len(self.edit_buffer) > 0:

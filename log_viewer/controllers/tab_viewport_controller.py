@@ -456,8 +456,8 @@ class ViewportController(QObject):
             widget_line = cursor.blockNumber()
             if 0 <= widget_line < len(self.tab.line_map):
                 file_line = self.tab.line_map[widget_line]
-                if self.tab.filter_active and self.tab._filter_all_lines:
-                    total = max(1, len(self.tab._filter_all_lines))
+                if getattr(self.tab, "filter_active", False) and getattr(self.tab, "filter_results", None) is not None:
+                    total = max(1, len(self.tab._filter_all_lines)) if getattr(self.tab, "_filter_all_lines", None) is not None else 1
                     idx = bisect_left_custom(self.tab._filter_all_lines, file_line)
                     pct = int((idx / total) * 1000)
                 else:
@@ -473,8 +473,8 @@ class ViewportController(QObject):
         if not self.tab.indexer or self.tab.indexer.line_count == 0:
             self.tab.pct_label.setText("0%")
             return
-        if self.tab.filter_active:
-            total = max(1, len(self.tab._filter_all_lines))
+        if getattr(self.tab, "filter_active", False):
+            total = max(1, len(self.tab._filter_all_lines)) if getattr(self.tab, "_filter_all_lines", None) is not None else 1
         else:
             total = max(1, self.tab.indexer.line_count)
 

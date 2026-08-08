@@ -316,10 +316,26 @@ class FileController(QObject):
     def _on_follow_new_lines(self, new_line_count: int = 0, mtime_str: str = "", ctime_str: str = "") -> None:
         if not self.tab.indexer or self.tab.indexer.line_count == 0:
             return
-        if new_line_count > 0 or not self.tab.line_map:
-            if self.tab.filter_active and self.tab.filter_results:
-                self._start_incremental_filter(new_line_count, mtime_str, ctime_str)
+            
+        pending = getattr(self.tab, "_inc_pending_lines", 0) + new_line_count
+        self.tab._inc_pending_lines = pending
+        
+        if pending > 0 or not self.tab.line_map:
+            if self.tab.filter_active and getattr(self.tab, "filter_results", None) is not None:
+                is_running = False
+                if hasattr(self.tab, "_inc_filter_thread"):
+                    try:
+                        is_running = self.tab._inc_filter_thread.isRunning()
+                    except RuntimeError:
+                        is_running = False
+                        
+                if is_running:
+                    return
+                self.tab._inc_pending_lines = 0
+                self._start_incremental_filter(pending, mtime_str, ctime_str)
                 return
+                
+            self.tab._inc_pending_lines = 0
             self._apply_follow_new_lines(mtime_str, ctime_str)
         else:
             self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
@@ -329,47 +345,85 @@ class FileController(QObject):
         new_total_lines = self.tab.indexer.line_count
         start_line = max(0, new_total_lines - new_line_count)
         
+        self.tab._inc_new_total_lines = new_total_lines
+        self.tab._inc_mtime_str = mtime_str
+        self.tab._inc_ctime_str = ctime_str
+        
         pattern = self.tab._main.filter_entry.text().strip()
         use_regex = self.tab._main.filter_regex_cb.isChecked()
         case_sens = self.tab._main.filter_case_cb.isChecked()
         negate = self.tab._main.filter_negate_cb.isChecked()
+        context_after = self.tab._main.filter_context_spin.value()
         
         self.tab._inc_filter_thread = QThread()
         self.tab._inc_filter_worker = IncrementalFilterWorker(
             self.tab.indexer,
             start_line, new_total_lines,
-            pattern, use_regex, case_sens, negate, self.tab.encoding
+            pattern, use_regex, case_sens, negate, self.tab.encoding, context_after
         )
         self.tab._inc_filter_worker.moveToThread(self.tab._inc_filter_thread)
         self.tab._inc_filter_thread.started.connect(self.tab._inc_filter_worker.run)
         
-        def on_inc_finished(results):
-            if results:
-                self.tab.filter_results.resize(new_total_lines)
-                self.tab.filter_results.update_indices(results)
-                
-                self.tab._filter_all_lines.resize(new_total_lines)
-                self.tab._filter_all_lines.update_indices(results)
-                
-            self._apply_follow_new_lines(mtime_str, ctime_str)
-            self.tab._inc_filter_thread.quit()
-            
-        self.tab._inc_filter_worker.finished.connect(on_inc_finished, Qt.QueuedConnection)
+        self.tab._inc_filter_worker.finished.connect(self._on_inc_finished_slot, Qt.QueuedConnection)
+        self.tab._inc_filter_worker.finished.connect(self.tab._inc_filter_thread.quit, Qt.QueuedConnection)
         self.tab._inc_filter_worker.finished.connect(self.tab._inc_filter_worker.deleteLater, Qt.QueuedConnection)
         self.tab._inc_filter_thread.finished.connect(self.tab._inc_filter_thread.deleteLater, Qt.QueuedConnection)
         
         self.tab._register_thread_worker(self.tab._inc_filter_thread, self.tab._inc_filter_worker)
         self.tab._inc_filter_thread.start()
 
-    def _apply_follow_new_lines(self, mtime_str: str, ctime_str: str) -> None:
-        last_start = max(0, self.tab.indexer.line_count - self.tab.window_size_lines)
-        self.tab.text.verticalScrollBar().blockSignals(True)
+    @Slot(object, object)
+    def _on_inc_finished_slot(self, results_list, filter_all_list) -> None:
+        new_total_lines = getattr(self.tab, "_inc_new_total_lines", 0)
+        mtime_str = getattr(self.tab, "_inc_mtime_str", "")
+        ctime_str = getattr(self.tab, "_inc_ctime_str", "")
+        if new_total_lines > 0:
+            has_new = False
+            if len(results_list) > 0 or len(filter_all_list) > 0:
+                from log_viewer.bitset import Bitset
+                
+                # Zabezpieczenie przed rzutowaniem przez nadrzędny kontroler na NoneType / Array przy nakładaniu okien asynchronicznych
+                if getattr(self.tab, "filter_results", None) is None or not hasattr(self.tab.filter_results, "resize"):
+                    self.tab.filter_results = Bitset(new_total_lines)
+                if getattr(self.tab, "_filter_all_lines", None) is None or not hasattr(self.tab._filter_all_lines, "resize"):
+                    self.tab._filter_all_lines = Bitset(new_total_lines)
+                    
+                self.tab.filter_results.resize(new_total_lines)
+                self.tab.filter_results.update_indices(results_list)
+                self.tab._filter_all_lines.resize(new_total_lines)
+                self.tab._filter_all_lines.update_indices(filter_all_list)
+                has_new = True
+                
+            self._apply_follow_new_lines(mtime_str, ctime_str, force_reload=has_new)
+
+    def _apply_follow_new_lines(self, mtime_str: str, ctime_str: str, force_reload: bool = False) -> None:
+        if self.tab.filter_active and getattr(self.tab, "filter_results", None) is not None:
+            last_start = max(0, len(self.tab._filter_all_lines) - self.tab.window_size_lines)
+        else:
+            last_start = max(0, self.tab.indexer.line_count - self.tab.window_size_lines)
+            force_reload = True
+            
+        self.tab._ignore_scroll_events = True
         try:
-            self.tab._load_window(at_line=last_start)
-            self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+            self.tab._load_window(at_line=last_start, force_reload=force_reload)
         finally:
-            self.tab.text.verticalScrollBar().blockSignals(False)
-        self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+            self.tab._ignore_scroll_events = False
+            
+        def _scroll_down():
+            if getattr(self.tab, "_ignore_scroll_events", False) is False:
+                self.tab._ignore_scroll_events = True
+                self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+                self.tab._ignore_scroll_events = False
+                
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, _scroll_down)
+            
+        if self.tab.filter_active and getattr(self.tab, "filter_results", None) is not None:
+            status_filter = self.tab._fmt("st_filtered", hits=len(self.tab.filter_results), total=self.tab.indexer.line_count)
+            status_follow = self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str)
+            self.tab._status(f"{status_filter} | {status_follow}")
+        else:
+            self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(object, int, int)
     def _on_follow_reindex(self, idx: LineIndexer, new_size: int, new_inode: int) -> None:
