@@ -8,6 +8,7 @@
 ## Główne możliwości:
 * **Asynchroniczne ładowanie** plików wielkości wielu GB przy minimalnym zużyciu zasobów,
 * **Zaawansowane filtrowanie** po konkretnych wzorcach lub wyrażeniach regularnych wraz z możliwością ustawienia tzw. linii kontekstu po każdym wystąpieniu. Wyszukiwanie milionów rekordów jest zoptymalizowane do poziomu sprzętowego dysku, używając skompresowanej struktury **Bitset**.
+* **Śledzenie plików na żywo (Tail / Follow Mode)** wyposażone w zaawansowany silnik *Incremental Filter*. Aplikacja w locie podłapuje i dopasowuje asynchronicznie przefiltrowane reguły dla napływających MB logów bez lagowania interfejsu.
 * **Mini-mapa** służąca do błyskawicznej nawigacji i podglądu pozycji w pliku.
 * Możliwość robienia **zakładek** (bookmarks) i nanoszenia i zapisywania **edycji** w pliku.
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
