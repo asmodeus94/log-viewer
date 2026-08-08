@@ -558,6 +558,16 @@ class FilterEngine:
 
         from log_viewer.bitset import Bitset
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
+        
+        max_needed_words = 0
+        for _chunk_id, (base_word, words) in chunk_results.items():
+            needed = base_word + len(words)
+            if needed > max_needed_words:
+                max_needed_words = needed
+                
+        if max_needed_words > merged_bitset._num_words:
+            merged_bitset.resize(max_needed_words * 64)
+            
         global_words = merged_bitset._words
         
         for _chunk_id, (base_word, words) in sorted(chunk_results.items(), key=lambda x: x[0]):
@@ -637,6 +647,9 @@ class FilterEngine:
                     for idx in chunk_hits:
                         words[idx // 64 - base_word] |= (1 << (idx % 64))
                     
+                    if (end_word + 1) > merged_bitset._num_words:
+                        merged_bitset.resize((end_word + 1) * 64)
+                        
                     global_words = merged_bitset._words
                     if len(words) == 1:
                         global_words[base_word] |= words[0]
