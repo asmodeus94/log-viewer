@@ -1,7 +1,7 @@
 import bisect
 import itertools
 import array
-import bisect
+import operator
 from typing import Sequence, Iterator, Union, overload
 
 class Bitset(Sequence[int]):
@@ -223,8 +223,9 @@ class Bitset(Sequence[int]):
         w1 = self._words
         w2 = other._words
 
-        for i in range(num_words):
-            new_words[i] = w1[i] & w2[i]
+        # Używamy zoptymalizowanej metody C (map + operator) i oszczędzamy pamięć (RAM) 
+        # bez tworzenia fizycznych kopii bufora list stosując islice (zamiast tab[:num]).
+        new_words[:num_words] = array.array('Q', map(operator.and_, itertools.islice(w1, num_words), itertools.islice(w2, num_words)))
 
         if min_size > 0:
             last_valid_bit = (min_size - 1) % 64
