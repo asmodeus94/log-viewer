@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Signal, Slot, QTimer, QThread, QPoint
 from PySide6.QtGui import (
-    QColor,
+    QColor, QAction
 )
 from PySide6.QtWidgets import (
     QApplication, QWidget, QMessageBox, QInputDialog,
@@ -180,6 +180,13 @@ class LogTab(QWidget):
         self._edge_timer.setInterval(300)
         self._edge_timer.timeout.connect(self._check_edges)
         self._edge_timer.start()
+
+        # Konfiguracja niestandardowych opcji menu kontekstowego
+        action_refresh = QAction(self.t("btn_refresh"), self)
+        action_refresh.triggered.connect(self.cmd_refresh)
+        action_reload = QAction(self.t("btn_reload"), self)
+        action_reload.triggered.connect(self.cmd_reload)
+        self.ui.text.custom_context_actions.extend([action_refresh, action_reload])
 
     # ------------------------------------------------------------------ helpers
     def t(self, key: str) -> str:

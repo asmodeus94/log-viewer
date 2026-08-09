@@ -1,3 +1,5 @@
+import bisect
+import itertools
 import array
 import bisect
 from typing import Sequence, Iterator, Union, overload
@@ -32,7 +34,6 @@ class Bitset(Sequence[int]):
         if self._counts is not None:
             return
             
-        import itertools
         counts = array.array('Q', itertools.accumulate(map(int.bit_count, self._words), initial=0))
         self._total_count = counts.pop()
         self._counts = counts
@@ -258,11 +259,9 @@ class Bitset(Sequence[int]):
 def bisect_left_custom(a, x):
     if hasattr(a, 'bisect_left'):
         return a.bisect_left(x)
-    import bisect
     return bisect.bisect_left(a, x)
 
 def bisect_right_custom(a, x):
     if hasattr(a, 'bisect_right'):
         return a.bisect_right(x)
-    import bisect
     return bisect.bisect_right(a, x)

@@ -1,6 +1,9 @@
 """Widgety PySide6 — LineNumberArea, LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap."""
-
 from __future__ import annotations
+
+from .formatters import format_log
+from .helpers import THEME_DARK
+import bisect
 
 from typing import List, Optional, Tuple, Set
 
@@ -112,6 +115,7 @@ class LogPlainTextEdit(QPlainTextEdit):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.custom_context_actions = []
         self._line_number_area = LineNumberArea(self)
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
@@ -291,6 +295,11 @@ class LogPlainTextEdit(QPlainTextEdit):
         menu.addAction(self._action_format_sel)
         menu.addAction(self._action_format_line)
 
+        if self.custom_context_actions:
+            menu.addSeparator()
+            for action in self.custom_context_actions:
+                menu.addAction(action)
+
         menu.exec(event.globalPos())
 
 
@@ -358,7 +367,6 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = 0
         self._batch_size = 1000
 
-        from .helpers import THEME_DARK
         self._color_error = QColor(THEME_DARK["error"])
         self._color_warn = QColor(THEME_DARK["warn"])
         self._color_info = QColor(THEME_DARK["info"])
@@ -485,7 +493,6 @@ class SearchResultsModel(QAbstractListModel):
                 return idx
             return -1
 
-        import bisect
         keys = [r[0] if isinstance(r, tuple) else r for r in self._all_results]
         idx = bisect.bisect_left(keys, line_no)
         if idx < len(self._all_results) and keys[idx] == line_no:
@@ -670,7 +677,6 @@ class FormatDialog(QDialog):
 
     def _apply_format(self, formatter_name: str) -> None:
         """Aplikuje wybrany formatter. Jeśli się nie uda, pokazuje oryginalny tekst."""
-        from .formatters import format_log
         formatted = format_log(self.original_text, formatter_name)
         if formatted:
             self.text_edit.setPlainText(formatted)

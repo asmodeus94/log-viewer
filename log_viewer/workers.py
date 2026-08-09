@@ -1,6 +1,12 @@
 """QThread workers — asynchroniczne indeksowanie, filtrowanie, zapis."""
-
 from __future__ import annotations
+
+from .bitset import Bitset
+from .exceptions import FileChangedError, CompressedSaveError
+from .filter_engine import RegexStrategy, PlainTextStrategy
+from .helpers import open_maybe_compressed
+import array
+import os
 
 import threading
 import time
@@ -89,7 +95,6 @@ class FilterWorker(QObject):
             self.progress.emit(pct, hits, state, partial_results)
 
         def on_done(results, error):
-            from .bitset import Bitset
             if error or not results or len(results) == 0:
                 self.finished.emit(Bitset(0), set(), Bitset(0), {}, set(), error)
                 return
@@ -142,7 +147,6 @@ class SaveWorker(QObject):
             )
             self.finished.emit(backup_path)
         except BaseException as e:
-            from .exceptions import FileChangedError, CompressedSaveError
             if isinstance(e, FileChangedError):
                 self.file_changed.emit(str(e))
             elif isinstance(e, CompressedSaveError):
@@ -172,8 +176,6 @@ class SaveAsWorker(QObject):
     @Slot()
     def run(self):
         try:
-            import os
-            from .helpers import open_maybe_compressed
             
             edits = self._edit_buffer._edits
             cancel_set = self._cancel_event.is_set
@@ -235,8 +237,6 @@ class ExportWorker(QObject):
     @Slot()
     def run(self):
         try:
-            import os
-            from .helpers import open_maybe_compressed
             count = 0
             
             cancel_set = self._cancel_event.is_set
@@ -328,10 +328,8 @@ class IncrementalFilterWorker(QObject):
 
     @Slot()
     def run(self):
-        import array
         results_array = array.array('Q')
         try:
-            from .filter_engine import RegexStrategy, PlainTextStrategy
             if self._use_regex:
                 strategy = RegexStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
             else:
@@ -345,7 +343,6 @@ class IncrementalFilterWorker(QObject):
         except Exception:
             pass
 
-        from .bitset import Bitset
         results_bitset = Bitset(self._end_line)
         if len(results_array) > 0:
             results_bitset.update_indices(results_array)

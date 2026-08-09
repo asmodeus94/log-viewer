@@ -13,13 +13,7 @@ class FileController(QObject):
         super().__init__(tab)
         self.tab = tab
 
-    def open_file(self, path: str, title: Optional[str] = None, preserve_state: bool = False) -> None:
-        if not os.path.isfile(path):
-            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
-            return
-
-        # Bezpieczeństwo wątkowe: jeśli to np. Reload (lub Open po Open), zatrzymaj poprzednie instancje, 
-        # by nie stworzyć zombiaków pożerających dysk i wywołujących segfault.
+    def _stop_background_threads(self) -> None:
         if getattr(self.tab, '_indexer_worker', None) is not None:
             try:
                 self.tab._indexer_worker.cancel()
@@ -35,6 +29,23 @@ class FileController(QObject):
                 except RuntimeError:
                     pass
                 setattr(self.tab, thread_name, None)
+        
+        if getattr(self.tab, "indexer", None) is not None:
+            try:
+                self.tab.indexer.close()
+            except Exception:
+                pass
+            self.tab.indexer = None
+
+    def open_file(self, path: str, title: Optional[str] = None, preserve_state: bool = False) -> None:
+        """Rozpoczyna asynchroniczne otwarcie i indeksowanie pliku."""
+        if not os.path.isfile(path):
+            QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+            return
+
+        # Bezpieczeństwo wątkowe: jeśli to np. Reload (lub Open po Open), zatrzymaj poprzednie instancje, 
+        # by nie stworzyć zombiaków pożerających dysk i wywołujących segfault.
+        self._stop_background_threads()
 
         if not preserve_state:
             self.tab.cmd_clear_filter(silent=True)
@@ -351,6 +362,7 @@ class FileController(QObject):
         QTimer.singleShot(next_poll, self.tab._follow_poll)
 
     def _start_follow_reindex(self, current_size: int, current_inode: int) -> None:
+        self._stop_background_threads()
         self.tab._follow_reindex_size = current_size
         self.tab._follow_reindex_inode = current_inode
         self.tab._indexer_thread = QThread()

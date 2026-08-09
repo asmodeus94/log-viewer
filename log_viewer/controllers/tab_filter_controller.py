@@ -1,3 +1,4 @@
+import array
 from PySide6.QtCore import QObject, Qt, Slot, QThread
 from PySide6.QtWidgets import QMessageBox
 import array
@@ -46,7 +47,6 @@ class FilterController(QObject):
         if self.tab.filter_engine is None or self.tab.filter_engine.path != self.tab.file_path:
             self.tab.filter_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
         self.tab.filter_active = True
-        import array
         self.tab.filter_results = array.array('Q')
 
         self.tab._filter_thread = QThread()
@@ -108,7 +108,6 @@ class FilterController(QObject):
         if not self.tab.filter_active or not self.tab.filter_results:
             self.tab._filter_hit_text_map.clear()
             self.tab._filter_hit_lines.clear()
-            import array
             self.tab._filter_all_lines = array.array('Q')
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
@@ -120,7 +119,6 @@ class FilterController(QObject):
         self.tab.filter_context_lines = set()
         self.tab._filter_hit_text_map.clear()
         self.tab._filter_hit_lines.clear()
-        import array
         self.tab._filter_all_lines = array.array('Q')
         self.tab._filter_context_after = 0
         if not silent:

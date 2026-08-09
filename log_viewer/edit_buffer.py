@@ -1,6 +1,7 @@
 """EditBuffer — bufor edycji (line_no -> new_text) + zapis przez temp-file."""
-
 from __future__ import annotations
+
+import sys
 
 import os
 import shutil
@@ -132,12 +133,10 @@ class EditBuffer:
             try:
                 shutil.copystat(src_path, backup_path)
             except OSError as e:
-                import sys
                 print(f"Warning: could not copy metadata to backup ({e})", file=sys.stderr)
             try:
                 shutil.copystat(src_path, tmp_path)
             except OSError as e:
-                import sys
                 print(f"Warning: could not copy metadata to output ({e})", file=sys.stderr)
 
             # Atomic replace

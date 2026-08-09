@@ -1,6 +1,7 @@
 """Konfiguracja użytkownika w ~/.log-viewer.json."""
-
 from __future__ import annotations
+
+import sys
 
 import os
 import json
@@ -61,10 +62,8 @@ class UserConfig:
             if isinstance(e, FileNotFoundError):
                 pass
             else:
-                import sys
                 print(f"Warning: could not load config from {self.path}: {e}", file=sys.stderr)
         except Exception as e:
-            import sys
             print(f"Warning: unexpected error loading config: {e}", file=sys.stderr)
 
     def save(self) -> None:
@@ -77,7 +76,6 @@ class UserConfig:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)
             os.replace(tmp_path, self.path)
         except Exception as e:
-            import sys
             print(f"Warning: could not save config to {self.path}: {e}", file=sys.stderr)
 
     def get(self, key: str, default: Any = None) -> Any:

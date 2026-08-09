@@ -1,6 +1,9 @@
 """app.py — LogTab (per-file widget) + LogViewerWindow (tabbed controller)."""
-
 from __future__ import annotations
+
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QPalette
+import re
 
 import os
 import re
@@ -222,7 +225,6 @@ class LogViewerWindow(QMainWindow):
     def _detect_system_theme(self) -> dict:
         """Wykrywa motyw systemowy (dark/light) i zwraca odpowiedni THEME."""
         try:
-            from PySide6.QtGui import QGuiApplication
             hints = QGuiApplication.styleHints()
             scheme = hints.colorScheme()
             if scheme == Qt.ColorScheme.Dark:
@@ -232,7 +234,6 @@ class LogViewerWindow(QMainWindow):
         except Exception:
             pass
         try:
-            from PySide6.QtGui import QPalette
             pal = QtWidgets.QApplication.palette()
             bg = pal.color(QPalette.Window)
             text_color = pal.color(QPalette.WindowText)
@@ -1241,7 +1242,6 @@ class LogViewerWindow(QMainWindow):
         if self._dnd_progress_dialog is not None:
             # Msg to zwykle format typu: "Budowanie indeksu... X.X%"
             # Próbujemy wyciągnąć %. Można to zrobić regexem.
-            import re
             m = re.search(r"(\d+(\.\d+)?)%", msg)
             if m:
                 val = float(m.group(1))
