@@ -28,8 +28,9 @@ class TestI18N:
             "app_title", "menu_file", "menu_edit", "menu_view", "menu_goto",
             "mi_open", "mi_save", "mi_exit", "mi_find", "mi_filter",
             "mi_goto", "mi_goto_start", "mi_goto_end", "mi_follow", "mi_about", "mi_settings",
-            "mi_next_tab", "mi_prev_tab", "mi_close_tab",
-            "st_ready", "st_indexing", "st_done",
+            "mi_next_tab", "mi_prev_tab", "mi_close_tab", "mi_refresh", "mi_reload",
+            "st_ready", "st_indexing", "st_done", "st_refreshing",
+            "btn_refresh", "btn_reload",
             "msg_no_file", "msg_about",
             "btn_prev_line", "btn_next_line",
         ]

@@ -82,6 +82,8 @@ class ViewportController(QObject):
         return lines
 
     def _load_window_impl(self, at_line: int) -> None:
+        if getattr(self.tab, "indexer", None) is None or getattr(self.tab, "edit_buffer", None) is None:
+            return
         if self.tab.filter_active and self.tab.filter_results:
             all_lines = self.tab._filter_all_lines
             n = len(all_lines)
@@ -233,7 +235,9 @@ class ViewportController(QObject):
             i += 1
 
     def _prepare_line_for_display(self, file_line_no: int, original_text: str) -> Tuple[str, List[str]]:
-        is_edited = self.tab.edit_buffer.has(file_line_no)
+        is_edited = False
+        if getattr(self.tab, "edit_buffer", None) is not None:
+            is_edited = self.tab.edit_buffer.has(file_line_no)
         text = self.tab.edit_buffer.get(file_line_no) if is_edited else original_text
         display_text, was_truncated = truncate_for_display(text, max_length=self.tab.max_display_line_length)
         tags: List[str] = []

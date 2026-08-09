@@ -1,3 +1,5 @@
+from log_viewer.bitset import Bitset
+import time
 from PySide6.QtCore import QObject, Qt, Slot, QThread, QTimer
 from PySide6.QtWidgets import QMessageBox
 import re
@@ -88,7 +90,6 @@ class SearchController(QObject):
             self.tab._search_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
 
         self.tab._search_results = []
-        from log_viewer.bitset import Bitset
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab._search_results_all = Bitset(total)
         self.tab._search_result_index = -1
@@ -146,7 +147,6 @@ class SearchController(QObject):
             else:
                 self.tab._search_results_all.update_indices(partial_results)
             
-            import time
             now = time.time()
             if not hasattr(self.tab, '_last_search_model_update'):
                 self.tab._last_search_model_update = 0
@@ -238,7 +238,6 @@ class SearchController(QObject):
 
         self.tab.search_pattern = ""
         self.tab._search_results = []
-        from log_viewer.bitset import Bitset
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab._search_results_all = Bitset(total)
         self.tab._search_result_index = -1

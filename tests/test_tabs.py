@@ -93,15 +93,16 @@ def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
 
     path = temp_log_file(num_lines=10)
 
-    with patch("log_viewer.log_tab.LogTab.open_file"):
+    with patch("log_viewer.controllers.tab_file_controller.FileController.open_file"):
         tab = window.open_file_in_tab(path)
 
     tab.file_path = path
+    tab._assigned_title = "mocked_title"
     tab.edit_buffer.set(0, "Zmieniona linia")
     assert len(tab.edit_buffer) == 1
 
     with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QtWidgets.QMessageBox.Yes):
-        with patch.object(tab, "open_file", side_effect=lambda *args, **kwargs: tab.edit_buffer.clear()):
+        with patch.object(tab.file_controller, "open_file", side_effect=lambda *args, **kwargs: tab.edit_buffer.clear()):
             window.cmd_reload()
 
     assert len(tab.edit_buffer) == 0

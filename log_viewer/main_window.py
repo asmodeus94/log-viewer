@@ -1,6 +1,9 @@
 """app.py — LogTab (per-file widget) + LogViewerWindow (tabbed controller)."""
-
 from __future__ import annotations
+
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QPalette
+import re
 
 import os
 import re
@@ -222,7 +225,6 @@ class LogViewerWindow(QMainWindow):
     def _detect_system_theme(self) -> dict:
         """Wykrywa motyw systemowy (dark/light) i zwraca odpowiedni THEME."""
         try:
-            from PySide6.QtGui import QGuiApplication
             hints = QGuiApplication.styleHints()
             scheme = hints.colorScheme()
             if scheme == Qt.ColorScheme.Dark:
@@ -232,7 +234,6 @@ class LogViewerWindow(QMainWindow):
         except Exception:
             pass
         try:
-            from PySide6.QtGui import QPalette
             pal = QtWidgets.QApplication.palette()
             bg = pal.color(QPalette.Window)
             text_color = pal.color(QPalette.WindowText)
@@ -624,6 +625,14 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
         filter_buttons_layout.addWidget(self.btn_clear_filter)
+        
+        self.btn_refresh = QPushButton(self.t("btn_refresh"))
+        self.btn_refresh.clicked.connect(self.cmd_refresh)
+        filter_buttons_layout.addWidget(self.btn_refresh)
+        
+        self.btn_reload = QPushButton(self.t("btn_reload"))
+        self.btn_reload.clicked.connect(self.cmd_reload)
+        filter_buttons_layout.addWidget(self.btn_reload)
         filter_buttons_layout.addStretch()
 
         filter_layout.addLayout(filter_buttons_layout, 2, 1)
@@ -652,7 +661,7 @@ class LogViewerWindow(QMainWindow):
 
         file_menu = menubar.addMenu(self.t("menu_file"))
         file_menu.addAction(self._mkaction(self.t("mi_open"), QKeySequence.StandardKey.Open, self.cmd_open))
-        self._action_reload = self._mkaction(self.t("mi_reload"), QKeySequence.StandardKey.Refresh, self.cmd_reload)
+        self._action_reload = self._mkaction(self.t("mi_reload"), "Ctrl+R", self.cmd_reload)
         file_menu.addAction(self._action_reload)
         self._action_save = self._mkaction(self.t("mi_save"), QKeySequence.StandardKey.Save, self.cmd_save_edits)
         file_menu.addAction(self._action_save)
@@ -691,6 +700,9 @@ class LogViewerWindow(QMainWindow):
         self._follow_action = self._mkaction(self.t("mi_follow"), "Ctrl+T", self.cmd_toggle_follow)
         self._follow_action.setCheckable(True)
         view_menu.addAction(self._follow_action)
+        
+        self._action_refresh = self._mkaction(self.t("mi_refresh"), QKeySequence.StandardKey.Refresh, self.cmd_refresh)
+        view_menu.addAction(self._action_refresh)
         view_menu.addSeparator()
 
         enc_menu = view_menu.addMenu(self.t("mi_encoding"))
@@ -977,6 +989,10 @@ class LogViewerWindow(QMainWindow):
             getattr(self, "filter_context_spin", None),
             getattr(self, "btn_apply_filter", None),
             getattr(self, "btn_clear_filter", None),
+            getattr(self, "btn_refresh", None),
+            getattr(self, "btn_reload", None),
+            getattr(self, "_action_refresh", None),
+            getattr(self, "_action_reload", None),
         ]
         for w in toolbar_widgets:
             if w is not None:
@@ -986,7 +1002,7 @@ class LogViewerWindow(QMainWindow):
         tab = self.tabs.widget(index)
         if not isinstance(tab, LogTab):
             return
-        if len(tab.edit_buffer) > 0:
+        if getattr(tab, "edit_buffer", None) is not None and len(tab.edit_buffer) > 0:
             choice = QMessageBox.question(
                 self, self.t("app_title"),
                 self.t("msg_clear_edits").format(n=len(tab.edit_buffer)),
@@ -1019,6 +1035,9 @@ class LogViewerWindow(QMainWindow):
 
     def cmd_reload(self):
         return self._delegate_to_tab("cmd_reload")
+
+    def cmd_refresh(self):
+        return self._delegate_to_tab("cmd_refresh")
 
     def cmd_find_dialog(self):
         return self._delegate_to_tab("cmd_find_dialog")
@@ -1227,7 +1246,6 @@ class LogViewerWindow(QMainWindow):
         if self._dnd_progress_dialog is not None:
             # Msg to zwykle format typu: "Budowanie indeksu... X.X%"
             # Próbujemy wyciągnąć %. Można to zrobić regexem.
-            import re
             m = re.search(r"(\d+(\.\d+)?)%", msg)
             if m:
                 val = float(m.group(1))

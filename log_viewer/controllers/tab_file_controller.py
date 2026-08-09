@@ -13,11 +13,42 @@ class FileController(QObject):
         super().__init__(tab)
         self.tab = tab
 
-    def open_file(self, path: str, title: Optional[str] = None) -> None:
+    def _stop_background_threads(self) -> None:
+        if getattr(self.tab, '_indexer_worker', None) is not None:
+            try:
+                self.tab._indexer_worker.cancel()
+            except Exception:
+                pass
+        for thread_name in ('_indexer_thread', '_filter_thread', '_save_thread', '_search_thread'):
+            t = getattr(self.tab, thread_name, None)
+            if t is not None:
+                try:
+                    if t.isRunning():
+                        t.quit()
+                        t.wait(1500)
+                except RuntimeError:
+                    pass
+                setattr(self.tab, thread_name, None)
+        
+        if getattr(self.tab, "indexer", None) is not None:
+            try:
+                self.tab.indexer.close()
+            except Exception:
+                pass
+            self.tab.indexer = None
+
+    def open_file(self, path: str, title: Optional[str] = None, preserve_state: bool = False) -> None:
+        """Rozpoczyna asynchroniczne otwarcie i indeksowanie pliku."""
         if not os.path.isfile(path):
             QMessageBox.critical(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_file"))
             return
-        self.tab.cmd_clear_filter(silent=True)
+
+        # Bezpieczeństwo wątkowe: jeśli to np. Reload (lub Open po Open), zatrzymaj poprzednie instancje, 
+        # by nie stworzyć zombiaków pożerających dysk i wywołujących segfault.
+        self._stop_background_threads()
+
+        if not preserve_state:
+            self.tab.cmd_clear_filter(silent=True)
         if self.tab.follow_active:
             self.tab.cmd_toggle_follow()
         self.tab.file_path = path
@@ -27,12 +58,13 @@ class FileController(QObject):
         self.tab.window_start = 0
         self.tab.window_lines = []
         self.tab.line_map = []
-        self.tab.edit_buffer.clear()
-        self.tab.bookmarks.clear()
-        self.tab._refresh_bookmarks_tree()
-        self.tab._refresh_edits_tree()
-        self.tab.pct_label.setText("0%")
-        self.tab.text.setPlainText("")
+        if not preserve_state:
+            self.tab.edit_buffer.clear()
+            self.tab.bookmarks.clear()
+            self.tab._refresh_bookmarks_tree()
+            self.tab._refresh_edits_tree()
+            self.tab.pct_label.setText("0%")
+            self.tab.text.setPlainText("")
         self.tab.text.set_line_map([])
 
         encoding = self.tab.encoding
@@ -120,6 +152,8 @@ class FileController(QObject):
 
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
+        if getattr(self.tab, "edit_buffer", None) is None:
+            return
         if self.tab.indexer is not None:
             try:
                 self.tab.indexer.close()
@@ -159,6 +193,10 @@ class FileController(QObject):
         # Zaktualizuj mini-mapę — natychmiast (dla małych plików) + debounced (dla dużych)
         self.tab._update_minimap()
         self.tab._minimap_update_timer.start()
+        
+        if getattr(self.tab, "_pending_reload_filter", False):
+            self.tab._pending_reload_filter = False
+            self.tab.cmd_apply_filter()
 
     def _start_reindex(self, saved_line: int) -> None:
         self.tab._status(self.tab.t("st_opening"))
@@ -215,6 +253,50 @@ class FileController(QObject):
         """Helper to cancel follow mode proactively when manual jumps happen."""
         if self.tab.follow_active:
             self.tab.cmd_toggle_follow()
+
+    def cmd_refresh(self) -> None:
+        if not self.tab.file_path:
+            return
+        self.tab._status(self.tab.t("st_refreshing"))
+        self._check_for_updates_once()
+
+    def cmd_reload(self) -> None:
+        if not self.tab.file_path:
+            return
+        has_filter = bool(self.tab._main.filter_entry.text().strip())
+        self.tab._pending_reload_filter = has_filter
+        self.open_file(self.tab.file_path, self.tab._assigned_title, preserve_state=True)
+
+    def _check_for_updates_once(self) -> None:
+        if not self.tab.file_path:
+            return
+        try:
+            current_stat = os.stat(self.tab.file_path)
+        except OSError:
+            return
+        current_size = current_stat.st_size
+        current_inode = current_stat.st_ino
+        mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_stat.st_mtime))
+        ctime_str = time.strftime("%H:%M:%S")
+
+        if current_inode != self.tab._last_file_inode and self.tab._last_file_inode != 0:
+            self.tab._start_follow_reindex(current_size, current_inode)
+            return
+
+        if current_size > self.tab._last_file_size:
+            try:
+                new_lines = self.tab.indexer.update_from(current_size)
+                self.tab._last_file_size = current_size
+                if new_lines > 0:
+                    self.tab._on_follow_new_lines(new_lines, mtime_str, ctime_str)
+                else:
+                    self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+            except Exception:
+                pass
+        elif current_size < self.tab._last_file_size:
+            self.tab._start_follow_reindex(current_size, current_inode)
+        else:
+            self.tab._status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     def cmd_toggle_follow(self) -> None:
         if not self.tab.indexer:
@@ -280,6 +362,7 @@ class FileController(QObject):
         QTimer.singleShot(next_poll, self.tab._follow_poll)
 
     def _start_follow_reindex(self, current_size: int, current_inode: int) -> None:
+        self._stop_background_threads()
         self.tab._follow_reindex_size = current_size
         self.tab._follow_reindex_inode = current_inode
         self.tab._indexer_thread = QThread()
