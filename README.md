@@ -15,7 +15,7 @@
 * Interfejs wyposażony w funkcjonalność Drag&Drop.
 * Obsługa wielokrotnego otwierania tego samego pliku (w kartach oznaczonych sufiksami `[A]`, `[B]`, itd.).
 * Dynamiczna aktualizacja nagłówka okna prezentująca nazwę przeglądanego pliku (zgodną z nazwą bieżącej karty).
-* Możliwość przeładowania zawartości i indeksu pliku (klawisz `F5` lub opcja `Przeładuj`).
+* Możliwość odświeżenia zawartości (klawisz `F5` lub opcja `Odśwież`) oraz całkowitego przeładowania i wyzerowania indeksu pliku (klawisz `Ctrl+R` lub opcja `Przeładuj`).
 
 ## Wymagania systemowe
 

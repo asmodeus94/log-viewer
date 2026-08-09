@@ -532,6 +532,12 @@ class LogTab(QWidget):
     def cmd_toggle_follow(self) -> None:
         return self.file_controller.cmd_toggle_follow()
 
+    def cmd_refresh(self) -> None:
+        return self.file_controller.cmd_refresh()
+
+    def cmd_reload(self) -> None:
+        return self.file_controller.cmd_reload()
+
     def _follow_poll(self) -> None:
         return self.file_controller._follow_poll()
 
