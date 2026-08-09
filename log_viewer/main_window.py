@@ -989,6 +989,10 @@ class LogViewerWindow(QMainWindow):
             getattr(self, "filter_context_spin", None),
             getattr(self, "btn_apply_filter", None),
             getattr(self, "btn_clear_filter", None),
+            getattr(self, "btn_refresh", None),
+            getattr(self, "btn_reload", None),
+            getattr(self, "_action_refresh", None),
+            getattr(self, "_action_reload", None),
         ]
         for w in toolbar_widgets:
             if w is not None:
