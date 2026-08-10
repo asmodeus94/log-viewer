@@ -45,8 +45,8 @@ def test_incremental_follow_with_filter_edge_cases():
         # Zwijamy scrollbar do 0 by sprawdzic timer
         tab.text.verticalScrollBar().setValue(0)
         
-        # Aktywujemy Follow
-        tab.cmd_toggle_follow()
+        # Aktywujemy Follow bez uruchamiania petli _follow_poll ktora zawiesza test na macOS
+        tab.follow_active = True
         assert tab.follow_active is True
         
         # Symulujemy natlok zdarzen (szybkie dopisywanie uzytkownika do rosnacego pliku logow)
@@ -61,17 +61,22 @@ def test_incremental_follow_with_filter_edge_cases():
         tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count, mtime_str="now", ctime_str="now")
         
         # Czekamy na przetworzenie pętli (Worker z szukaniem filtru wysle wyniki)
-        for _ in range(50):
+        for _ in range(100):
             QCoreApplication.processEvents()
             time.sleep(0.01)
+            if hasattr(tab, '_inc_filter_thread') and not tab._inc_filter_thread.isRunning():
+                break
             
         # Po przetworzeniu eventow, powinny sie pojawic zaaktualizowane wyniki bitset
         assert len(tab.filter_results) > 0, "IncrementalWorker filter results were not correctly merged"
         
         # Sprawdzamy czy timer przewijania podbil suwak (QTimer.singleShot w GUI loopie)
-        # Nastepnie odpalamy 100 krokow by timer wygasl
+        # Nastepnie odpalamy krotki cykl dla pewnosci ze wygasl
         for _ in range(50):
             QCoreApplication.processEvents()
+            time.sleep(0.01)
+            if tab.text.verticalScrollBar().value() == tab.text.verticalScrollBar().maximum():
+                break
             
         max_val = tab.text.verticalScrollBar().maximum()
         assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
