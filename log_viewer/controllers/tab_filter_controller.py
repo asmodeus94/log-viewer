@@ -6,6 +6,7 @@ import re
 from typing import Optional, List, Tuple
 from log_viewer.filter_engine import FilterEngine
 from log_viewer.workers import FilterWorker
+from log_viewer.bitset import Bitset
 
 class FilterController(QObject):
     def __init__(self, tab):
@@ -44,6 +45,15 @@ class FilterController(QObject):
         if self.tab.filter_engine and self.tab.filter_engine.is_running():
             self.tab.filter_engine.cancel()
 
+        if getattr(self.tab, '_filter_thread', None) is not None:
+            try:
+                if self.tab._filter_thread.isRunning():
+                    self.tab._filter_thread.quit()
+                    self.tab._filter_thread.wait(1500)
+            except RuntimeError:
+                pass
+            self.tab._filter_thread = None
+
         if self.tab.filter_engine is None or self.tab.filter_engine.path != self.tab.file_path:
             self.tab.filter_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
         self.tab.filter_active = True
@@ -71,7 +81,7 @@ class FilterController(QObject):
         self.tab._status(self.tab._fmt("st_filtering", pct=f"{pct:.1f}", hits=hits))
 
     @Slot(object, object, object, object, object, object)
-    def _on_filter_done(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
+    def _on_filter_done(self, results_data, context_lines, filter_all_data, hit_text_map, hit_lines_set, error) -> None:
         if error:
             if error != "cancelled":
                 try:
@@ -82,12 +92,20 @@ class FilterController(QObject):
                 except RuntimeError:
                     pass
             return
-        if not results:
+        if not results_data:
             QMessageBox.information(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_matches"))
             self.tab.filter_active = False
             self.tab._refresh_status()
             self.tab._update_position_slider()
             return
+
+        results = Bitset(results_data[0])
+        results._words = results_data[1]
+        results._total_count = results_data[2]
+        
+        filter_all_lines = Bitset(filter_all_data[0])
+        filter_all_lines._words = filter_all_data[1]
+        filter_all_lines._total_count = filter_all_data[2]
 
         self.tab.filter_results = results
         self.tab._filter_all_lines = filter_all_lines

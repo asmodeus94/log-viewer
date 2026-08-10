@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
-_running_tasks = set()
 import time
 import bisect
 import queue
+import atexit
 from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable
+
+_running_tasks = set()
 
 from .bitset import bisect_left_custom, bisect_right_custom
 
@@ -678,7 +680,6 @@ class LogTab(QWidget):
             pass
 
 
-import atexit
 
 def _cleanup_running_tasks():
     for task_ref in list(_running_tasks):

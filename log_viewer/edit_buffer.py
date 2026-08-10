@@ -6,10 +6,14 @@ import sys
 import os
 import shutil
 import tempfile
+import uuid
 from typing import Callable, Dict, Optional
 
 from .exceptions import FileChangedError, CompressedSaveError
 from .helpers import is_compressed
+
+def secure_opener(path, flags):
+    return os.open(path, flags, 0o600)
 
 
 class EditBuffer:
@@ -96,20 +100,17 @@ class EditBuffer:
         # Z tego samego strumienia kopiujemy do backup i jednocześnie
         # zapisujemy edytowane linie do tmp. Nie ma drugiego odczytu pliku,
         # więc inny proces nie może dopisać danych między odczytami.
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=os.path.dirname(os.path.abspath(src_path)) or ".",
-            prefix=".log-viewer_tmp_",
+        tmp_path = os.path.join(
+            os.path.dirname(os.path.abspath(src_path)) or ".",
+            f".log-viewer_tmp_{uuid.uuid4().hex}"
         )
         bytes_written = 0
         last_progress_bytes = 0
 
-        def secure_opener(path, flags):
-            return os.open(path, flags, 0o600)
-
         try:
             with open(src_path, "rb") as src, \
                  open(backup_path, "wb", opener=secure_opener) as bak, \
-                 os.fdopen(tmp_fd, "wb") as out:
+                 open(tmp_path, "wb", opener=secure_opener) as out:
                 line_no = 0
                 for raw in src:
                     # Kopiuj do backup (oryginalna treść)

@@ -1232,9 +1232,7 @@ class LogViewerWindow(QMainWindow):
             # Upewniamy się, że nie wyświetli się wewnętrzny dialog ładowania pojedynczego pliku z tab_file_controller
             # Zauważ że QProgressDialog jest inicjalizowany w _index_progress w LogTab
             if getattr(self._dnd_current_tab, "_index_progress", None) is not None:
-                self._dnd_current_tab._index_progress.close()
-                self._dnd_current_tab._index_progress.deleteLater()
-                self._dnd_current_tab._index_progress = None
+                self._dnd_current_tab._close_index_progress()
 
             self._dnd_current_tab.file_loaded.connect(self._on_dnd_file_loaded, Qt.QueuedConnection)
             self._dnd_current_tab.status_changed.connect(self._on_dnd_tab_status_changed, Qt.QueuedConnection)

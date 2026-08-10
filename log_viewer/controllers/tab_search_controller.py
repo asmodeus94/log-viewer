@@ -156,7 +156,7 @@ class SearchController(QObject):
                 self.tab._last_search_model_update = now
 
     @Slot(object, object, object, object, object, object)
-    def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
+    def _on_search_finished(self, results_data, context_lines, filter_all_data, hit_text_map, hit_lines_set, error) -> None:
         if error:
             if error != "cancelled":
                 try:
@@ -164,6 +164,17 @@ class SearchController(QObject):
                 except RuntimeError:
                     pass
             return
+
+        if results_data:
+            results = Bitset(results_data[0])
+            results._words = results_data[1]
+            results._total_count = results_data[2]
+            
+            filter_all_lines = Bitset(filter_all_data[0])
+            filter_all_lines._words = filter_all_data[1]
+            filter_all_lines._total_count = filter_all_data[2]
+        else:
+            filter_all_lines = []
 
         self.tab._search_results_all = filter_all_lines
             

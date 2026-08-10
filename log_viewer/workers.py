@@ -96,7 +96,7 @@ class FilterWorker(QObject):
 
         def on_done(results, error):
             if error or not results or len(results) == 0:
-                self.finished.emit(Bitset(0), set(), Bitset(0), {}, set(), error)
+                self.finished.emit(None, set(), None, {}, set(), error)
                 return
 
             if self._context_after > 0:
@@ -106,7 +106,10 @@ class FilterWorker(QObject):
 
             filter_all_lines = results.expand_context(self._context_after)
 
-            self.finished.emit(results, set(), filter_all_lines, {}, set(), error)
+            res_tuple = (results._size, results._words, getattr(results, '_total_count', -1))
+            all_tuple = (filter_all_lines._size, filter_all_lines._words, getattr(filter_all_lines, '_total_count', -1))
+
+            self.finished.emit(res_tuple, set(), all_tuple, {}, set(), error)
 
         self._engine.start(
             self._pattern, self._use_regex, self._case_sensitive, self._negate,
@@ -349,4 +352,7 @@ class IncrementalFilterWorker(QObject):
             
         filter_all_lines_bitset = results_bitset.expand_context(self._context_after)
         
-        self.finished.emit(list(results_bitset[:]), list(filter_all_lines_bitset[:]))
+        res_tuple = (results_bitset._size, results_bitset._words, getattr(results_bitset, '_total_count', -1))
+        all_tuple = (filter_all_lines_bitset._size, filter_all_lines_bitset._words, getattr(filter_all_lines_bitset, '_total_count', -1))
+        
+        self.finished.emit(res_tuple, all_tuple)
