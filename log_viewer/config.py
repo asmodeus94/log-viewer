@@ -5,8 +5,11 @@ import sys
 
 import os
 import json
-import tempfile
+import uuid
 from typing import Any, Dict, Optional
+
+def secure_opener(path, flags):
+    return os.open(path, flags, 0o600)
 
 from .helpers import (
     DEFAULT_ENCODING, WINDOW_SIZE_LINES, MAX_DISPLAY_LINES,
@@ -68,11 +71,11 @@ class UserConfig:
 
     def save(self) -> None:
         try:
-            tmp_fd, tmp_path = tempfile.mkstemp(
-                dir=os.path.dirname(os.path.abspath(self.path)) or ".",
-                prefix=".log-viewer_cfg_",
+            tmp_path = os.path.join(
+                os.path.dirname(os.path.abspath(self.path)) or ".",
+                f".log-viewer_cfg_{uuid.uuid4().hex}"
             )
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8", opener=secure_opener) as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)
             os.replace(tmp_path, self.path)
         except Exception as e:

@@ -617,10 +617,15 @@ class TestFilterContext:
         # nie zapisuje). Pobieramy tab bezpośrednio.
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = array.array('Q', [10, 20, 30])
+        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20, 30]), 100)
         tab._filter_context_after = 2
-        filter_all = Bitset.from_indices(tab.filter_results, 100).expand_context(2)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        filter_all = tab.filter_results.expand_context(2)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {}, set(), None
+        )
 
         # Po każdym trafieniu 2 następujące linie (z pominięciem trafień).
         # Trafienia: 10, 20, 30.
@@ -633,10 +638,15 @@ class TestFilterContext:
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = array.array('Q', [10])
+        tab.filter_results = Bitset.from_indices(array.array('Q', [10]), 100)
         tab._filter_context_after = 0
-        filter_all = Bitset.from_indices(tab.filter_results, 100)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {10: "x"}, {10}, None)
+        filter_all = tab.filter_results.expand_context(0)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {10: "x"}, {10}, None
+        )
         assert tab.filter_context_lines == set()
 
     def test_build_filter_context_skips_hit_lines(self, app_instance):
@@ -646,10 +656,15 @@ class TestFilterContext:
         tab.filter_active = True
         # Trafienia w 10 i 11. Kontekst dla 10 = {11, 12}, ale 11 jest trafieniem,
         # więc tylko {12}. Kontekst dla 11 = {12, 13}.
-        tab.filter_results = array.array('Q', [10, 11])
+        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 11]), 100)
         tab._filter_context_after = 2
-        filter_all = Bitset.from_indices(tab.filter_results, 100).expand_context(2)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        filter_all = tab.filter_results.expand_context(2)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {}, set(), None
+        )
         # 12, 13 — 11 i 10 są trafieniami, więc pominęliśmy je.
         assert set(tab._filter_all_lines) - set(tab.filter_results) == {12, 13}
 
@@ -658,10 +673,15 @@ class TestFilterContext:
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = array.array('Q', [10])
-        tab._filter_context_after = 2
-        filter_all = Bitset.from_indices(tab.filter_results, 100).expand_context(2)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20]), 100)
+        tab._filter_context_after = 1
+        filter_all = tab.filter_results.expand_context(1)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {}, set(), None
+        )
         assert len(tab._filter_all_lines) > 1
 
         tab.cmd_clear_filter(silent=True)
@@ -678,10 +698,15 @@ class TestFilterContext:
 
         # Symulacja: filtr z 3 trafieniami (linie 10, 20, 30), kontekst=2.
         tab.filter_active = True
-        tab.filter_results = array.array('Q', [10, 20, 30])
+        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20, 30]), 100)
         tab._filter_context_after = 2
-        filter_all = Bitset.from_indices(tab.filter_results, 100).expand_context(2)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        filter_all = tab.filter_results.expand_context(2)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {}, set(), None
+        )
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
         tab._load_window(at_line=0)
@@ -704,10 +729,15 @@ class TestFilterContext:
 
         # Trafienie w linii 5, kontekst=2 → linie 6, 7 to kontekst.
         tab.filter_active = True
-        tab.filter_results = array.array('Q', [5])
+        tab.filter_results = Bitset.from_indices(array.array('Q', [5]), 100)
         tab._filter_context_after = 2
-        filter_all = Bitset.from_indices(tab.filter_results, 100).expand_context(2)
-        tab._on_filter_done(tab.filter_results, set(), filter_all, {}, set(), None)
+        filter_all = tab.filter_results.expand_context(2)
+        tab._on_filter_done(
+            (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
+            set(),
+            (filter_all._size, filter_all._words, filter_all._total_count),
+            {}, set(), None
+        )
         tab._load_window(at_line=0)
         app.processEvents()
 

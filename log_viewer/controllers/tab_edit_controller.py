@@ -225,7 +225,9 @@ class EditController(QObject):
     @Slot()
     def _on_save_done(self):
         if hasattr(self.tab, "_save_as_progress") and self.tab._save_as_progress:
+            self.tab._save_as_progress.blockSignals(True)
             self.tab._save_as_progress.close()
+            self.tab._save_as_progress.deleteLater()
             self.tab._save_as_progress = None
         QMessageBox.information(self.tab._main, self.tab.t("app_title"),
                                 self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=self.tab._save_as_path))
@@ -233,7 +235,9 @@ class EditController(QObject):
     @Slot(str)
     def _on_save_error(self, err: str):
         if hasattr(self.tab, "_save_as_progress") and self.tab._save_as_progress:
+            self.tab._save_as_progress.blockSignals(True)
             self.tab._save_as_progress.close()
+            self.tab._save_as_progress.deleteLater()
             self.tab._save_as_progress = None
         if err == "cancelled":
             self.tab._status(self.tab.t("st_cancelled"))
@@ -298,6 +302,8 @@ class EditController(QObject):
     @Slot(str)
     def _on_export_error(self, err: str):
         if hasattr(self.tab, "_export_progress") and self.tab._export_progress:
+            self.tab._export_progress.blockSignals(True)
+            self.tab._export_progress.close()
             self.tab._export_progress.deleteLater()
             self.tab._export_progress = None
         if err == "cancelled":

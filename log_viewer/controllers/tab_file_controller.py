@@ -135,6 +135,7 @@ class FileController(QObject):
         if self.tab._index_progress is not None:
             self.tab._index_progress.blockSignals(True)
             self.tab._index_progress.close()
+            self.tab._index_progress.deleteLater()
             self.tab._index_progress = None
 
     @Slot(object)
@@ -456,13 +457,13 @@ class FileController(QObject):
         self.tab._inc_filter_thread.start()
 
     @Slot(object, object)
-    def _on_inc_finished_slot(self, results_list, filter_all_list) -> None:
+    def _on_inc_finished_slot(self, results_data, filter_all_data) -> None:
         new_total_lines = getattr(self.tab, "_inc_new_total_lines", 0)
         mtime_str = getattr(self.tab, "_inc_mtime_str", "")
         ctime_str = getattr(self.tab, "_inc_ctime_str", "")
         if new_total_lines > 0:
             has_new = False
-            if len(results_list) > 0 or len(filter_all_list) > 0:
+            if results_data and (results_data[2] > 0 or sum(results_data[1]) > 0):
                 from log_viewer.bitset import Bitset
                 
                 # Zabezpieczenie przed rzutowaniem przez nadrzędny kontroler na NoneType / Array przy nakładaniu okien asynchronicznych
@@ -472,9 +473,19 @@ class FileController(QObject):
                     self.tab._filter_all_lines = Bitset(new_total_lines)
                     
                 self.tab.filter_results.resize(new_total_lines)
-                self.tab.filter_results.update_indices(results_list)
+                inc_res_words = results_data[1]
+                target_res_words = self.tab.filter_results._words
+                for i in range(min(len(inc_res_words), len(target_res_words))):
+                    target_res_words[i] |= inc_res_words[i]
+                
                 self.tab._filter_all_lines.resize(new_total_lines)
-                self.tab._filter_all_lines.update_indices(filter_all_list)
+                inc_all_words = filter_all_data[1]
+                target_all_words = self.tab._filter_all_lines._words
+                for i in range(min(len(inc_all_words), len(target_all_words))):
+                    target_all_words[i] |= inc_all_words[i]
+                
+                self.tab.filter_results._counts = None
+                self.tab._filter_all_lines._counts = None
                 has_new = True
                 
             self._apply_follow_new_lines(mtime_str, ctime_str, force_reload=has_new)
