@@ -8,13 +8,13 @@ import json
 import uuid
 from typing import Any, Dict, Optional
 
-def secure_opener(path, flags):
-    return os.open(path, flags, 0o600)
-
 from .helpers import (
     DEFAULT_ENCODING, WINDOW_SIZE_LINES, MAX_DISPLAY_LINES,
     MAX_DISPLAY_LINE_LENGTH, INDEX_INTERVAL_BYTES, CONFIG_FILE_PATH,
 )
+
+def secure_opener(path, flags):
+    return os.open(path, flags, 0o600)
 
 
 class UserConfig:

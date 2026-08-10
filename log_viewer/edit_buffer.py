@@ -9,11 +9,11 @@ import tempfile
 import uuid
 from typing import Callable, Dict, Optional
 
-def secure_opener(path, flags):
-    return os.open(path, flags, 0o600)
-
 from .exceptions import FileChangedError, CompressedSaveError
 from .helpers import is_compressed
+
+def secure_opener(path, flags):
+    return os.open(path, flags, 0o600)
 
 
 class EditBuffer:
