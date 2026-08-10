@@ -118,8 +118,7 @@ class ViewportController(QObject):
                 edited_widget_lines.append(i)
 
             if self.tab.filter_active and self.tab.filter_results:
-                hit_idx = bisect.bisect_left(self.tab.filter_results, ln)
-                is_hit = hit_idx < len(self.tab.filter_results) and self.tab.filter_results[hit_idx] == ln
+                is_hit = ln in self.tab.filter_results
                 if is_hit:
                     filter_hit_widget_lines.append(i)
                 else:
@@ -190,8 +189,7 @@ class ViewportController(QObject):
             if self.tab.edit_buffer and self.tab.edit_buffer.has(ln):
                 edited_widget_lines.append(i)
             if is_filtered:
-                hit_idx = bisect.bisect_left(self.tab.filter_results, ln)
-                is_hit = hit_idx < len(self.tab.filter_results) and self.tab.filter_results[hit_idx] == ln
+                is_hit = ln in self.tab.filter_results
                 if is_hit:
                     filter_hit_widget_lines.append(i)
                 else:
