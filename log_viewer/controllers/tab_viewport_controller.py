@@ -208,6 +208,20 @@ class ViewportController(QObject):
         color_bookmark = self.tab._theme_colors.get("bookmark", QtGui.QColor("#6a9955"))
         color_edited = self.tab._theme_colors.get("edited", QtGui.QColor("#ce9178"))
 
+        fmt_context = QtGui.QTextCharFormat()
+        fmt_context.setBackground(color_context)
+
+        fmt_highlight = QtGui.QTextCharFormat()
+        fmt_highlight.setBackground(color_highlight)
+        fmt_highlight.setForeground(color_black)
+        fmt_highlight.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
+
+        fmt_bookmark = QtGui.QTextCharFormat()
+        fmt_bookmark.setBackground(color_bookmark)
+
+        fmt_edited = QtGui.QTextCharFormat()
+        fmt_edited.setBackground(color_edited)
+
         context_set = set(context_widget_lines)
         filter_hit_set = set(filter_hit_widget_lines)
         bookmark_set = set(bookmark_widget_lines)
@@ -221,30 +235,28 @@ class ViewportController(QObject):
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_context)
+                sel.format = fmt_context
                 self.tab._static_extra_sels.append(sel)
 
             if i in filter_hit_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_highlight)
-                sel.format.setForeground(color_black)
-                sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
+                sel.format = fmt_highlight
                 self.tab._static_extra_sels.append(sel)
 
             if i in bookmark_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_bookmark)
+                sel.format = fmt_bookmark
                 self.tab._static_extra_sels.append(sel)
 
             if i in edited_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_edited)
+                sel.format = fmt_edited
                 self.tab._static_extra_sels.append(sel)
 
             block = block.next()
