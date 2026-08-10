@@ -205,9 +205,13 @@ class ViewportController(QObject):
         color_context = self.tab._theme_colors.get("context", QtGui.QColor("#3a3d3a"))
         color_highlight = self.tab._theme_colors.get("highlight", QtGui.QColor("#fff176"))
         color_black = self.tab._theme_colors.get("black", QtGui.QColor("#000000"))
+        color_bookmark = self.tab._theme_colors.get("bookmark", QtGui.QColor("#6a9955"))
+        color_edited = self.tab._theme_colors.get("edited", QtGui.QColor("#ce9178"))
 
         context_set = set(context_widget_lines)
         filter_hit_set = set(filter_hit_widget_lines)
+        bookmark_set = set(bookmark_widget_lines)
+        edited_set = set(edited_widget_lines)
 
         doc = self.tab.text.document()
         block = doc.begin()
@@ -227,6 +231,20 @@ class ViewportController(QObject):
                 sel.format.setBackground(color_highlight)
                 sel.format.setForeground(color_black)
                 sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
+                self.tab._static_extra_sels.append(sel)
+
+            if i in bookmark_set:
+                sel = QtWidgets.QTextEdit.ExtraSelection()
+                sel.cursor = QtGui.QTextCursor(block)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+                sel.format.setBackground(color_bookmark)
+                self.tab._static_extra_sels.append(sel)
+
+            if i in edited_set:
+                sel = QtWidgets.QTextEdit.ExtraSelection()
+                sel.cursor = QtGui.QTextCursor(block)
+                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+                sel.format.setBackground(color_edited)
                 self.tab._static_extra_sels.append(sel)
 
             block = block.next()
@@ -524,33 +542,11 @@ class ViewportController(QObject):
 
         sels: List[QtWidgets.QTextEdit.ExtraSelection] = list(getattr(self.tab, "_static_extra_sels", []))
 
-        doc = self.tab.text.document()
+        bookmark_set = getattr(self.tab, "_bookmark_widget_lines", [])
+        edited_set = getattr(self.tab, "_edited_widget_lines", [])
+        filter_hit_set = getattr(self.tab, "_filter_hit_widget_lines", [])
 
-        bookmark_set = set(getattr(self.tab, "_bookmark_widget_lines", []))
-        edited_set = set(getattr(self.tab, "_edited_widget_lines", []))
-        filter_hit_set = set(getattr(self.tab, "_filter_hit_widget_lines", []))
-
-        color_bookmark = self.tab._theme_colors.get("bookmark", QColor("#6a9955"))
-        color_edited = self.tab._theme_colors.get("edited", QColor("#ce9178"))
         color_current_line = self.tab._theme_colors.get("current_line", QColor("#2a2d2e"))
-
-        for li in bookmark_set:
-            block = doc.findBlockByNumber(li)
-            if block.isValid():
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_bookmark)
-                sels.append(sel)
-
-        for li in edited_set:
-            block = doc.findBlockByNumber(li)
-            if block.isValid():
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format.setBackground(color_edited)
-                sels.append(sel)
 
         search_block = -1
         if self.tab._search_extra_sel is not None:
