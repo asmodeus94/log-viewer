@@ -7,6 +7,7 @@ import os
 from log_viewer.helpers import fmt_size
 from log_viewer.workers import IndexerWorker
 from log_viewer.indexer import LineIndexer
+from log_viewer.bitset import Bitset
 
 class FileController(QObject):
     def __init__(self, tab):
@@ -464,8 +465,6 @@ class FileController(QObject):
         if new_total_lines > 0:
             has_new = False
             if results_data and (results_data[2] > 0 or sum(results_data[1]) > 0):
-                from log_viewer.bitset import Bitset
-                
                 # Zabezpieczenie przed rzutowaniem przez nadrzędny kontroler na NoneType / Array przy nakładaniu okien asynchronicznych
                 if getattr(self.tab, "filter_results", None) is None or not hasattr(self.tab.filter_results, "resize"):
                     self.tab.filter_results = Bitset(new_total_lines)

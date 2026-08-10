@@ -6,6 +6,7 @@ import re
 from typing import Optional, List, Tuple
 from log_viewer.filter_engine import FilterEngine
 from log_viewer.workers import FilterWorker
+from log_viewer.bitset import Bitset
 
 class FilterController(QObject):
     def __init__(self, tab):
@@ -98,7 +99,6 @@ class FilterController(QObject):
             self.tab._update_position_slider()
             return
 
-        from log_viewer.bitset import Bitset
         results = Bitset(results_data[0])
         results._words = results_data[1]
         results._total_count = results_data[2]

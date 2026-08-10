@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 
 from log_viewer.helpers import open_maybe_compressed
 from log_viewer.indexer import LineIndexer
+from log_viewer.bitset import Bitset
 
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
@@ -438,7 +439,6 @@ class FilterEngine:
             except re.error as e:
                 if self._is_current_session(session) and not self._cancel.is_set():
                     try:
-                        from log_viewer.bitset import Bitset
                         on_done(Bitset(0), str(e))
                     except Exception:
                         pass
@@ -546,7 +546,6 @@ class FilterEngine:
         except Exception as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
-                    from log_viewer.bitset import Bitset
                     on_done(Bitset(0), str(e))
                 except Exception:
                     pass
@@ -556,7 +555,6 @@ class FilterEngine:
         if self._cancel.is_set() or not self._is_current_session(session):
             return
 
-        from log_viewer.bitset import Bitset
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
         
         max_needed_words = 0
@@ -608,7 +606,6 @@ class FilterEngine:
         Używane dla małych plików (< 50 MB) oraz plików skompresowanych,
         gdzie multiprocessing przyniósłby zbyt duży narzut.
         """
-        from log_viewer.bitset import Bitset
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
         total_hits = 0
         error: Optional[str] = None

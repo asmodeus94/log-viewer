@@ -166,7 +166,6 @@ class SearchController(QObject):
             return
 
         if results_data:
-            from log_viewer.bitset import Bitset
             results = Bitset(results_data[0])
             results._words = results_data[1]
             results._total_count = results_data[2]
