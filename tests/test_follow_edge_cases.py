@@ -46,7 +46,8 @@ def test_incremental_follow_with_filter_edge_cases():
         tab.text.verticalScrollBar().setValue(0)
         
         # Aktywujemy Follow
-        tab.cmd_toggle_follow()
+        with patch.object(tab.file_controller, "_follow_poll"):
+            tab.cmd_toggle_follow()
         assert tab.follow_active is True
         
         # Symulujemy natlok zdarzen (szybkie dopisywanie uzytkownika do rosnacego pliku logow)
@@ -61,9 +62,15 @@ def test_incremental_follow_with_filter_edge_cases():
         tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count, mtime_str="now", ctime_str="now")
         
         # Czekamy na przetworzenie pętli (Worker z szukaniem filtru wysle wyniki)
-        for _ in range(50):
-            QCoreApplication.processEvents()
-            time.sleep(0.01)
+        thread = getattr(tab, "_inc_filter_thread", None)
+        if thread:
+            while thread.isRunning():
+                QCoreApplication.processEvents()
+                time.sleep(0.01)
+        else:
+            for _ in range(50):
+                QCoreApplication.processEvents()
+                time.sleep(0.01)
             
         # Po przetworzeniu eventow, powinny sie pojawic zaaktualizowane wyniki bitset
         assert len(tab.filter_results) > 0, "IncrementalWorker filter results were not correctly merged"
@@ -73,6 +80,11 @@ def test_incremental_follow_with_filter_edge_cases():
         for _ in range(50):
             QCoreApplication.processEvents()
             
+        # Ensure we turn off follow mode to stop any singleShot timers
+        if tab.follow_active:
+            with patch.object(tab.file_controller, "_follow_poll"):
+                tab.cmd_toggle_follow()
+
         max_val = tab.text.verticalScrollBar().maximum()
         assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
         
@@ -81,7 +93,19 @@ def test_incremental_follow_with_filter_edge_cases():
             f.write(b"Line 20 - empty\n")
             
         new_lines_count_2 = indexer.update_from(os.stat(tf.name).st_size)
-        tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count_2, mtime_str="now", ctime_str="now")
+
+        with patch.object(tab.file_controller, "_follow_poll"):
+            tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count_2, mtime_str="now", ctime_str="now")
+
+        thread2 = getattr(tab, "_inc_filter_thread", None)
+        if thread2:
+            while thread2.isRunning():
+                QCoreApplication.processEvents()
+                time.sleep(0.01)
+        else:
+            for _ in range(50):
+                QCoreApplication.processEvents()
+                time.sleep(0.01)
         
         assert getattr(tab, "_inc_pending_lines", 0) >= 0
         assert tab.file_controller is not None
