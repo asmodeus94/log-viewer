@@ -343,7 +343,7 @@ class IncrementalFilterWorker(QObject):
                 text_bytes = text.encode(self._encoding, errors='replace')
                 if strategy.match(text_bytes):
                     results_array.append(line_no)
-        except Exception:
+        except BaseException:
             pass
 
         results_bitset = Bitset(self._end_line)
