@@ -20,7 +20,7 @@ class FileController(QObject):
                 self.tab._indexer_worker.cancel()
             except Exception:
                 pass
-        for thread_name in ('_indexer_thread', '_filter_thread', '_save_thread', '_search_thread'):
+        for thread_name in ('_indexer_thread', '_filter_thread', '_save_thread', '_search_thread', '_inc_filter_thread'):
             t = getattr(self.tab, thread_name, None)
             if t is not None:
                 try:

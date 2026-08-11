@@ -83,11 +83,24 @@ def test_incremental_follow_with_filter_edge_cases():
         new_lines_count_2 = indexer.update_from(os.stat(tf.name).st_size)
         tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count_2, mtime_str="now", ctime_str="now")
         
+        # Czekamy na przetworzenie zdarzen drugiego workera w event loopie
+        for _ in range(50):
+            QCoreApplication.processEvents()
+            time.sleep(0.01)
+        
         assert getattr(tab, "_inc_pending_lines", 0) >= 0
         assert tab.file_controller is not None
         
         print("All Incremental Follow Edge Cases Pass!")
     finally:
+        if 'tab' in locals() and tab is not None:
+            tab.follow_active = False
+            if hasattr(tab, "file_controller") and tab.file_controller is not None:
+                tab.file_controller._stop_background_threads()
+        if 'window' in locals() and window is not None:
+            window.close()
+        for _ in range(10):
+            QCoreApplication.processEvents()
         try:
             os.unlink(tf.name)
         except OSError:
