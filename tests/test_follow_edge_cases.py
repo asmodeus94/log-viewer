@@ -45,53 +45,64 @@ def test_incremental_follow_with_filter_edge_cases():
         # Zwijamy scrollbar do 0 by sprawdzic timer
         tab.text.verticalScrollBar().setValue(0)
         
+        # Zatrzymujemy timer minimapy aby uniknąć pętli w testach
+        if hasattr(tab, '_minimap_update_timer'):
+            tab._minimap_update_timer.stop()
+
         # Aktywujemy Follow
-        tab.cmd_toggle_follow()
-        assert tab.follow_active is True
-        
-        # Symulujemy natlok zdarzen (szybkie dopisywanie uzytkownika do rosnacego pliku logow)
-        with open(tf.name, "ab") as f:
-            for i in range(10, 20):
-                f.write(f"Line {i} - secret incoming\n".encode('utf-8'))
+        with patch.object(tab.file_controller, '_follow_poll'):
+            tab.cmd_toggle_follow()
+            assert tab.follow_active is True
+
+            # Symulujemy natlok zdarzen (szybkie dopisywanie uzytkownika do rosnacego pliku logow)
+            with open(tf.name, "ab") as f:
+                for i in range(10, 20):
+                    f.write(f"Line {i} - secret incoming\n".encode('utf-8'))
+
+            new_lines_count = indexer.update_from(os.stat(tf.name).st_size)
+            assert new_lines_count == 10
+
+            # Wywołanie _on_follow_new_lines (to co wywolywalo Segfault wczesniej przez lambda closure)
+            tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count, mtime_str="now", ctime_str="now")
+
+            # Czekamy na przetworzenie pętli (Worker z szukaniem filtru wysle wyniki)
+            start_time = time.time()
+            while getattr(tab, "_inc_filter_thread", None) is not None and tab._inc_filter_thread.isRunning():
+                QCoreApplication.processEvents()
+                if time.time() - start_time > 5.0:
+                    raise RuntimeError("Timeout waiting for _inc_filter_thread to finish")
+
+            # Dodatkowe przeczyszczenie kolejki, symulujące drobny czas na dokończenie timerów okna
+            for _ in range(50):
+                QCoreApplication.processEvents()
                 
-        new_lines_count = indexer.update_from(os.stat(tf.name).st_size)
-        assert new_lines_count == 10
-        
-        # Wywołanie _on_follow_new_lines (to co wywolywalo Segfault wczesniej przez lambda closure)
-        tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count, mtime_str="now", ctime_str="now")
-        
-        # Czekamy na przetworzenie pętli (Worker z szukaniem filtru wysle wyniki)
-        for _ in range(50):
-            QCoreApplication.processEvents()
-            time.sleep(0.01)
+            # Po przetworzeniu eventow, powinny sie pojawic zaaktualizowane wyniki bitset
+            assert len(tab.filter_results) > 0, "IncrementalWorker filter results were not correctly merged"
             
-        # Po przetworzeniu eventow, powinny sie pojawic zaaktualizowane wyniki bitset
-        assert len(tab.filter_results) > 0, "IncrementalWorker filter results were not correctly merged"
-        
-        # Sprawdzamy czy timer przewijania podbil suwak (QTimer.singleShot w GUI loopie)
-        # Nastepnie odpalamy 100 krokow by timer wygasl
-        for _ in range(50):
-            QCoreApplication.processEvents()
+            max_val = tab.text.verticalScrollBar().maximum()
+            assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
             
-        max_val = tab.text.verticalScrollBar().maximum()
-        assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
-        
-        # Drugi natlok (test na thread leak i wczesniejsze zakonczenie optymalizatora)
-        with open(tf.name, "ab") as f:
-            f.write(b"Line 20 - empty\n")
+            # Drugi natlok (test na thread leak i wczesniejsze zakonczenie optymalizatora)
+            with open(tf.name, "ab") as f:
+                f.write(b"Line 20 - empty\n")
+
+            new_lines_count_2 = indexer.update_from(os.stat(tf.name).st_size)
+            tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count_2, mtime_str="now", ctime_str="now")
             
-        new_lines_count_2 = indexer.update_from(os.stat(tf.name).st_size)
-        tab.file_controller._on_follow_new_lines(new_line_count=new_lines_count_2, mtime_str="now", ctime_str="now")
-        
-        # Czekamy na przetworzenie zdarzen drugiego workera w event loopie
-        for _ in range(50):
-            QCoreApplication.processEvents()
-            time.sleep(0.01)
-        
-        assert getattr(tab, "_inc_pending_lines", 0) >= 0
-        assert tab.file_controller is not None
-        
-        print("All Incremental Follow Edge Cases Pass!")
+            # Czekamy na przetworzenie zdarzen drugiego workera w event loopie
+            start_time = time.time()
+            while getattr(tab, "_inc_filter_thread", None) is not None and tab._inc_filter_thread.isRunning():
+                QCoreApplication.processEvents()
+                if time.time() - start_time > 5.0:
+                    raise RuntimeError("Timeout waiting for _inc_filter_thread to finish")
+
+            for _ in range(50):
+                QCoreApplication.processEvents()
+
+            assert getattr(tab, "_inc_pending_lines", 0) >= 0
+            assert tab.file_controller is not None
+
+            print("All Incremental Follow Edge Cases Pass!")
     finally:
         if 'tab' in locals() and tab is not None:
             tab.follow_active = False
