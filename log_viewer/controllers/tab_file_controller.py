@@ -15,11 +15,15 @@ class FileController(QObject):
         self.tab = tab
 
     def _stop_background_threads(self) -> None:
-        if getattr(self.tab, '_indexer_worker', None) is not None:
-            try:
-                self.tab._indexer_worker.cancel()
-            except Exception:
-                pass
+        for worker_name in ('_indexer_worker', '_filter_worker', '_save_worker', '_save_as_worker', '_export_worker', '_inc_filter_worker'):
+            w = getattr(self.tab, worker_name, None)
+            if w is not None:
+                try:
+                    if hasattr(w, "cancel"):
+                        w.cancel()
+                except Exception:
+                    pass
+                setattr(self.tab, worker_name, None)
         for thread_name in ('_indexer_thread', '_filter_thread', '_save_thread', '_search_thread', '_inc_filter_thread'):
             t = getattr(self.tab, thread_name, None)
             if t is not None:
@@ -463,25 +467,26 @@ class FileController(QObject):
         mtime_str = getattr(self.tab, "_inc_mtime_str", "")
         ctime_str = getattr(self.tab, "_inc_ctime_str", "")
         if new_total_lines > 0:
+            if getattr(self.tab, "filter_results", None) is None or not hasattr(self.tab.filter_results, "resize"):
+                self.tab.filter_results = Bitset(new_total_lines)
+            if getattr(self.tab, "_filter_all_lines", None) is None or not hasattr(self.tab._filter_all_lines, "resize"):
+                self.tab._filter_all_lines = Bitset(new_total_lines)
+
+            self.tab.filter_results.resize(new_total_lines)
+            self.tab._filter_all_lines.resize(new_total_lines)
+
             has_new = False
-            if results_data and (results_data[2] > 0 or sum(results_data[1]) > 0):
-                # Zabezpieczenie przed rzutowaniem przez nadrzędny kontroler na NoneType / Array przy nakładaniu okien asynchronicznych
-                if getattr(self.tab, "filter_results", None) is None or not hasattr(self.tab.filter_results, "resize"):
-                    self.tab.filter_results = Bitset(new_total_lines)
-                if getattr(self.tab, "_filter_all_lines", None) is None or not hasattr(self.tab._filter_all_lines, "resize"):
-                    self.tab._filter_all_lines = Bitset(new_total_lines)
-                    
-                self.tab.filter_results.resize(new_total_lines)
+            if results_data and results_data[1] is not None:
                 inc_res_words = results_data[1]
                 target_res_words = self.tab.filter_results._words
                 for i in range(min(len(inc_res_words), len(target_res_words))):
                     target_res_words[i] |= inc_res_words[i]
                 
-                self.tab._filter_all_lines.resize(new_total_lines)
-                inc_all_words = filter_all_data[1]
-                target_all_words = self.tab._filter_all_lines._words
-                for i in range(min(len(inc_all_words), len(target_all_words))):
-                    target_all_words[i] |= inc_all_words[i]
+                if filter_all_data and filter_all_data[1] is not None:
+                    inc_all_words = filter_all_data[1]
+                    target_all_words = self.tab._filter_all_lines._words
+                    for i in range(min(len(inc_all_words), len(target_all_words))):
+                        target_all_words[i] |= inc_all_words[i]
                 
                 self.tab.filter_results._counts = None
                 self.tab._filter_all_lines._counts = None

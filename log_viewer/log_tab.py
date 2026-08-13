@@ -614,36 +614,23 @@ class LogTab(QWidget):
         self.follow_active = False
 
         try:
-            if self._edge_timer:
+            if getattr(self, "_edge_timer", None) is not None:
                 self._edge_timer.stop()
-            if self._minimap_update_timer:
+            if getattr(self, "_minimap_update_timer", None) is not None:
                 self._minimap_update_timer.stop()
-            if self._scroll_debounce_timer:
+            if getattr(self, "_scroll_debounce_timer", None) is not None:
                 self._scroll_debounce_timer.stop()
-            if self._edge_load_timer:
+            if getattr(self, "_edge_load_timer", None) is not None:
                 self._edge_load_timer.stop()
         except Exception:
             pass
-        if self.filter_engine and self.filter_engine.is_running():
+        if getattr(self, "filter_engine", None) and self.filter_engine.is_running():
             self.filter_engine.cancel()
-        if self._search_engine and self._search_engine.is_running():
+        if getattr(self, "_search_engine", None) and self._search_engine.is_running():
             self._search_engine.cancel()
-        # Anuluj indeksowanie w tle — bez tego pool multiprocessing będzie
-        # działał dalej nawet po zamknięciu karty.
-        if self._indexer_worker is not None:
-            try:
-                self._indexer_worker.cancel()
-            except Exception:
-                pass
-        for t in (self._indexer_thread, self._filter_thread, self._save_thread, self._search_thread):
-            if t is not None:
-                try:
-                    if t.isRunning():
-                        t.quit()
-                        t.wait(2000)
-                except RuntimeError:
-                    pass
-        if self.indexer is not None:
+        if getattr(self, "file_controller", None) is not None:
+            self.file_controller._stop_background_threads()
+        if getattr(self, "indexer", None) is not None:
             try:
                 self.indexer.close()
             except Exception:

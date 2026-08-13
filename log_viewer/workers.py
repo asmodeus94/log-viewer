@@ -317,7 +317,7 @@ class IncrementalFilterWorker(QObject):
     """Worker wykonujący szybkie, inkrementalne wyszukiwanie w locie (dla nowych danych w Follow)."""
     finished = Signal(object, object)  # zwraca: Bitset (trafienia) i Bitset (kontekst)
 
-    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str, context_after: int = 0):
+    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str, context_after: int = 0) -> None:
         super().__init__()
         self._indexer = indexer
         self._start_line = start_line
@@ -328,9 +328,14 @@ class IncrementalFilterWorker(QObject):
         self._negate = negate
         self._encoding = encoding
         self._context_after = context_after
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Anuluje działanie workera inkrementalnego filtrowania."""
+        self._cancel_event.set()
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         results_array = array.array('Q')
         try:
             if self._use_regex:
@@ -339,20 +344,27 @@ class IncrementalFilterWorker(QObject):
                 strategy = PlainTextStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
             
             lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
+            cancel_set = self._cancel_event.is_set
             for (line_no, text) in lines:
+                if cancel_set():
+                    return
                 text_bytes = text.encode(self._encoding, errors='replace')
                 if strategy.match(text_bytes):
                     results_array.append(line_no)
         except BaseException:
             pass
 
-        results_bitset = Bitset(self._end_line)
+        if self._cancel_event.is_set():
+            return
+
         if len(results_array) > 0:
+            results_bitset = Bitset(self._end_line)
             results_bitset.update_indices(results_array)
-            
-        filter_all_lines_bitset = results_bitset.expand_context(self._context_after)
-        
-        res_tuple = (results_bitset._size, results_bitset._words, getattr(results_bitset, '_total_count', -1))
-        all_tuple = (filter_all_lines_bitset._size, filter_all_lines_bitset._words, getattr(filter_all_lines_bitset, '_total_count', -1))
+            filter_all_lines_bitset = results_bitset.expand_context(self._context_after)
+            res_tuple = (results_bitset._size, results_bitset._words, getattr(results_bitset, '_total_count', -1))
+            all_tuple = (filter_all_lines_bitset._size, filter_all_lines_bitset._words, getattr(filter_all_lines_bitset, '_total_count', -1))
+        else:
+            res_tuple = (self._end_line, None, 0)
+            all_tuple = (self._end_line, None, 0)
         
         self.finished.emit(res_tuple, all_tuple)
