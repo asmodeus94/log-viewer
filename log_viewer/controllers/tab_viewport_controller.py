@@ -324,6 +324,7 @@ class ViewportController(QObject):
                                 self._append_lines(new_lines)
                         finally:
                             self.tab._is_loading = False
+                            self._update_current_line_highlight()
                             QtCore.QTimer.singleShot(150, lambda: setattr(self.tab, "_ignore_scroll_events", False))
                 else:
                     next_start = current_last_line + 1
@@ -337,6 +338,7 @@ class ViewportController(QObject):
                                 self._append_lines(new_lines)
                         finally:
                             self.tab._is_loading = False
+                            self._update_current_line_highlight()
                             QtCore.QTimer.singleShot(150, lambda: setattr(self.tab, "_ignore_scroll_events", False))
 
             elif value <= 1000 and self.tab.line_map and self.tab.line_map[0] > 0:
@@ -357,6 +359,7 @@ class ViewportController(QObject):
                         finally:
                             self.tab._ignore_scroll_events = False
                             self.tab._is_loading = False
+                            self._update_current_line_highlight()
                 else:
                     prev_start = max(0, current_first_line - self.tab.window_size_lines)
                     if current_first_line > 0:
@@ -370,8 +373,10 @@ class ViewportController(QObject):
                         finally:
                             self.tab._ignore_scroll_events = False
                             self.tab._is_loading = False
+                            self._update_current_line_highlight()
         except Exception:
             self.tab._is_loading = False
+            self._update_current_line_highlight()
             QtCore.QTimer.singleShot(150, lambda: setattr(self.tab, "_ignore_scroll_events", False))
 
     def _append_lines(self, new_lines: List[Tuple[int, str]]) -> None:
@@ -385,6 +390,7 @@ class ViewportController(QObject):
         try:
             cursor = self.tab.text.textCursor()
             cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+            cursor.setCharFormat(QtGui.QTextCharFormat())
             cursor.beginEditBlock()
             for ln, text in new_lines:
                 display_text, tags = self._prepare_line_for_display(ln, text)
@@ -407,7 +413,7 @@ class ViewportController(QObject):
 
             self.tab.text.set_line_map(self.tab.line_map)
             self._rebuild_extra_selections()
-            self._update_current_line_highlight()
+            self._update_current_line_highlight(force=True)
             scrollbar.setValue(max(0, old_value))
             self._update_position_slider()
         finally:
@@ -424,6 +430,7 @@ class ViewportController(QObject):
             old_val = scrollbar.value()
             cursor = self.tab.text.textCursor()
             cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+            cursor.setCharFormat(QtGui.QTextCharFormat())
             cursor.beginEditBlock()
             for ln, text in reversed(new_lines):
                 display_text, tags = self._prepare_line_for_display(ln, text)
@@ -450,7 +457,7 @@ class ViewportController(QObject):
                 self.tab.line_map = self.tab.line_map[:self.tab.max_display_lines]
             self.tab.text.set_line_map(self.tab.line_map)
             self._rebuild_extra_selections()
-            self._update_current_line_highlight()
+            self._update_current_line_highlight(force=True)
             try:
                 idx = bisect.bisect_left(self.tab.line_map, old_first_file_line)
                 if idx != len(self.tab.line_map) and self.tab.line_map[idx] == old_first_file_line:
@@ -545,8 +552,8 @@ class ViewportController(QObject):
         self._update_current_line_highlight()
         self.tab.text.viewport().update()
 
-    def _update_current_line_highlight(self) -> None:
-        if self.tab._is_loading:
+    def _update_current_line_highlight(self, force: bool = False) -> None:
+        if self.tab._is_loading and not force:
             return
 
         if hasattr(self.tab.text, "set_bookmarks"):

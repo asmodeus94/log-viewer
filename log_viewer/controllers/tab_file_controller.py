@@ -1,9 +1,9 @@
+import array
+import os
+import time
 from typing import Optional
 from PySide6.QtCore import QObject, Qt, Slot, QThread, QTimer
 from PySide6.QtWidgets import QMessageBox, QProgressDialog
-import os
-import time
-import os
 from log_viewer.helpers import fmt_size
 from log_viewer.workers import IndexerWorker
 from log_viewer.indexer import LineIndexer
@@ -448,7 +448,7 @@ class FileController(QObject):
         self.tab._inc_filter_worker = IncrementalFilterWorker(
             self.tab.indexer,
             start_line, new_total_lines,
-            pattern, use_regex, case_sens, negate, self.tab.encoding, context_after
+            pattern, use_regex, case_sens, negate, self.tab.encoding
         )
         self.tab._inc_filter_worker.moveToThread(self.tab._inc_filter_thread)
         self.tab._inc_filter_thread.started.connect(self.tab._inc_filter_worker.run)
@@ -461,8 +461,8 @@ class FileController(QObject):
         self.tab._register_thread_worker(self.tab._inc_filter_thread, self.tab._inc_filter_worker)
         self.tab._inc_filter_thread.start()
 
-    @Slot(object, object)
-    def _on_inc_finished_slot(self, results_data, filter_all_data) -> None:
+    @Slot(object)
+    def _on_inc_finished_slot(self, results_data) -> None:
         new_total_lines = getattr(self.tab, "_inc_new_total_lines", 0)
         mtime_str = getattr(self.tab, "_inc_mtime_str", "")
         ctime_str = getattr(self.tab, "_inc_ctime_str", "")
@@ -473,7 +473,6 @@ class FileController(QObject):
                 self.tab._filter_all_lines = Bitset(new_total_lines)
 
             self.tab.filter_results.resize(new_total_lines)
-            self.tab._filter_all_lines.resize(new_total_lines)
 
             has_new = False
             if results_data and results_data[1] is not None:
@@ -482,15 +481,28 @@ class FileController(QObject):
                 for i in range(min(len(inc_res_words), len(target_res_words))):
                     target_res_words[i] |= inc_res_words[i]
                 
-                if filter_all_data and filter_all_data[1] is not None:
-                    inc_all_words = filter_all_data[1]
-                    target_all_words = self.tab._filter_all_lines._words
-                    for i in range(min(len(inc_all_words), len(target_all_words))):
-                        target_all_words[i] |= inc_all_words[i]
-                
                 self.tab.filter_results._counts = None
-                self.tab._filter_all_lines._counts = None
                 has_new = True
+
+            context_after = getattr(self.tab, "_filter_context_after", 0)
+            should_expand = False
+            if context_after > 0 and len(self.tab.filter_results) > 0:
+                if has_new:
+                    should_expand = True
+                else:
+                    last_hit = self.tab.filter_results[-1]
+                    old_total = self.tab._filter_all_lines._size
+                    if last_hit + context_after >= old_total:
+                        should_expand = True
+
+            if should_expand:
+                self.tab._filter_all_lines = self.tab.filter_results.expand_context(context_after)
+                has_new = True
+            else:
+                self.tab._filter_all_lines.resize(new_total_lines)
+                if has_new:
+                    self.tab._filter_all_lines._words = array.array('Q', self.tab.filter_results._words)
+                    self.tab._filter_all_lines._counts = None
                 
             self._apply_follow_new_lines(mtime_str, ctime_str, force_reload=has_new)
 
