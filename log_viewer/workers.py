@@ -315,9 +315,9 @@ class ExportWorker(QObject):
 
 class IncrementalFilterWorker(QObject):
     """Worker wykonujący szybkie, inkrementalne wyszukiwanie w locie (dla nowych danych w Follow)."""
-    finished = Signal(object, object)  # zwraca: Bitset (trafienia) i Bitset (kontekst)
+    finished = Signal(object)  # zwraca: krotkę z danymi trafień (res_tuple)
 
-    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str, context_after: int = 0) -> None:
+    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str) -> None:
         super().__init__()
         self._indexer = indexer
         self._start_line = start_line
@@ -327,7 +327,6 @@ class IncrementalFilterWorker(QObject):
         self._case_sensitive = case_sensitive
         self._negate = negate
         self._encoding = encoding
-        self._context_after = context_after
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -360,11 +359,8 @@ class IncrementalFilterWorker(QObject):
         if len(results_array) > 0:
             results_bitset = Bitset(self._end_line)
             results_bitset.update_indices(results_array)
-            filter_all_lines_bitset = results_bitset.expand_context(self._context_after)
             res_tuple = (results_bitset._size, results_bitset._words, getattr(results_bitset, '_total_count', -1))
-            all_tuple = (filter_all_lines_bitset._size, filter_all_lines_bitset._words, getattr(filter_all_lines_bitset, '_total_count', -1))
         else:
             res_tuple = (self._end_line, None, 0)
-            all_tuple = (self._end_line, None, 0)
         
-        self.finished.emit(res_tuple, all_tuple)
+        self.finished.emit(res_tuple)
