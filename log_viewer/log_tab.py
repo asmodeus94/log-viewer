@@ -54,9 +54,19 @@ class LogTab(QWidget):
 
 
     # UI elements type hints (from compiled UI)
+    ui: Ui_LogTab
     text: LogPlainTextEdit
     pct_label: QtWidgets.QLabel
     search_results_view: QtWidgets.QListView
+    bm_tree: QtWidgets.QTreeWidget
+    ed_tree: QtWidgets.QTreeWidget
+    btn_del_bookmarks: QtWidgets.QPushButton
+    btn_del_edits: QtWidgets.QPushButton
+    splitter: QtWidgets.QSplitter
+    v_splitter: QtWidgets.QSplitter
+    _lbl_bookmarks: QtWidgets.QLabel
+    _lbl_edits: QtWidgets.QLabel
+    _search_results_label: QtWidgets.QLabel
 
     def _register_thread_worker(self, thread: QtCore.QThread, worker: QtCore.QObject) -> None:
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
@@ -197,9 +207,16 @@ class LogTab(QWidget):
     def _fmt(self, msg_key: str, **kw) -> str:
         return self._main._fmt(msg_key, **kw)
 
-    def _status(self, msg: str) -> None:
+    @property
+    def main_window(self) -> LogViewerWindow:
+        return self._main
+
+    def set_status(self, msg: str) -> None:
         """Aktualizuje status bar (przez sygnał do LogViewerWindow)."""
         self.status_changed.emit(msg)
+
+    def _status(self, msg: str) -> None:
+        self.set_status(msg)
 
     # ----- config accessors (delegowane do LogViewerWindow) -----
 
@@ -503,11 +520,17 @@ class LogTab(QWidget):
     def cmd_toggle_bookmark(self):
         return self.bookmark_controller.cmd_toggle_bookmark()
 
+    def refresh_bookmarks_tree(self) -> None:
+        return self.bookmark_controller.refresh_bookmarks_tree()
+
     def _refresh_bookmarks_tree(self):
-        return self.bookmark_controller._refresh_bookmarks_tree()
+        return self.refresh_bookmarks_tree()
+
+    def refresh_edits_tree(self) -> None:
+        return self.bookmark_controller.refresh_edits_tree()
 
     def _refresh_edits_tree(self):
-        return self.bookmark_controller._refresh_edits_tree()
+        return self.refresh_edits_tree()
 
     def _goto_bookmark(self):
         return self.bookmark_controller._goto_bookmark()
@@ -515,8 +538,11 @@ class LogTab(QWidget):
     def _goto_edit(self):
         return self.bookmark_controller._goto_edit()
 
+    def goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
+        return self.viewport_controller.goto_file_line(ln, is_filtered_index)
+
     def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
-        return self.viewport_controller._goto_file_line(ln, is_filtered_index)
+        return self.goto_file_line(ln, is_filtered_index)
 
 
     def _delete_selected_bookmarks(self):
@@ -591,13 +617,15 @@ class LogTab(QWidget):
             self._start_reindex(saved_line)
 
     # --------------------------------------------------------- misc ----
+    def reload_current_view(self) -> None:
+        return self.viewport_controller.reload_current_view()
+
     def _reload_current_view(self) -> None:
-        return self.viewport_controller._reload_current_view()
+        return self.reload_current_view()
 
-
-    def _refresh_status(self) -> None:
+    def refresh_status(self) -> None:
         if not self.indexer:
-            self._status(self.t("st_ready"))
+            self.set_status(self.t("st_ready"))
             return
         if self.filter_active:
             hits = len(self.filter_results) if getattr(self, "filter_results", None) is not None else 0
@@ -606,7 +634,10 @@ class LogTab(QWidget):
             left = self._fmt("st_done", total=self.indexer.line_count, size=fmt_size(self.indexer.size))
         if len(self.edit_buffer) > 0:
             left += "   |   " + self.t("st_edits").format(n=len(self.edit_buffer))
-        self._status(left)
+        self.set_status(left)
+
+    def _refresh_status(self) -> None:
+        return self.refresh_status()
 
     def close(self) -> None:
         """Zamyka indexer, anuluje wątki. Wywoływane przy zamykaniu zakładki."""

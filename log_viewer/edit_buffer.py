@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, KeysView, Iterator
 
 from .exceptions import FileChangedError, CompressedSaveError
 from .helpers import is_compressed
@@ -42,6 +42,12 @@ class EditBuffer:
 
     def items(self):
         return self._edits.items()
+
+    def keys(self) -> KeysView[int]:
+        return self._edits.keys()
+
+    def __iter__(self) -> Iterator[int]:
+        return iter(self._edits)
 
     def save_to_file(self, src_path: str, progress_cb: Optional[Callable[[float], None]] = None,
                      expected_mtime: Optional[float] = None,

@@ -31,6 +31,22 @@ class ViewportController(QObject):
         super().__init__(tab)
         self.tab = tab
 
+    def rebuild_extra_selections(self) -> None:
+        """Publiczny interfejs do przebudowywania zaznaczeń dodatkowych."""
+        self._rebuild_extra_selections()
+
+    def update_current_line_highlight(self, force: bool = False) -> None:
+        """Publiczny interfejs do aktualizacji podświetlenia bieżącej linii."""
+        self._update_current_line_highlight(force=force)
+
+    def goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
+        """Publiczny interfejs nawigacji do linii pliku."""
+        self._goto_file_line(ln, is_filtered_index=is_filtered_index)
+
+    def reload_current_view(self) -> None:
+        """Publiczny interfejs do przeładowania bieżącego widoku."""
+        self._reload_current_view()
+
     def _load_window(self, at_line: int, force_reload: bool = False) -> None:
         if not self.tab.indexer:
             return

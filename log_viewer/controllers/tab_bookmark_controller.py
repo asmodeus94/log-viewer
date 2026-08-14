@@ -1,12 +1,24 @@
+"""tab_bookmark_controller.py — Kontroler zakładek i widoku edycji dla LogTab."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QMessageBox, QTreeWidgetItem
 from PySide6 import QtGui
 
+if TYPE_CHECKING:
+    from log_viewer.log_tab import LogTab
+
 
 class BookmarkController(QObject):
-    def __init__(self, tab):
+    """Kontroler odpowiedzialny za zarządzanie zakładkami (bookmarks)
+    oraz panelem widoku bufora edycji w pojedynczej karcie.
+    """
+
+    def __init__(self, tab: LogTab) -> None:
         super().__init__(tab)
-        self.tab = tab
+        self.tab: LogTab = tab
 
     def cmd_toggle_bookmark(self) -> None:
         """Przełącza zakładkę w LINII KURSORA.
@@ -24,52 +36,68 @@ class BookmarkController(QObject):
             self.tab.text.setTextCursor(cursor)
             cursor = self.tab.text.textCursor()
         widget_line = cursor.blockNumber()
-        if widget_line < 0 or widget_line >= len(self.tab.line_map):
+        if widget_line < 0 or self.tab.line_map is None or widget_line >= len(self.tab.line_map):
             return
         file_line = self.tab.line_map[widget_line]
         if file_line in self.tab.bookmarks:
             del self.tab.bookmarks[file_line]
-            self.tab._status(self.tab.t("msg_bookmark_removed").format(n=file_line + 1))
+            self.tab.set_status(self.tab.t("msg_bookmark_removed").format(n=file_line + 1))
         else:
             self.tab.bookmarks[file_line] = None
-            self.tab._status(self.tab.t("msg_bookmark_added").format(n=file_line + 1))
-        self._refresh_bookmarks_tree()
-        self.tab.viewport_controller._rebuild_extra_selections()
-        self.tab.viewport_controller._update_current_line_highlight()
+            self.tab.set_status(self.tab.t("msg_bookmark_added").format(n=file_line + 1))
+        self.refresh_bookmarks_tree()
+        self.tab.viewport_controller.rebuild_extra_selections()
+        self.tab.viewport_controller.update_current_line_highlight()
         block = self.tab.text.document().findBlockByNumber(widget_line)
         if block.isValid():
             new_cur = QtGui.QTextCursor(block)
             self.tab.text.setTextCursor(new_cur)
 
-    def _refresh_bookmarks_tree(self) -> None:
+    def refresh_bookmarks_tree(self) -> None:
+        """Odświeża drzewo zakładek w panelu bocznym."""
         self.tab.bm_tree.clear()
-        for ln in sorted(self.tab.bookmarks.keys()):
+        sorted_keys: list[int] = sorted(self.tab.bookmarks.keys())
+        for ln in sorted_keys:
             item = QTreeWidgetItem([f"{ln + 1:,}"])
-            item.setData(0, Qt.UserRole, ln)
+            item.setData(0, int(Qt.ItemDataRole.UserRole), ln)
             self.tab.bm_tree.addTopLevelItem(item)
 
-    def _refresh_edits_tree(self) -> None:
+    _refresh_bookmarks_tree = refresh_bookmarks_tree
+
+    def refresh_edits_tree(self) -> None:
+        """Odświeża drzewo edycji w panelu bocznym."""
         self.tab.ed_tree.clear()
-        for ln in sorted(self.tab.edit_buffer._edits.keys()):
+        sorted_keys: list[int] = sorted(self.tab.edit_buffer.keys())
+        for ln in sorted_keys:
             item = QTreeWidgetItem([f"{ln + 1:,}"])
-            item.setData(0, Qt.UserRole, ln)
+            item.setData(0, int(Qt.ItemDataRole.UserRole), ln)
             self.tab.ed_tree.addTopLevelItem(item)
 
-    def _goto_bookmark(self) -> None:
+    _refresh_edits_tree = refresh_edits_tree
+
+    def goto_bookmark(self) -> None:
+        """Przechodzi do wybranej w drzewie zakładki."""
         item = self.tab.bm_tree.currentItem()
         if not item:
             return
-        ln = item.data(0, Qt.UserRole)
-        self.tab._goto_file_line(ln)
+        val = item.data(0, int(Qt.ItemDataRole.UserRole))
+        if val is not None:
+            self.tab.goto_file_line(int(val))
 
-    def _goto_edit(self) -> None:
+    _goto_bookmark = goto_bookmark
+
+    def goto_edit(self) -> None:
+        """Przechodzi do wybranej w drzewie zmodyfikowanej linii."""
         item = self.tab.ed_tree.currentItem()
         if not item:
             return
-        ln = item.data(0, Qt.UserRole)
-        self.tab._goto_file_line(ln)
+        val = item.data(0, int(Qt.ItemDataRole.UserRole))
+        if val is not None:
+            self.tab.goto_file_line(int(val))
 
-    def _delete_selected_bookmarks(self) -> None:
+    _goto_edit = goto_edit
+
+    def delete_selected_bookmarks(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Zakładki.
 
         Po usunięciu zaznacza następny element w drzewie (jak w IDE —
@@ -77,81 +105,104 @@ class BookmarkController(QObject):
         """
         items = self.tab.bm_tree.selectedItems()
         if not items:
-            self.tab._status(self.tab.t("msg_no_selection"))
+            self.tab.set_status(self.tab.t("msg_no_selection"))
             return
-        first_selected_idx = self.tab.bm_tree.indexOfTopLevelItem(items[0])
+        first_selected_idx: int = self.tab.bm_tree.indexOfTopLevelItem(items[0])
         removed = 0
         for item in items:
-            ln = item.data(0, Qt.UserRole)
-            if ln in self.tab.bookmarks:
-                del self.tab.bookmarks[ln]
-                removed += 1
+            val = item.data(0, int(Qt.ItemDataRole.UserRole))
+            if val is not None:
+                ln = int(val)
+                if ln in self.tab.bookmarks:
+                    del self.tab.bookmarks[ln]
+                    removed += 1
         if removed:
-            self._refresh_bookmarks_tree()
-            self.tab.viewport_controller._rebuild_extra_selections()
-            self.tab.viewport_controller._update_current_line_highlight()
-            self.tab._status(self.tab.t("msg_bookmarks_removed").format(n=removed))
+            self.refresh_bookmarks_tree()
+            self.tab.viewport_controller.rebuild_extra_selections()
+            self.tab.viewport_controller.update_current_line_highlight()
+            self.tab.set_status(self.tab.t("msg_bookmarks_removed").format(n=removed))
             count = self.tab.bm_tree.topLevelItemCount()
             if count > 0:
-                next_idx = min(first_selected_idx, count - 1)
-                self.tab.bm_tree.setCurrentItem(self.tab.bm_tree.topLevelItem(next_idx))
+                next_idx: int = int(min(first_selected_idx, count - 1))
+                top_item = self.tab.bm_tree.topLevelItem(next_idx)
+                if top_item is not None:
+                    self.tab.bm_tree.setCurrentItem(top_item)
 
-    def _delete_selected_edits(self) -> None:
+    _delete_selected_bookmarks = delete_selected_bookmarks
+
+    def delete_selected_edits(self) -> None:
         """Usuwa wszystkie zaznaczone w drzewie Edycje (czyści bufor dla nich).
 
         Po usunięciu zaznacza następny element w drzewie (jak w IDE).
         """
         items = self.tab.ed_tree.selectedItems()
         if not items:
-            self.tab._status(self.tab.t("msg_no_selection"))
+            self.tab.set_status(self.tab.t("msg_no_selection"))
             return
-        first_selected_idx = self.tab.ed_tree.indexOfTopLevelItem(items[0])
+        first_selected_idx: int = self.tab.ed_tree.indexOfTopLevelItem(items[0])
         removed = 0
         for item in items:
-            ln = item.data(0, Qt.UserRole)
-            if self.tab.edit_buffer.has(ln):
-                self.tab.edit_buffer.discard(ln)
-                removed += 1
+            val = item.data(0, int(Qt.ItemDataRole.UserRole))
+            if val is not None:
+                ln = int(val)
+                if self.tab.edit_buffer.has(ln):
+                    self.tab.edit_buffer.discard(ln)
+                    removed += 1
         if removed:
-            self._refresh_edits_tree()
-            self.tab._reload_current_view()
-            self.tab._refresh_status()
-            self.tab._status(self.tab.t("msg_edits_removed").format(n=removed))
+            self.refresh_edits_tree()
+            self.tab.reload_current_view()
+            self.tab.refresh_status()
+            self.tab.set_status(self.tab.t("msg_edits_removed").format(n=removed))
             count = self.tab.ed_tree.topLevelItemCount()
             if count > 0:
-                next_idx = min(first_selected_idx, count - 1)
-                self.tab.ed_tree.setCurrentItem(self.tab.ed_tree.topLevelItem(next_idx))
+                next_idx: int = int(min(first_selected_idx, count - 1))
+                top_item = self.tab.ed_tree.topLevelItem(next_idx)
+                if top_item is not None:
+                    self.tab.ed_tree.setCurrentItem(top_item)
+
+    _delete_selected_edits = delete_selected_edits
 
     def cmd_next_bookmark(self) -> None:
+        """Nawiguje do kolejnej zakładki po aktualnej linii."""
         if not self.tab.bookmarks:
-            QMessageBox.information(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_bookmarks"))
+            QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_bookmarks"))
             return
         cursor = self.tab.text.textCursor()
-        current_file_line = self.tab.line_map[cursor.blockNumber()] if self.tab.line_map else -1
-        sorted_bms = sorted(self.tab.bookmarks.keys())
+        block_num = cursor.blockNumber()
+        current_file_line: int = -1
+        if self.tab.line_map and 0 <= block_num < len(self.tab.line_map):
+            current_file_line = self.tab.line_map[block_num]
+
+        sorted_bms: list[int] = sorted(self.tab.bookmarks.keys())
         for ln in sorted_bms:
             if ln > current_file_line:
-                self.tab._goto_file_line(ln)
+                self.tab.goto_file_line(ln)
                 return
-        self.tab._goto_file_line(sorted_bms[0])
+        self.tab.goto_file_line(sorted_bms[0])
 
     def cmd_prev_bookmark(self) -> None:
+        """Nawiguje do poprzedniej zakładki przed aktualną linią."""
         if not self.tab.bookmarks:
-            QMessageBox.information(self.tab._main, self.tab.t("app_title"), self.tab.t("msg_no_bookmarks"))
+            QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_bookmarks"))
             return
         cursor = self.tab.text.textCursor()
-        current_file_line = self.tab.line_map[cursor.blockNumber()] if self.tab.line_map else (self.tab.indexer.line_count if self.tab.indexer else 0)
-        sorted_bms = sorted(self.tab.bookmarks.keys(), reverse=True)
+        block_num = cursor.blockNumber()
+        current_file_line: int = self.tab.indexer.line_count if self.tab.indexer else 0
+        if self.tab.line_map and 0 <= block_num < len(self.tab.line_map):
+            current_file_line = self.tab.line_map[block_num]
+
+        sorted_bms: list[int] = sorted(self.tab.bookmarks.keys(), reverse=True)
         for ln in sorted_bms:
             if ln < current_file_line:
-                self.tab._goto_file_line(ln)
+                self.tab.goto_file_line(ln)
                 return
-        self.tab._goto_file_line(sorted_bms[0])
+        self.tab.goto_file_line(sorted_bms[0])
 
     def cmd_clear_bookmarks(self) -> None:
+        """Usuwa wszystkie zakładki z bieżącej karty."""
         if not self.tab.bookmarks:
             return
         self.tab.bookmarks.clear()
-        self._refresh_bookmarks_tree()
-        self.tab.viewport_controller._rebuild_extra_selections()
-        self.tab.viewport_controller._update_current_line_highlight()
+        self.refresh_bookmarks_tree()
+        self.tab.viewport_controller.rebuild_extra_selections()
+        self.tab.viewport_controller.update_current_line_highlight()
