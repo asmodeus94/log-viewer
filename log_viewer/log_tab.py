@@ -7,11 +7,11 @@ import time
 import bisect
 import queue
 import atexit
-from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable
+from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable, Set
 
 _running_tasks = set()
 
-from .bitset import bisect_left_custom, bisect_right_custom
+from .bitset import Bitset, bisect_left_custom, bisect_right_custom
 
 if TYPE_CHECKING:
     from .main_window import LogViewerWindow
@@ -34,7 +34,7 @@ from .indexer import LineIndexer
 from .controllers import FileController, EditController, SearchController, FilterController, UIController, BookmarkController, ViewportController
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
-from .workers import IndexerWorker, FilterWorker, SaveWorker, SaveAsWorker, ExportWorker
+from .workers import IndexerWorker, FilterWorker, SaveWorker, SaveAsWorker, ExportWorker, IncrementalFilterWorker
 from .widgets import SearchResultsModel, LogPlainTextEdit
 from .ui.ui_log_tab import Ui_LogTab
 
@@ -109,13 +109,13 @@ class LogTab(QWidget):
 
         # Filtr
         self.filter_active: bool = False
-        self.filter_results: Optional[List[Tuple[int, int, str]]] = []
+        self.filter_results: Optional[Bitset] = None
         self._filter_hit_text_map: Optional[Dict[int, str]] = {}
-        self._filter_hit_lines: Optional[set] = set()
-        self._filter_all_lines: Optional[List[int]] = []
+        self._filter_hit_lines: Optional[Set[int]] = set()
+        self._filter_all_lines: Optional[Bitset] = None
         # Linie kontekstu (N linii po każdym trafieniu) — zbiór numerów linii pliku.
         # Tła kontekstu są dodawane przez ExtraSelections (jak zakładki).
-        self.filter_context_lines: Optional[set] = set()
+        self.filter_context_lines: Optional[Set[int]] = set()
         # Ile linii kontekstu po każdym trafieniu (0 = wyłączone).
         self._filter_context_after: int = 0
 
@@ -214,8 +214,11 @@ class LogTab(QWidget):
     def t(self, key: str) -> str:
         return self._main.t(key)
 
-    def _fmt(self, msg_key: str, **kw) -> str:
+    def fmt(self, msg_key: str, **kw) -> str:
         return self._main._fmt(msg_key, **kw)
+
+    def _fmt(self, msg_key: str, **kw) -> str:
+        return self.fmt(msg_key, **kw)
 
     @property
     def main_window(self) -> LogViewerWindow:
@@ -376,6 +379,218 @@ class LogTab(QWidget):
     def export_worker(self, val: Optional[ExportWorker]) -> None:
         self._export_worker = val
 
+    @property
+    def assigned_title(self) -> str:
+        return getattr(self, "_assigned_title", "")
+
+    @assigned_title.setter
+    def assigned_title(self, val: str) -> None:
+        self._assigned_title = val
+
+    @property
+    def last_file_size(self) -> int:
+        return self._last_file_size
+
+    @last_file_size.setter
+    def last_file_size(self, val: int) -> None:
+        self._last_file_size = val
+
+    @property
+    def last_file_inode(self) -> int:
+        return getattr(self, "_last_file_inode", 0)
+
+    @last_file_inode.setter
+    def last_file_inode(self, val: int) -> None:
+        self._last_file_inode = val
+
+    @property
+    def indexer_thread(self) -> Optional[QThread]:
+        return self._indexer_thread
+
+    @indexer_thread.setter
+    def indexer_thread(self, val: Optional[QThread]) -> None:
+        self._indexer_thread = val
+
+    @property
+    def indexer_worker(self) -> Optional[IndexerWorker]:
+        return self._indexer_worker
+
+    @indexer_worker.setter
+    def indexer_worker(self, val: Optional[IndexerWorker]) -> None:
+        self._indexer_worker = val
+
+    @property
+    def index_progress(self) -> Optional[QProgressDialog]:
+        return self._index_progress
+
+    @index_progress.setter
+    def index_progress(self, val: Optional[QProgressDialog]) -> None:
+        self._index_progress = val
+
+    @property
+    def filter_thread(self) -> Optional[QThread]:
+        return self._filter_thread
+
+    @filter_thread.setter
+    def filter_thread(self, val: Optional[QThread]) -> None:
+        self._filter_thread = val
+
+    @property
+    def filter_worker(self) -> Optional[FilterWorker]:
+        return self._filter_worker
+
+    @filter_worker.setter
+    def filter_worker(self, val: Optional[FilterWorker]) -> None:
+        self._filter_worker = val
+
+    @property
+    def filter_all_lines(self) -> Optional[Bitset]:
+        return getattr(self, "_filter_all_lines", None)
+
+    @filter_all_lines.setter
+    def filter_all_lines(self, val: Optional[Bitset]) -> None:
+        self._filter_all_lines = val
+
+    @property
+    def filter_context_after(self) -> int:
+        return getattr(self, "_filter_context_after", 0)
+
+    @filter_context_after.setter
+    def filter_context_after(self, val: int) -> None:
+        self._filter_context_after = val
+
+    @property
+    def filter_hit_text_map(self) -> Optional[Dict[int, str]]:
+        return getattr(self, "_filter_hit_text_map", None)
+
+    @filter_hit_text_map.setter
+    def filter_hit_text_map(self, val: Optional[Dict[int, str]]) -> None:
+        self._filter_hit_text_map = val
+
+    @property
+    def filter_hit_lines(self) -> Optional[Set[int]]:
+        return getattr(self, "_filter_hit_lines", None)
+
+    @filter_hit_lines.setter
+    def filter_hit_lines(self, val: Optional[Set[int]]) -> None:
+        self._filter_hit_lines = val
+
+    @property
+    def search_thread(self) -> Optional[QThread]:
+        return getattr(self, "_search_thread", None)
+
+    @search_thread.setter
+    def search_thread(self, val: Optional[QThread]) -> None:
+        self._search_thread = val
+
+    @property
+    def search_engine(self) -> Optional[FilterEngine]:
+        return getattr(self, "_search_engine", None)
+
+    @search_engine.setter
+    def search_engine(self, val: Optional[FilterEngine]) -> None:
+        self._search_engine = val
+
+    @property
+    def follow_reindexing(self) -> bool:
+        return self._follow_reindexing
+
+    @follow_reindexing.setter
+    def follow_reindexing(self, val: bool) -> None:
+        self._follow_reindexing = val
+
+    @property
+    def follow_reindex_size(self) -> int:
+        return getattr(self, "_follow_reindex_size", 0)
+
+    @follow_reindex_size.setter
+    def follow_reindex_size(self, val: int) -> None:
+        self._follow_reindex_size = val
+
+    @property
+    def follow_reindex_inode(self) -> int:
+        return getattr(self, "_follow_reindex_inode", 0)
+
+    @follow_reindex_inode.setter
+    def follow_reindex_inode(self, val: int) -> None:
+        self._follow_reindex_inode = val
+
+    @property
+    def pending_reload_filter(self) -> bool:
+        return getattr(self, "_pending_reload_filter", False)
+
+    @pending_reload_filter.setter
+    def pending_reload_filter(self, val: bool) -> None:
+        self._pending_reload_filter = val
+
+    @property
+    def reindex_saved_line(self) -> int:
+        return getattr(self, "_reindex_saved_line", 0)
+
+    @reindex_saved_line.setter
+    def reindex_saved_line(self, val: int) -> None:
+        self._reindex_saved_line = val
+
+    @property
+    def inc_pending_lines(self) -> int:
+        return getattr(self, "_inc_pending_lines", 0)
+
+    @inc_pending_lines.setter
+    def inc_pending_lines(self, val: int) -> None:
+        self._inc_pending_lines = val
+
+    @property
+    def inc_new_total_lines(self) -> int:
+        return getattr(self, "_inc_new_total_lines", 0)
+
+    @inc_new_total_lines.setter
+    def inc_new_total_lines(self, val: int) -> None:
+        self._inc_new_total_lines = val
+
+    @property
+    def inc_mtime_str(self) -> str:
+        return getattr(self, "_inc_mtime_str", "")
+
+    @inc_mtime_str.setter
+    def inc_mtime_str(self, val: str) -> None:
+        self._inc_mtime_str = val
+
+    @property
+    def inc_ctime_str(self) -> str:
+        return getattr(self, "_inc_ctime_str", "")
+
+    @inc_ctime_str.setter
+    def inc_ctime_str(self, val: str) -> None:
+        self._inc_ctime_str = val
+
+    @property
+    def inc_filter_thread(self) -> Optional[QThread]:
+        return getattr(self, "_inc_filter_thread", None)
+
+    @inc_filter_thread.setter
+    def inc_filter_thread(self, val: Optional[QThread]) -> None:
+        self._inc_filter_thread = val
+
+    @property
+    def inc_filter_worker(self) -> Optional[IncrementalFilterWorker]:
+        return getattr(self, "_inc_filter_worker", None)
+
+    @inc_filter_worker.setter
+    def inc_filter_worker(self, val: Optional[IncrementalFilterWorker]) -> None:
+        self._inc_filter_worker = val
+
+    @property
+    def ignore_scroll_events(self) -> bool:
+        return getattr(self, "_ignore_scroll_events", False)
+
+    @ignore_scroll_events.setter
+    def ignore_scroll_events(self, val: bool) -> None:
+        self._ignore_scroll_events = val
+
+    @property
+    def minimap_update_timer(self) -> QTimer:
+        return self._minimap_update_timer
+
     # ------------------------------------------------------------------ UI
     def _setup_ui_elements(self) -> None:
         return self.ui_controller._setup_ui_elements()
@@ -431,8 +646,11 @@ class LogTab(QWidget):
         self.file_loaded.emit(True)
 
     # -------------------------------------------------- virtual window -----
+    def load_window(self, at_line: int, force_reload: bool = False) -> None:
+        return self.viewport_controller.load_window(at_line, force_reload)
+
     def _load_window(self, at_line: int, force_reload: bool = False) -> None:
-        return self.viewport_controller._load_window(at_line, force_reload)
+        return self.load_window(at_line, force_reload)
 
     def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
         return self.viewport_controller._get_filtered_lines(chunk_lines)
@@ -468,11 +686,17 @@ class LogTab(QWidget):
     def _on_minimap_click(self, line_no: int) -> None:
         return self.viewport_controller._on_minimap_click(line_no)
 
+    def update_minimap(self) -> None:
+        return self.ui_controller.update_minimap()
+
     def _update_minimap(self) -> None:
-        return self.ui_controller._update_minimap()
+        return self.update_minimap()
+
+    def update_minimap_viewport(self) -> None:
+        return self.ui_controller.update_minimap_viewport()
 
     def _update_minimap_viewport(self) -> None:
-        return self.ui_controller._update_minimap_viewport()
+        return self.update_minimap_viewport()
 
     def _update_slider_from_scroll(self) -> None:
         return self.viewport_controller._update_slider_from_scroll()

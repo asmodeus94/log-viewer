@@ -1,7 +1,6 @@
 import array
 from PySide6.QtCore import QObject, Qt, Slot, QThread
 from PySide6.QtWidgets import QMessageBox
-import array
 import re
 from typing import Optional, List, Tuple
 from log_viewer.filter_engine import FilterEngine
@@ -119,13 +118,19 @@ class FilterController(QObject):
             self.tab.text.verticalScrollBar().setValue(0)
         finally:
             self.tab._ignore_scroll_events = False
-            
+
         self.tab._status(self.tab._fmt("st_filtered", hits=len(results), total=self.tab.indexer.line_count))
 
     def _update_filter_cache(self) -> None:
         if not self.tab.filter_active or not self.tab.filter_results:
-            self.tab._filter_hit_text_map.clear()
-            self.tab._filter_hit_lines.clear()
+            if getattr(self.tab, "_filter_hit_text_map", None) is not None:
+                self.tab._filter_hit_text_map.clear()
+            else:
+                self.tab._filter_hit_text_map = {}
+            if getattr(self.tab, "_filter_hit_lines", None) is not None:
+                self.tab._filter_hit_lines.clear()
+            else:
+                self.tab._filter_hit_lines = set()
             self.tab._filter_all_lines = array.array('Q')
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
@@ -135,8 +140,14 @@ class FilterController(QObject):
         self.tab.filter_active = False
         self.tab.filter_results = []
         self.tab.filter_context_lines = set()
-        self.tab._filter_hit_text_map.clear()
-        self.tab._filter_hit_lines.clear()
+        if getattr(self.tab, "_filter_hit_text_map", None) is not None:
+            self.tab._filter_hit_text_map.clear()
+        else:
+            self.tab._filter_hit_text_map = {}
+        if getattr(self.tab, "_filter_hit_lines", None) is not None:
+            self.tab._filter_hit_lines.clear()
+        else:
+            self.tab._filter_hit_lines = set()
         self.tab._filter_all_lines = array.array('Q')
         self.tab._filter_context_after = 0
         if not silent:

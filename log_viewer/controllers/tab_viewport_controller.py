@@ -47,6 +47,10 @@ class ViewportController(QObject):
         """Publiczny interfejs do przeładowania bieżącego widoku."""
         self._reload_current_view()
 
+    def load_window(self, at_line: int, force_reload: bool = False) -> None:
+        """Publiczny interfejs do załadowania okna linii do widoku edytora."""
+        self._load_window(at_line, force_reload=force_reload)
+
     def _load_window(self, at_line: int, force_reload: bool = False) -> None:
         if not self.tab.indexer:
             return

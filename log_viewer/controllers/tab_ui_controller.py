@@ -155,6 +155,14 @@ class UIController(QObject):
         # Po reload przebuduj podświetlenie bieżącej linii nowym kolorem.
         self.tab._update_current_line_highlight()
 
+    def update_minimap(self) -> None:
+        """Publiczny interfejs do aktualizacji minimapy."""
+        self._update_minimap()
+
+    def update_minimap_viewport(self) -> None:
+        """Publiczny interfejs do aktualizacji wskaźnika pozycji viewportu na minimapie."""
+        self._update_minimap_viewport()
+
     def _update_minimap(self) -> None:
         if not self.tab.indexer or self.tab.indexer.line_count == 0:
             return

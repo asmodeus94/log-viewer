@@ -998,6 +998,15 @@ class LogViewerWindow(QMainWindow):
             if w is not None:
                 w.setEnabled(has_tabs)
 
+    @property
+    def follow_action(self) -> Optional[QAction]:
+        """Zwraca akcję śledzenia pliku (Follow mode) z paska narzędzi/menu."""
+        return self._follow_action
+
+    def close_tab(self, index: int) -> None:
+        """Zamyka zakładkę o podanym indeksie."""
+        self._on_tab_close_requested(index)
+
     def _on_tab_close_requested(self, index: int) -> None:
         tab = self.tabs.widget(index)
         if not isinstance(tab, LogTab):

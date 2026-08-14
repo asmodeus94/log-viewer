@@ -48,6 +48,30 @@ class Bitset(Sequence[int]):
         self._size = new_size
         self._counts = None
 
+    @property
+    def size(self) -> int:
+        """Zwraca całkowity rozmiar uniwersum bitsetu (liczbę indeksowanych linii)."""
+        return self._size
+
+    def or_words(self, words: Sequence[int]) -> None:
+        """Łączy alternatywą bitową (OR) słowa bitsetu z przekazaną sekwencją."""
+        for i in range(min(len(words), self._num_words)):
+            self._words[i] |= words[i]
+        self._counts = None
+
+    def copy_from(self, other: "Bitset") -> None:
+        """Kopiuje zawartość z innego Bitsetu do bieżącej instancji."""
+        self.resize(other._size)
+        self._words = array.array('Q', other._words)
+        self._num_words = other._num_words
+        self._counts = None
+
+    def clone(self) -> "Bitset":
+        """Zwraca głęboką kopię bieżącego Bitsetu."""
+        new_bs = Bitset(self._size)
+        new_bs._words = array.array('Q', self._words)
+        return new_bs
+
     def __len__(self) -> int:
         self._build_cache()
         return self._total_count
