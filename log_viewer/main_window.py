@@ -1297,11 +1297,12 @@ class LogViewerWindow(QMainWindow):
             if not isinstance(tab, LogTab):
                 continue
             if len(tab.edit_buffer) > 0:
-                if not QMessageBox.question(
+                choice = QMessageBox.question(
                     self, self.t("app_title"),
                     self.t("msg_clear_edits").format(n=len(tab.edit_buffer)) + "\n\n" + self.t("mi_exit") + "?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-                ) == QMessageBox.Yes:
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+                )
+                if choice not in (QMessageBox.StandardButton.Yes, int(QMessageBox.StandardButton.Yes)):
                     event.ignore()
                     return
             tab.close()

@@ -204,9 +204,21 @@ class FileController(QObject):
             self.tab._pending_reload_filter = False
             self.tab.cmd_apply_filter()
 
-    def _start_reindex(self, saved_line: int) -> None:
+    def start_reindex(self, saved_line: int) -> None:
         self.tab._status(self.tab.t("st_opening"))
         self.tab._reindex_saved_line = saved_line
+        
+        if getattr(self.tab, "_indexer_thread", None) is not None:
+            try:
+                if self.tab._indexer_thread.isRunning():
+                    if hasattr(self.tab, "_indexer_worker") and self.tab._indexer_worker:
+                        self.tab._indexer_worker.cancel()
+                    self.tab._indexer_thread.quit()
+                    self.tab._indexer_thread.wait(1000)
+            except RuntimeError:
+                pass
+        self.tab._indexer_thread = None
+        
         self.tab._indexer_thread = QThread()
         self.tab._indexer_worker = IndexerWorker(self.tab.file_path, self.tab.encoding, self.tab.index_interval_bytes)
         self.tab._indexer_worker.moveToThread(self.tab._indexer_thread)
@@ -223,6 +235,8 @@ class FileController(QObject):
         self.tab._indexer_worker.error.connect(self.tab._indexer_worker.deleteLater, Qt.QueuedConnection)
         self.tab._indexer_thread.finished.connect(self.tab._indexer_thread.deleteLater, Qt.QueuedConnection)
         self.tab._indexer_thread.start()
+
+    _start_reindex = start_reindex
 
     @Slot(object)
     def _on_reindex_finished(self, idx: LineIndexer) -> None:

@@ -34,7 +34,7 @@ from .indexer import LineIndexer
 from .controllers import FileController, EditController, SearchController, FilterController, UIController, BookmarkController, ViewportController
 from .filter_engine import FilterEngine
 from .edit_buffer import EditBuffer
-from .workers import IndexerWorker, FilterWorker, SaveWorker
+from .workers import IndexerWorker, FilterWorker, SaveWorker, SaveAsWorker, ExportWorker
 from .widgets import SearchResultsModel, LogPlainTextEdit
 from .ui.ui_log_tab import Ui_LogTab
 
@@ -68,11 +68,13 @@ class LogTab(QWidget):
     _lbl_edits: QtWidgets.QLabel
     _search_results_label: QtWidgets.QLabel
 
-    def _register_thread_worker(self, thread: QtCore.QThread, worker: QtCore.QObject) -> None:
+    def register_thread_worker(self, thread: QtCore.QThread, worker: QtCore.QObject) -> None:
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
         task_ref = (thread, worker)
         _running_tasks.add(task_ref)
         thread.finished.connect(lambda r=task_ref: _running_tasks.discard(r))
+
+    _register_thread_worker = register_thread_worker
 
     def __init__(self, main_window: "LogViewerWindow", parent=None):
         super().__init__(parent)
@@ -162,6 +164,14 @@ class LogTab(QWidget):
         self._save_thread: Optional[QThread] = None
         self._save_worker: Optional[SaveWorker] = None
         self._save_progress: Optional[QProgressDialog] = None
+        self._save_as_thread: Optional[QThread] = None
+        self._save_as_worker: Optional[SaveAsWorker] = None
+        self._save_as_progress: Optional[QProgressDialog] = None
+        self._save_as_path: Optional[str] = None
+        self._export_thread: Optional[QThread] = None
+        self._export_worker: Optional[ExportWorker] = None
+        self._export_progress: Optional[QProgressDialog] = None
+        self._export_path: Optional[str] = None
 
         # Ostatnio wybrany formatter w sesji
         self._last_formatter: str = "JSON"
@@ -251,6 +261,120 @@ class LogTab(QWidget):
     @property
     def theme(self) -> dict:
         return self._main.theme
+
+    # ----- file & worker state properties -----
+
+    @property
+    def file_mtime_at_open(self) -> float:
+        return self._file_mtime_at_open
+
+    @file_mtime_at_open.setter
+    def file_mtime_at_open(self, val: float) -> None:
+        self._file_mtime_at_open = val
+
+    @property
+    def file_size_at_open(self) -> int:
+        return self._file_size_at_open
+
+    @file_size_at_open.setter
+    def file_size_at_open(self, val: int) -> None:
+        self._file_size_at_open = val
+
+    @property
+    def last_formatter(self) -> str:
+        return self._last_formatter
+
+    @last_formatter.setter
+    def last_formatter(self, val: str) -> None:
+        self._last_formatter = val
+
+    @property
+    def save_progress(self) -> Optional[QProgressDialog]:
+        return self._save_progress
+
+    @save_progress.setter
+    def save_progress(self, val: Optional[QProgressDialog]) -> None:
+        self._save_progress = val
+
+    @property
+    def save_thread(self) -> Optional[QThread]:
+        return self._save_thread
+
+    @save_thread.setter
+    def save_thread(self, val: Optional[QThread]) -> None:
+        self._save_thread = val
+
+    @property
+    def save_worker(self) -> Optional[SaveWorker]:
+        return self._save_worker
+
+    @save_worker.setter
+    def save_worker(self, val: Optional[SaveWorker]) -> None:
+        self._save_worker = val
+
+    @property
+    def save_as_progress(self) -> Optional[QProgressDialog]:
+        return self._save_as_progress
+
+    @save_as_progress.setter
+    def save_as_progress(self, val: Optional[QProgressDialog]) -> None:
+        self._save_as_progress = val
+
+    @property
+    def save_as_path(self) -> Optional[str]:
+        return self._save_as_path
+
+    @save_as_path.setter
+    def save_as_path(self, val: Optional[str]) -> None:
+        self._save_as_path = val
+
+    @property
+    def save_as_thread(self) -> Optional[QThread]:
+        return self._save_as_thread
+
+    @save_as_thread.setter
+    def save_as_thread(self, val: Optional[QThread]) -> None:
+        self._save_as_thread = val
+
+    @property
+    def save_as_worker(self) -> Optional[SaveAsWorker]:
+        return self._save_as_worker
+
+    @save_as_worker.setter
+    def save_as_worker(self, val: Optional[SaveAsWorker]) -> None:
+        self._save_as_worker = val
+
+    @property
+    def export_progress(self) -> Optional[QProgressDialog]:
+        return self._export_progress
+
+    @export_progress.setter
+    def export_progress(self, val: Optional[QProgressDialog]) -> None:
+        self._export_progress = val
+
+    @property
+    def export_path(self) -> Optional[str]:
+        return self._export_path
+
+    @export_path.setter
+    def export_path(self, val: Optional[str]) -> None:
+        self._export_path = val
+
+    @property
+    def export_thread(self) -> Optional[QThread]:
+        return self._export_thread
+
+    @export_thread.setter
+    def export_thread(self, val: Optional[QThread]) -> None:
+        self._export_thread = val
+
+    @property
+    def export_worker(self) -> Optional[ExportWorker]:
+        return self._export_worker
+
+    @export_worker.setter
+    def export_worker(self, val: Optional[ExportWorker]) -> None:
+        self._export_worker = val
 
     # ------------------------------------------------------------------ UI
     def _setup_ui_elements(self) -> None:
@@ -421,8 +545,11 @@ class LogTab(QWidget):
     def cmd_clear_search(self) -> None:
         return self.search_controller.cmd_clear_search()
 
+    def get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
+        return self.viewport_controller.get_display_text(file_line_no, widget_line_idx)
+
     def _get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
-        return self.viewport_controller._get_display_text(file_line_no, widget_line_idx)
+        return self.get_display_text(file_line_no, widget_line_idx)
 
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
         return self.viewport_controller._highlight_and_scroll(widget_line_no)
@@ -473,8 +600,11 @@ class LogTab(QWidget):
     def cmd_edit_line(self) -> None:
         return self.edit_controller.cmd_edit_line()
 
+    def revert_edit(self, file_line: int) -> None:
+        return self.edit_controller.revert_edit(file_line)
+
     def _revert_edit(self, file_line: int) -> None:
-        return self.edit_controller._revert_edit(file_line)
+        return self.revert_edit(file_line)
 
     def cmd_save_edits(self) -> None:
         return self.edit_controller.cmd_save_edits()
@@ -483,8 +613,11 @@ class LogTab(QWidget):
     def _on_save_done(self, backup_path: str) -> None:
         return self.edit_controller._on_save_done(backup_path)
 
+    def start_reindex(self, saved_line: int) -> None:
+        return self.file_controller.start_reindex(saved_line)
+
     def _start_reindex(self, saved_line: int) -> None:
-        return self.file_controller._start_reindex(saved_line)
+        return self.start_reindex(saved_line)
 
     @Slot(object)
     def _on_reindex_finished(self, idx: LineIndexer) -> None:
@@ -610,6 +743,7 @@ class LogTab(QWidget):
                 saved_line = self.line_map[cursor.blockNumber()] if self.line_map else 0
             except Exception:
                 saved_line = 0
+            self.file_controller._stop_background_threads()
             try:
                 self.indexer.close()
             except Exception:

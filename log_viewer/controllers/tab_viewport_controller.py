@@ -541,7 +541,7 @@ class ViewportController(QObject):
 
         self.tab.pct_label.setText(f"{pct // 10}%")
 
-    def _get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
+    def get_display_text(self, file_line_no: int, widget_line_idx: int) -> str:
         if self.tab.edit_buffer.has(file_line_no):
             edit = self.tab.edit_buffer.get(file_line_no)
             if edit is not None:
@@ -549,6 +549,8 @@ class ViewportController(QObject):
         if widget_line_idx < len(self.tab.window_lines):
             return self.tab.window_lines[widget_line_idx][1]
         return ""
+
+    _get_display_text = get_display_text
 
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
         block_cursor = QtGui.QTextCursor(self.tab.text.document().findBlockByNumber(widget_line_no))
