@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from PySide6.QtCore import QObject, Qt, Slot, QThread
+
+from PySide6.QtCore import QObject, Qt, QThread, Slot
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
@@ -137,9 +138,12 @@ class EditController(QObject):
             if est_seconds > 5:
                 save_warning = f"\n\n⚠️ Plik ma {size} — zapis potrwa ~{est_seconds:.0f}s."
         choice = QMessageBox.question(
-            self.tab.main_window, self.tab.t("app_title"),
-            self.tab.t("msg_confirm_save").format(n=len(self.tab.edit_buffer), size=size, path=self.tab.file_path) + save_warning,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+            self.tab.main_window,
+            self.tab.t("app_title"),
+            self.tab.t("msg_confirm_save").format(n=len(self.tab.edit_buffer), size=size, path=self.tab.file_path)
+            + save_warning,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
         if choice not in (QMessageBox.StandardButton.Yes, int(QMessageBox.StandardButton.Yes)):
             return
@@ -155,8 +159,10 @@ class EditController(QObject):
 
         save_thread = QThread()
         save_worker = SaveWorker(
-            self.tab.edit_buffer, self.tab.file_path,
-            self.tab.file_mtime_at_open, self.tab.file_size_at_open,
+            self.tab.edit_buffer,
+            self.tab.file_path,
+            self.tab.file_mtime_at_open,
+            self.tab.file_size_at_open,
             self.tab.encoding,
         )
         self.tab.save_thread = save_thread
@@ -189,8 +195,11 @@ class EditController(QObject):
         if progress is not None:
             progress.close()
             self.tab.save_progress = None
-        QMessageBox.information(self.tab.main_window, self.tab.t("app_title"),
-                                self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=self.tab.file_path))
+        QMessageBox.information(
+            self.tab.main_window,
+            self.tab.t("app_title"),
+            self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=self.tab.file_path),
+        )
         try:
             cursor = self.tab.text.textCursor()
             saved_line = self.tab.line_map[cursor.blockNumber()] if self.tab.line_map else 0
@@ -215,7 +224,8 @@ class EditController(QObject):
             progress.close()
             self.tab.save_progress = None
         choice = QMessageBox.question(
-            self.tab.main_window, self.tab.t("app_title"),
+            self.tab.main_window,
+            self.tab.t("app_title"),
             self.tab.t("msg_file_changed").format(error=err, n=len(self.tab.edit_buffer)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -249,9 +259,11 @@ class EditController(QObject):
         if len(self.tab.edit_buffer) == 0:
             return
         choice = QMessageBox.question(
-            self.tab.main_window, self.tab.t("app_title"),
+            self.tab.main_window,
+            self.tab.t("app_title"),
             self.tab.t("msg_clear_edits").format(n=len(self.tab.edit_buffer)),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
         )
         if choice not in (QMessageBox.StandardButton.Yes, int(QMessageBox.StandardButton.Yes)):
             return
@@ -275,8 +287,11 @@ class EditController(QObject):
             progress.deleteLater()
             self.tab.save_as_progress = None
         path = self.tab.save_as_path or ""
-        QMessageBox.information(self.tab.main_window, self.tab.t("app_title"),
-                                self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=path))
+        QMessageBox.information(
+            self.tab.main_window,
+            self.tab.t("app_title"),
+            self.tab.t("msg_save_ok").format(n=len(self.tab.edit_buffer), path=path),
+        )
 
     @Slot(str)
     def _on_save_as_error(self, err: str) -> None:
@@ -289,7 +304,9 @@ class EditController(QObject):
         if err == "cancelled":
             self.tab.set_status(self.tab.t("st_cancelled"))
         else:
-            QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_save_error").format(err=err))
+            QMessageBox.critical(
+                self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_save_error").format(err=err)
+            )
 
     def cmd_save_as(self) -> None:
         """Zapisuje zawartość pliku z uwzględnieniem edycji do nowo wybranego pliku."""
@@ -308,10 +325,12 @@ class EditController(QObject):
         )
         if not path:
             return
-            
+
         self.tab.save_as_path = path
 
-        save_as_progress = QProgressDialog(self.tab.t("dlg_save_as_title"), self.tab.t("btn_cancel"), 0, 100, self.tab.main_window)
+        save_as_progress = QProgressDialog(
+            self.tab.t("dlg_save_as_title"), self.tab.t("btn_cancel"), 0, 100, self.tab.main_window
+        )
         save_as_progress.setWindowTitle(self.tab.t("dlg_save_as_title"))
         save_as_progress.setWindowModality(Qt.WindowModality.NonModal)
         save_as_progress.setValue(0)
@@ -320,8 +339,7 @@ class EditController(QObject):
 
         save_as_thread = QThread()
         save_as_worker = SaveAsWorker(
-            self.tab.edit_buffer, self.tab.file_path, path, self.tab.encoding,
-            total_lines=self.tab.indexer.line_count
+            self.tab.edit_buffer, self.tab.file_path, path, self.tab.encoding, total_lines=self.tab.indexer.line_count
         )
         self.tab.save_as_thread = save_as_thread
         self.tab.save_as_worker = save_as_worker
@@ -357,8 +375,9 @@ class EditController(QObject):
             self.tab.export_progress = None
         path = self.tab.export_path or ""
         self.tab.set_status(self.tab.t("msg_exported").format(n=count, path=path))
-        QMessageBox.information(self.tab.main_window, self.tab.t("app_title"),
-                                self.tab.t("msg_exported").format(n=count, path=path))
+        QMessageBox.information(
+            self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_exported").format(n=count, path=path)
+        )
 
     @Slot(str)
     def _on_export_error(self, err: str) -> None:
@@ -371,7 +390,9 @@ class EditController(QObject):
         if err == "cancelled":
             self.tab.set_status(self.tab.t("st_cancelled"))
         else:
-            QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_export_error").format(err=err))
+            QMessageBox.critical(
+                self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_export_error").format(err=err)
+            )
 
     def cmd_export(self) -> None:
         """Eksportuje przefiltrowany lub cały plik (wraz z edycjami) do nowego pliku."""
@@ -390,10 +411,12 @@ class EditController(QObject):
         )
         if not path:
             return
-            
+
         self.tab.export_path = path
 
-        export_progress = QProgressDialog(self.tab.t("dlg_export_title"), self.tab.t("btn_cancel"), 0, 100, self.tab.main_window)
+        export_progress = QProgressDialog(
+            self.tab.t("dlg_export_title"), self.tab.t("btn_cancel"), 0, 100, self.tab.main_window
+        )
         export_progress.setWindowTitle(self.tab.t("dlg_export_title"))
         export_progress.setWindowModality(Qt.WindowModality.WindowModal)
         export_progress.setValue(0)
@@ -402,11 +425,13 @@ class EditController(QObject):
 
         export_thread = QThread()
         export_worker = ExportWorker(
-            self.tab.edit_buffer, self.tab.file_path, path,
+            self.tab.edit_buffer,
+            self.tab.file_path,
+            path,
             encoding=self.tab.encoding,
             filter_active=self.tab.filter_active,
             filter_results=self.tab.filter_results,
-            total_lines=self.tab.indexer.line_count
+            total_lines=self.tab.indexer.line_count,
         )
         self.tab.export_thread = export_thread
         self.tab.export_worker = export_worker

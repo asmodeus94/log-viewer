@@ -6,9 +6,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtWidgets
-from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
+from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtWidgets
+
 
 def test_follow_toggles_and_scrolls_to_bottom(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -39,6 +40,7 @@ def test_follow_toggles_and_scrolls_to_bottom(temp_log_file):
     max_val = tab.text.verticalScrollBar().maximum()
     assert tab.text.verticalScrollBar().value() == max_val
 
+
 def test_follow_new_lines_scrolls_to_bottom(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))
@@ -48,6 +50,7 @@ def test_follow_new_lines_scrolls_to_bottom(temp_log_file):
     tab = window.open_file_in_tab(path)
 
     from log_viewer.indexer import LineIndexer
+
     indexer = LineIndexer(path, progress_cb=None, encoding="utf-8", index_interval_bytes=1024 * 1024)
     tab.indexer = indexer
     tab.file_path = path

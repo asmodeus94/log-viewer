@@ -1,38 +1,49 @@
 """Widgety PySide6 — LineNumberArea, LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap."""
+
 from __future__ import annotations
 
-from .formatters import format_log
-from .helpers import THEME_DARK
 import bisect
 
-from typing import List, Optional, Tuple, Set
-
-from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import Qt, Signal, QSize, QAbstractListModel, QModelIndex, QPoint, QRectF
+from PySide6 import QtGui
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QFontDatabase, QTextCursor,
-    QPainter, QFontMetrics, QDragEnterEvent, QDropEvent, QPen, QBrush,
+    QAction,
+    QBrush,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QFont,
+    QFontDatabase,
+    QFontMetrics,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QTextCursor,
 )
 from PySide6.QtWidgets import (
-    QMenu, QApplication,
-    QWidget, QPlainTextEdit, QTextEdit, QLabel, QLineEdit, QCheckBox, QPushButton,
-    QDialog, QDialogButtonBox, QSpinBox, QFontComboBox, QGridLayout,
-    QFrame, QSizePolicy, QListView, QVBoxLayout, QHBoxLayout, QComboBox
+    QApplication,
+    QDialog,
+    QDialogButtonBox,
+    QMenu,
+    QPlainTextEdit,
+    QTextEdit,
+    QWidget,
 )
 
-from .helpers import THEME
-from .formatters import FORMATTERS
-from .ui.ui_settings_dialog import Ui_SettingsDialog
+from .formatters import FORMATTERS, format_log
+from .helpers import THEME, THEME_DARK
 from .ui.ui_format_dialog import Ui_FormatDialog
+from .ui.ui_settings_dialog import Ui_SettingsDialog
+
 
 class LineNumberArea(QWidget):
     """Widget rysujący numery linii zsynchronizowany z QPlainTextEdit."""
 
-    def __init__(self, editor: "LogPlainTextEdit"):
+    def __init__(self, editor: LogPlainTextEdit):
         super().__init__(editor)
         self._editor = editor
-        self._line_map: List[int] = []
-        self._bookmarks: Set[int] = set()
+        self._line_map: list[int] = []
+        self._bookmarks: set[int] = set()
         self._width_digits = 5
         # Pocache'owane obiekty rysujące do eliminacji alokacji w paintEvent
         self._bg_color = QColor("#f0f0f0")
@@ -41,7 +52,7 @@ class LineNumberArea(QWidget):
         self._bookmark_pen = QPen(Qt.NoPen)
         self.update_width()
 
-    def set_line_map(self, line_map: List[int]) -> None:
+    def set_line_map(self, line_map: list[int]) -> None:
         self._line_map = line_map
         if line_map:
             max_line = max(line_map) + 1 if line_map else 1
@@ -51,7 +62,7 @@ class LineNumberArea(QWidget):
                 self.update_width()
         self.update()
 
-    def set_bookmarks(self, bookmarks: Set[int]) -> None:
+    def set_bookmarks(self, bookmarks: set[int]) -> None:
         if self._bookmarks != bookmarks:
             self._bookmarks = set(bookmarks)
             self.update()
@@ -81,31 +92,33 @@ class LineNumberArea(QWidget):
         has_bookmarks = len(self._bookmarks) > 0
 
         while block.isValid() and top <= event.rect().bottom():
-            if block.isVisible() and bottom >= event.rect().top():
-                if block_number < len(self._line_map):
-                    raw_file_line = self._line_map[block_number]
-                    file_line_str = f"{raw_file_line + 1:,}"
+            if block.isVisible() and bottom >= event.rect().top() and block_number < len(self._line_map):
+                raw_file_line = self._line_map[block_number]
+                file_line_str = f"{raw_file_line + 1:,}"
 
-                    # Rysuj kropkę wskaźnika zakładek na marginesie
-                    if has_bookmarks and raw_file_line in self._bookmarks:
-                        painter.setPen(self._bookmark_pen)
-                        painter.setBrush(self._bookmark_brush)
-                        cy = top + (font_height // 2)
-                        painter.drawEllipse(QPoint(6, cy), 3, 3)
-                        painter.setPen(self._text_pen)
+                # Rysuj kropkę wskaźnika zakładek na marginesie
+                if has_bookmarks and raw_file_line in self._bookmarks:
+                    painter.setPen(self._bookmark_pen)
+                    painter.setBrush(self._bookmark_brush)
+                    cy = top + (font_height // 2)
+                    painter.drawEllipse(QPoint(6, cy), 3, 3)
+                    painter.setPen(self._text_pen)
 
-                    painter.drawText(
-                        0, top, self.width() - 8,
-                        font_height,
-                        Qt.AlignRight | Qt.AlignVCenter,
-                        file_line_str,
-                    )
+                painter.drawText(
+                    0,
+                    top,
+                    self.width() - 8,
+                    font_height,
+                    Qt.AlignRight | Qt.AlignVCenter,
+                    file_line_str,
+                )
             block = block.next()
             block_number += 1
             top = bottom
             bottom = top + round(self._editor.blockBoundingRect(block).height())
             if block is None:
                 break
+
 
 class LogPlainTextEdit(QPlainTextEdit):
     """QPlainTextEdit z wbudowanym LineNumberArea i obsługą drag&drop plików."""
@@ -122,7 +135,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         self._update_line_number_area_width(0)
         self.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.setReadOnly(True)
-        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setPointSize(10)
 
         self.setFont(font)
@@ -133,11 +146,32 @@ class LogPlainTextEdit(QPlainTextEdit):
         # jak aktywny (tło, podświetlenie, tekst), żeby np. wynik wyszukiwania
         # (żółte tło) nie bladł, gdy focus jest na dolnej liście wyników.
         pal = self.palette()
-        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Highlight, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Highlight))
-        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.HighlightedText, pal.color(QtGui.QPalette.Active, QtGui.QPalette.HighlightedText))
-        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Base, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Base))
-        pal.setColor(QtGui.QPalette.Inactive, QtGui.QPalette.Text, pal.color(QtGui.QPalette.Active, QtGui.QPalette.Text))
+        pal.setColor(
+            QtGui.QPalette.ColorGroup.Inactive,
+            QtGui.QPalette.ColorRole.Highlight,
+            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Highlight),
+        )
+        pal.setColor(
+            QtGui.QPalette.ColorGroup.Inactive,
+            QtGui.QPalette.ColorRole.HighlightedText,
+            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.HighlightedText),
+        )
+        pal.setColor(
+            QtGui.QPalette.ColorGroup.Inactive,
+            QtGui.QPalette.ColorRole.Base,
+            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Base),
+        )
+        pal.setColor(
+            QtGui.QPalette.ColorGroup.Inactive,
+            QtGui.QPalette.ColorRole.Text,
+            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Text),
+        )
         self.setPalette(pal)
+
+    @property
+    def line_number_area(self) -> LineNumberArea:
+        """Zwraca skojarzony widget rysujący numery linii."""
+        return self._line_number_area
 
     def _setup_actions(self):
         self._action_copy = QAction(self)
@@ -189,8 +223,8 @@ class LogPlainTextEdit(QPlainTextEdit):
     def _do_format_selection(self):
         if not self.textCursor().hasSelection():
             return
-        app = self.window() if hasattr(self, 'window') else None
-        if app and hasattr(app, 'cmd_format_selection'):
+        app = self.window() if hasattr(self, "window") else None
+        if app and hasattr(app, "cmd_format_selection"):
             app.cmd_format_selection()
 
     def _do_format_line(self):
@@ -210,20 +244,21 @@ class LogPlainTextEdit(QPlainTextEdit):
 
         if tab and hasattr(tab, "_last_formatter"):
             tab._last_formatter = dialog.get_selected_formatter()
-            
+
         dialog.deleteLater()
 
-    def set_line_map(self, line_map: List[int]) -> None:
+    def set_line_map(self, line_map: list[int]) -> None:
         self._line_number_area.set_line_map(line_map)
 
-    def set_bookmarks(self, bookmarks: Set[int]) -> None:
+    def set_bookmarks(self, bookmarks: set[int]) -> None:
         self._line_number_area.set_bookmarks(bookmarks)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cr = self.contentsRect()
         self._line_number_area.setGeometry(
-            cr.left(), cr.top(),
+            cr.left(),
+            cr.top(),
             self._line_number_area.width(),
             cr.height(),
         )
@@ -271,11 +306,9 @@ class LogPlainTextEdit(QPlainTextEdit):
         else:
             event.ignore()
 
-
-
     def contextMenuEvent(self, event):
-        app = self.window() if hasattr(self, 'window') else None
-        t = getattr(app, 't', lambda k: k)
+        app = self.window() if hasattr(self, "window") else None
+        t = getattr(app, "t", lambda k: k)
 
         menu = QMenu(self)
 
@@ -301,7 +334,6 @@ class LogPlainTextEdit(QPlainTextEdit):
                 menu.addAction(action)
 
         menu.exec(event.globalPos())
-
 
 
 class SettingsDialog(QDialog):
@@ -339,7 +371,7 @@ class SettingsDialog(QDialog):
         self.ui.lbl_max_line_length.setText(self.t("lbl_max_line_length"))
         self.ui.lbl_index_interval.setText(self.t("lbl_index_interval"))
 
-    def get_values(self) -> Tuple[str, int, int, int, int, int]:
+    def get_values(self) -> tuple[str, int, int, int, int, int]:
         family = self.font_combo.currentFont().family()
         return (
             family,
@@ -349,6 +381,7 @@ class SettingsDialog(QDialog):
             self.ml_spin.value(),
             self.ii_spin.value() * 1024 * 1024,
         )
+
 
 class SearchResultsModel(QAbstractListModel):
     """
@@ -363,7 +396,7 @@ class SearchResultsModel(QAbstractListModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._all_results: List[Tuple[int, str]] = []
+        self._all_results: list[tuple[int, str]] = []
         self._visible_count = 0
         self._batch_size = 1000
 
@@ -372,7 +405,7 @@ class SearchResultsModel(QAbstractListModel):
         self._color_info = QColor(THEME_DARK["info"])
         self._color_debug = QColor(THEME_DARK["debug"])
 
-    def set_results(self, results: List[int], indexer=None) -> None:
+    def set_results(self, results: list[int], indexer=None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
         self._all_results = results
@@ -380,7 +413,7 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = min(len(results), self._batch_size)
         self.endResetModel()
 
-    def append_results(self, results: List[Tuple[int, str]]) -> None:
+    def append_results(self, results: list[tuple[int, str]]) -> None:
         """Dodaje wyniki na końcu. Wywołuje beginInsertRows/endInsertRows."""
         if not results:
             return
@@ -422,7 +455,7 @@ class SearchResultsModel(QAbstractListModel):
         """Wymusza wirtualne wyrenderowanie zasięgu aż do podanego wiersza w czasie O(1)."""
         if target_row < self._visible_count:
             return
-            
+
         if target_row >= len(self._all_results):
             target_row = len(self._all_results) - 1
             if target_row < self._visible_count:
@@ -443,7 +476,7 @@ class SearchResultsModel(QAbstractListModel):
             line_no, text = item
         else:
             line_no = item
-            if hasattr(self, '_indexer') and self._indexer:
+            if hasattr(self, "_indexer") and self._indexer:
                 lines = self._indexer.read_lines(line_no, 1)
                 text = lines[0][1] if lines else ""
             else:
@@ -468,7 +501,7 @@ class SearchResultsModel(QAbstractListModel):
         self._indexer = None
         self.endResetModel()
 
-    def get_line_no(self, row: int) -> Optional[int]:
+    def get_line_no(self, row: int) -> int | None:
         """Zwraca numer linii pliku dla danego wiersza wyników."""
         if 0 <= row < len(self._all_results):
             item = self._all_results[row]
@@ -481,7 +514,7 @@ class SearchResultsModel(QAbstractListModel):
         Używa bisect — wyniki są posortowane rosnąco po line_no.
         Zwraca -1 jeśli nie znaleziono dokładnego dopasowania.
         """
-        if hasattr(self._all_results, 'bisect_left'):
+        if hasattr(self._all_results, "bisect_left"):
             idx = self._all_results.bisect_left(line_no)
             if idx < len(self._all_results) and self._all_results[idx] == line_no:
                 # Doładowanie widocznych wierszy
@@ -505,6 +538,7 @@ class SearchResultsModel(QAbstractListModel):
             return idx
         return -1
 
+
 class MiniMap(QWidget):
     """
     Mini-map pokazująca gęstość ERROR/WARN/INFO/DEBUG w całym pliku.
@@ -527,7 +561,7 @@ class MiniMap(QWidget):
         super().__init__(parent)
         self.setFixedWidth(48)
         self.setMinimumHeight(100)
-        self._line_data: List[str] = []  # ["error", "warn", "info", "debug", ""]
+        self._line_data: list[str] = []  # ["error", "warn", "info", "debug", ""]
         self._total_lines: int = 0
         self._viewport_start: float = 0.0  # 0.0–1.0
         self._viewport_end: float = 0.0  # 0.0–1.0
@@ -538,10 +572,26 @@ class MiniMap(QWidget):
             "debug": QColor(THEME["minimap_debug"]),
             "": QColor(THEME["minimap_bg"]),
         }
-        self._bg = QColor(THEME["minimap_bg"])
-        self._viewport_color = QColor(THEME["minimap_viewport"])
 
-    def set_line_data(self, line_data: List[str], total_lines: int) -> None:
+    @property
+    def total_lines(self) -> int:
+        """Zwraca całkowitą liczbę linii reprezentowanych na minimapie."""
+        return self._total_lines
+
+    def apply_theme(self, theme: dict) -> None:
+        """Aktualizuje kolory minimapy na podstawie przekazanego słownika motywu."""
+        self._colors = {
+            "error": QColor(theme["minimap_error"]),
+            "warn": QColor(theme["minimap_warn"]),
+            "info": QColor(theme["minimap_info"]),
+            "debug": QColor(theme["minimap_debug"]),
+            "": QColor(theme["minimap_bg"]),
+        }
+        self._bg = QColor(theme["minimap_bg"])
+        self._viewport_color = QColor(theme["minimap_viewport"])
+        self.update()
+
+    def set_line_data(self, line_data: list[str], total_lines: int) -> None:
         """Ustawia dane mini-mapy. line_data to lista kategorii per linia."""
         self._line_data = line_data
         self._total_lines = total_lines
@@ -611,19 +661,21 @@ class MiniMap(QWidget):
         line_no = int(pct * self._total_lines)
         self.position_clicked.emit(line_no)
 
+
 class FormatDialog(QDialog):
     """
     Dialog pozwalający na sformatowanie przekazanego fragmentu tekstu
     (np. JSON) i jego podgląd. Pamięta wybrany formatter w trakcie sesji.
     """
+
     def __init__(self, parent, text: str, initial_formatter: str = "JSON"):
         super().__init__(parent)
         self.ui = Ui_FormatDialog()
         self.ui.setupUi(self)
 
         self.original_text = text
-        self.app = parent.window() if hasattr(parent, 'window') else parent
-        self.t = self.app.t if hasattr(self.app, 't') else lambda k: k
+        self.app = parent.window() if hasattr(parent, "window") else parent
+        self.t = self.app.t if hasattr(self.app, "t") else lambda k: k
 
         self.editor = None
         if hasattr(parent, "textCursor"):
@@ -670,7 +722,7 @@ class FormatDialog(QDialog):
         current_text = self.text_edit.toPlainText()
         failed_msg = self.t("msg_format_failed") + "\n\n"
         if current_text.startswith(failed_msg):
-            current_text = current_text[len(failed_msg):]
+            current_text = current_text[len(failed_msg) :]
 
         self.original_text = current_text
         self._apply_format(self.formatter_combo.currentText())
@@ -714,6 +766,7 @@ class FormatDialog(QDialog):
         self.original_text = selected_text
         self._apply_format(self.formatter_combo.currentText())
 
+
 class ExpandingLineEdit(QTextEdit):
     """
     Pole tekstowe, które dynamicznie dostosowuje swoją szerokość i wysokość.
@@ -723,6 +776,7 @@ class ExpandingLineEdit(QTextEdit):
     pokazuje suwak.
     Enter zatwierdza, Shift+Enter nowa linia.
     """
+
     returnPressed = Signal()
 
     def __init__(self, *args, **kwargs):
@@ -779,14 +833,13 @@ class ExpandingLineEdit(QTextEdit):
             doc = self.document()
 
             text_str = self.toPlainText()
-            lines = text_str.split('\n')
+            lines = text_str.split("\n")
             max_line_width = max([fm.horizontalAdvance(line) for line in lines] + [0])
 
             text_width = max_line_width + 30
             new_width = max(self.focused_min_width, text_width)
             new_width = min(new_width, self.max_width_limit)
             self.setMinimumWidth(new_width)
-
 
             doc_height = int(doc.size().height()) + 10
             new_height = min(doc_height, self.max_height_limit)

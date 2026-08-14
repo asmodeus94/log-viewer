@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
 from PySide6.QtWidgets import QMessageBox, QProgressDialog
 
@@ -82,7 +83,7 @@ class FileController(QObject):
                 pass
             self.tab.indexer = None
 
-    def open_file(self, path: str, title: Optional[str] = None, preserve_state: bool = False) -> None:
+    def open_file(self, path: str, title: str | None = None, preserve_state: bool = False) -> None:
         """Rozpoczyna asynchroniczne otwarcie i indeksowanie pliku."""
         if not os.path.isfile(path):
             QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
@@ -120,7 +121,7 @@ class FileController(QObject):
         except OSError:
             file_size = 0
 
-        index_progress: Optional[QProgressDialog] = None
+        index_progress: QProgressDialog | None = None
         if file_size > 50 * 1024 * 1024:
             dlg = QProgressDialog(
                 self.tab.fmt("st_indexing", pct="0.0"),
@@ -329,10 +330,12 @@ class FileController(QObject):
             # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
             pass
 
-    def _cancel_follow_if_active(self) -> None:
+    def cancel_follow_if_active(self) -> None:
         """Wyłącza tryb śledzenia (follow) przy ręcznych przesunięciach użytkownika."""
         if self.tab.follow_active:
             self.cmd_toggle_follow()
+
+    _cancel_follow_if_active = cancel_follow_if_active
 
     def cmd_refresh(self) -> None:
         """Sprawdza plik pod kątem aktualizacji jednorazowo."""

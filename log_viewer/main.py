@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 import multiprocessing
-
-from PySide6 import QtWidgets, QtGui
-from PySide6.QtCore import Qt
-
 import os
-from .main_window import LogViewerWindow
+import sys
+
+from PySide6 import QtGui, QtWidgets
+
 from .config import UserConfig
 from .helpers import get_resource_path
+from .main_window import LogViewerWindow
 
 
 def main() -> None:

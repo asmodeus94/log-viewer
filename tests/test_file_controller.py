@@ -8,16 +8,15 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
-from PySide6 import QtWidgets
-from PySide6.QtCore import QThread
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
-
 from log_viewer.bitset import Bitset
 from log_viewer.config import UserConfig
 from log_viewer.controllers.tab_file_controller import FileController
 from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
 from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtWidgets
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QMessageBox, QProgressDialog
 
 
 @pytest.fixture
@@ -32,7 +31,7 @@ def app_context():
         test_file = tmp.name
     with open(test_file, "wb") as f:
         for i in range(100):
-            f.write(f"Line {i} content\n".encode("utf-8"))
+            f.write(f"Line {i} content\n".encode())
 
     tab = window._new_tab()
     idx = LineIndexer(test_file, encoding="utf-8")
@@ -153,8 +152,7 @@ class TestFileController:
         controller = tab.file_controller
 
         new_idx = LineIndexer(test_file, encoding="utf-8")
-        with patch.object(tab, "load_window") as mock_load, \
-             patch.object(tab, "update_minimap") as mock_minimap:
+        with patch.object(tab, "load_window") as mock_load, patch.object(tab, "update_minimap") as mock_minimap:
             controller._on_index_done(new_idx)
             assert tab.indexer is new_idx
             mock_load.assert_called_with(at_line=0)

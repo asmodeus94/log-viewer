@@ -4,13 +4,14 @@ Główny skrypt uruchomieniowy.
 Automatycznie kompiluje zmienione pliki .ui (kompilacja przyrostowa)
 a następnie uruchamia aplikację Log Viewer.
 """
-import sys
+
 import os
+import sys
+
 
 def main():
     # Krok 1: Skompiluj pliki UI przyrostowo
     repo_root = os.path.dirname(os.path.abspath(__file__))
-    compile_script = os.path.join(repo_root, "scripts", "compile_ui.py")
 
     # Dodajemy ścieżkę do sys.path aby zaimportować moduł
     scripts_dir = os.path.join(repo_root, "scripts")
@@ -19,6 +20,7 @@ def main():
 
     try:
         import compile_ui
+
         # Przechwytujemy sys.exit jeśli pojawiłby się w skrypcie (np. brak PySide6)
         try:
             compile_ui.main()
@@ -36,10 +38,12 @@ def main():
 
     try:
         from log_viewer.main import main as log_viewer_main
+
         log_viewer_main()
     except ImportError as e:
         print(f"Error: Could not start log_viewer. ({e})")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

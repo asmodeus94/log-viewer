@@ -2,41 +2,43 @@
 
 from __future__ import annotations
 
-import os
-import time
-import bisect
-import queue
 import atexit
-from typing import Optional, List, Tuple, Dict, Union, TYPE_CHECKING, Callable, Set
+from typing import TYPE_CHECKING
 
-_running_tasks = set()
-
-from .bitset import Bitset, bisect_left_custom, bisect_right_custom
+from .bitset import Bitset
 
 if TYPE_CHECKING:
     from .main_window import LogViewerWindow
 
-from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import Signal, Slot, QTimer, QThread, QPoint
-from PySide6.QtGui import (
-    QColor, QAction
-)
+from PySide6 import QtCore, QtWidgets
+from PySide6.QtCore import QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QAction, QColor
 from PySide6.QtWidgets import (
-    QApplication, QWidget, QMessageBox, QInputDialog,
     QProgressDialog,
+    QWidget,
 )
 
+from .controllers import (
+    BookmarkController,
+    EditController,
+    FileController,
+    FilterController,
+    SearchController,
+    UIController,
+    ViewportController,
+)
+from .edit_buffer import EditBuffer
+from .filter_engine import FilterEngine
 from .helpers import (
-    fmt_size, truncate_for_display,
-    TAG_BOOKMARK, TAG_EDITED, TAG_TRUNCATED,
+    fmt_size,
 )
 from .indexer import LineIndexer
-from .controllers import FileController, EditController, SearchController, FilterController, UIController, BookmarkController, ViewportController
-from .filter_engine import FilterEngine
-from .edit_buffer import EditBuffer
-from .workers import IndexerWorker, FilterWorker, SaveWorker, SaveAsWorker, ExportWorker, IncrementalFilterWorker
-from .widgets import SearchResultsModel, LogPlainTextEdit
 from .ui.ui_log_tab import Ui_LogTab
+from .widgets import LogPlainTextEdit, MiniMap, SearchResultsModel
+from .workers import ExportWorker, FilterWorker, IncrementalFilterWorker, IndexerWorker, SaveAsWorker, SaveWorker
+
+_running_tasks: set = set()
+
 
 class LogTab(QWidget):
     """Jedna zakładka = jeden plik. Zawiera całą logikę per-file.
@@ -52,10 +54,10 @@ class LogTab(QWidget):
     title_changed = Signal(str)
     file_loaded = Signal(bool)  # emitowane po załadowaniu pliku z sukcesem (True) lub błędem (False)
 
-
     # UI elements type hints (from compiled UI)
     ui: Ui_LogTab
     text: LogPlainTextEdit
+    minimap: MiniMap
     pct_label: QtWidgets.QLabel
     search_results_view: QtWidgets.QListView
     bm_tree: QtWidgets.QTreeWidget
@@ -64,9 +66,9 @@ class LogTab(QWidget):
     btn_del_edits: QtWidgets.QPushButton
     splitter: QtWidgets.QSplitter
     v_splitter: QtWidgets.QSplitter
-    _lbl_bookmarks: QtWidgets.QLabel
-    _lbl_edits: QtWidgets.QLabel
-    _search_results_label: QtWidgets.QLabel
+    lbl_bookmarks: QtWidgets.QLabel
+    lbl_edits: QtWidgets.QLabel
+    search_results_label: QtWidgets.QLabel
 
     def register_thread_worker(self, thread: QtCore.QThread, worker: QtCore.QObject) -> None:
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
@@ -76,7 +78,7 @@ class LogTab(QWidget):
 
     _register_thread_worker = register_thread_worker
 
-    def __init__(self, main_window: "LogViewerWindow", parent=None):
+    def __init__(self, main_window: LogViewerWindow, parent=None):
         super().__init__(parent)
         self._main = main_window
         self.file_controller = FileController(self)
@@ -87,35 +89,34 @@ class LogTab(QWidget):
         self.ui_controller = UIController(self)
         self.viewport_controller = ViewportController(self)
 
-
         # Stan pliku
-        self.file_path: Optional[str] = None
-        self.indexer: Optional[LineIndexer] = None
-        self.filter_engine: Optional[FilterEngine] = None
+        self.file_path: str | None = None
+        self.indexer: LineIndexer | None = None
+        self.filter_engine: FilterEngine | None = None
         self.edit_buffer = EditBuffer()
-        self.bookmarks: Dict[int, None] = {}
+        self.bookmarks: dict[int, None] = {}
 
         self._file_mtime_at_open: float = 0.0
         self._file_size_at_open: int = 0
         self._last_file_inode: int = 0
 
         # Cache dla obiektów QColor
-        self._theme_colors: Dict[str, QColor] = {}
+        self._theme_colors: dict[str, QColor] = {}
 
         # Wirtualne okno
         self.window_start: int = 0
-        self.window_lines: List[Tuple[int, str]] = []
-        self.line_map: Optional[List[int]] = []
+        self.window_lines: list[tuple[int, str]] = []
+        self.line_map: list[int] | None = []
 
         # Filtr
         self.filter_active: bool = False
-        self.filter_results: Optional[Bitset] = None
-        self._filter_hit_text_map: Optional[Dict[int, str]] = {}
-        self._filter_hit_lines: Optional[Set[int]] = set()
-        self._filter_all_lines: Optional[Bitset] = None
+        self.filter_results: Bitset | None = None
+        self._filter_hit_text_map: dict[int, str] | None = {}
+        self._filter_hit_lines: set[int] | None = set()
+        self._filter_all_lines: Bitset | None = None
         # Linie kontekstu (N linii po każdym trafieniu) — zbiór numerów linii pliku.
         # Tła kontekstu są dodawane przez ExtraSelections (jak zakładki).
-        self.filter_context_lines: Optional[Set[int]] = set()
+        self.filter_context_lines: set[int] | None = set()
         # Ile linii kontekstu po każdym trafieniu (0 = wyłączone).
         self._filter_context_after: int = 0
 
@@ -128,13 +129,13 @@ class LogTab(QWidget):
         self._last_search_case: bool = False
         self._last_search_negate: bool = False
         # Wyniki wyszukiwania (panel dolny)
-        self._search_results: List[Tuple[int, str]] = []
-        self._search_results_all: List[Union[int, Tuple[int, str]]] = []  # pełne wyniki
+        self._search_results: list[tuple[int, str]] = []
+        self._search_results_all: list[int | tuple[int, str]] = []  # pełne wyniki
         self._search_result_index: int = -1
-        self._search_engine: Optional[FilterEngine] = None
-        self._search_thread: Optional[QThread] = None
-        self._search_worker: Optional[FilterWorker] = None
-        self._search_model: Optional[SearchResultsModel] = None
+        self._search_engine: FilterEngine | None = None
+        self._search_thread: QThread | None = None
+        self._search_worker: FilterWorker | None = None
+        self._search_model: SearchResultsModel | None = None
 
         # Scroll tracking — JEDEN timer do debouncing
         self._scroll_debounce_timer = QTimer(self)
@@ -144,7 +145,7 @@ class LogTab(QWidget):
         self._is_updating_slider = False
         self._is_loading = False
         self._last_edge_load_time: float = 0.0
-        self._minimap_data: List[str] = []
+        self._minimap_data: list[str] = []
         self._minimap_update_timer = QTimer(self)
         self._minimap_update_timer.setSingleShot(True)
         self._minimap_update_timer.setInterval(500)
@@ -156,22 +157,22 @@ class LogTab(QWidget):
         self._follow_reindexing: bool = False
 
         # QThread workers (per-tab)
-        self._indexer_thread: Optional[QThread] = None
-        self._indexer_worker: Optional[IndexerWorker] = None
-        self._index_progress: Optional[QProgressDialog] = None
-        self._filter_thread: Optional[QThread] = None
-        self._filter_worker: Optional[FilterWorker] = None
-        self._save_thread: Optional[QThread] = None
-        self._save_worker: Optional[SaveWorker] = None
-        self._save_progress: Optional[QProgressDialog] = None
-        self._save_as_thread: Optional[QThread] = None
-        self._save_as_worker: Optional[SaveAsWorker] = None
-        self._save_as_progress: Optional[QProgressDialog] = None
-        self._save_as_path: Optional[str] = None
-        self._export_thread: Optional[QThread] = None
-        self._export_worker: Optional[ExportWorker] = None
-        self._export_progress: Optional[QProgressDialog] = None
-        self._export_path: Optional[str] = None
+        self._indexer_thread: QThread | None = None
+        self._indexer_worker: IndexerWorker | None = None
+        self._index_progress: QProgressDialog | None = None
+        self._filter_thread: QThread | None = None
+        self._filter_worker: FilterWorker | None = None
+        self._save_thread: QThread | None = None
+        self._save_worker: SaveWorker | None = None
+        self._save_progress: QProgressDialog | None = None
+        self._save_as_thread: QThread | None = None
+        self._save_as_worker: SaveAsWorker | None = None
+        self._save_as_progress: QProgressDialog | None = None
+        self._save_as_path: str | None = None
+        self._export_thread: QThread | None = None
+        self._export_worker: ExportWorker | None = None
+        self._export_progress: QProgressDialog | None = None
+        self._export_path: str | None = None
 
         # Ostatnio wybrany formatter w sesji
         self._last_formatter: str = "JSON"
@@ -190,6 +191,7 @@ class LogTab(QWidget):
 
         # Timer do ładowania krawędzi zainicjalizowany przed użyciem
         self._edge_load_timer = QTimer(self)
+        self._search_extra_sel: QtWidgets.QTextEdit.ExtraSelection | None = None
 
         # Build UI
         self.ui = Ui_LogTab()
@@ -254,7 +256,7 @@ class LogTab(QWidget):
         return self._main.index_interval_bytes
 
     @property
-    def font_family(self) -> Optional[str]:
+    def font_family(self) -> str | None:
         return self._main.font_family
 
     @property
@@ -292,91 +294,91 @@ class LogTab(QWidget):
         self._last_formatter = val
 
     @property
-    def save_progress(self) -> Optional[QProgressDialog]:
+    def save_progress(self) -> QProgressDialog | None:
         return self._save_progress
 
     @save_progress.setter
-    def save_progress(self, val: Optional[QProgressDialog]) -> None:
+    def save_progress(self, val: QProgressDialog | None) -> None:
         self._save_progress = val
 
     @property
-    def save_thread(self) -> Optional[QThread]:
+    def save_thread(self) -> QThread | None:
         return self._save_thread
 
     @save_thread.setter
-    def save_thread(self, val: Optional[QThread]) -> None:
+    def save_thread(self, val: QThread | None) -> None:
         self._save_thread = val
 
     @property
-    def save_worker(self) -> Optional[SaveWorker]:
+    def save_worker(self) -> SaveWorker | None:
         return self._save_worker
 
     @save_worker.setter
-    def save_worker(self, val: Optional[SaveWorker]) -> None:
+    def save_worker(self, val: SaveWorker | None) -> None:
         self._save_worker = val
 
     @property
-    def save_as_progress(self) -> Optional[QProgressDialog]:
+    def save_as_progress(self) -> QProgressDialog | None:
         return self._save_as_progress
 
     @save_as_progress.setter
-    def save_as_progress(self, val: Optional[QProgressDialog]) -> None:
+    def save_as_progress(self, val: QProgressDialog | None) -> None:
         self._save_as_progress = val
 
     @property
-    def save_as_path(self) -> Optional[str]:
+    def save_as_path(self) -> str | None:
         return self._save_as_path
 
     @save_as_path.setter
-    def save_as_path(self, val: Optional[str]) -> None:
+    def save_as_path(self, val: str | None) -> None:
         self._save_as_path = val
 
     @property
-    def save_as_thread(self) -> Optional[QThread]:
+    def save_as_thread(self) -> QThread | None:
         return self._save_as_thread
 
     @save_as_thread.setter
-    def save_as_thread(self, val: Optional[QThread]) -> None:
+    def save_as_thread(self, val: QThread | None) -> None:
         self._save_as_thread = val
 
     @property
-    def save_as_worker(self) -> Optional[SaveAsWorker]:
+    def save_as_worker(self) -> SaveAsWorker | None:
         return self._save_as_worker
 
     @save_as_worker.setter
-    def save_as_worker(self, val: Optional[SaveAsWorker]) -> None:
+    def save_as_worker(self, val: SaveAsWorker | None) -> None:
         self._save_as_worker = val
 
     @property
-    def export_progress(self) -> Optional[QProgressDialog]:
+    def export_progress(self) -> QProgressDialog | None:
         return self._export_progress
 
     @export_progress.setter
-    def export_progress(self, val: Optional[QProgressDialog]) -> None:
+    def export_progress(self, val: QProgressDialog | None) -> None:
         self._export_progress = val
 
     @property
-    def export_path(self) -> Optional[str]:
+    def export_path(self) -> str | None:
         return self._export_path
 
     @export_path.setter
-    def export_path(self, val: Optional[str]) -> None:
+    def export_path(self, val: str | None) -> None:
         self._export_path = val
 
     @property
-    def export_thread(self) -> Optional[QThread]:
+    def export_thread(self) -> QThread | None:
         return self._export_thread
 
     @export_thread.setter
-    def export_thread(self, val: Optional[QThread]) -> None:
+    def export_thread(self, val: QThread | None) -> None:
         self._export_thread = val
 
     @property
-    def export_worker(self) -> Optional[ExportWorker]:
+    def export_worker(self) -> ExportWorker | None:
         return self._export_worker
 
     @export_worker.setter
-    def export_worker(self, val: Optional[ExportWorker]) -> None:
+    def export_worker(self, val: ExportWorker | None) -> None:
         self._export_worker = val
 
     @property
@@ -404,51 +406,51 @@ class LogTab(QWidget):
         self._last_file_inode = val
 
     @property
-    def indexer_thread(self) -> Optional[QThread]:
+    def indexer_thread(self) -> QThread | None:
         return self._indexer_thread
 
     @indexer_thread.setter
-    def indexer_thread(self, val: Optional[QThread]) -> None:
+    def indexer_thread(self, val: QThread | None) -> None:
         self._indexer_thread = val
 
     @property
-    def indexer_worker(self) -> Optional[IndexerWorker]:
+    def indexer_worker(self) -> IndexerWorker | None:
         return self._indexer_worker
 
     @indexer_worker.setter
-    def indexer_worker(self, val: Optional[IndexerWorker]) -> None:
+    def indexer_worker(self, val: IndexerWorker | None) -> None:
         self._indexer_worker = val
 
     @property
-    def index_progress(self) -> Optional[QProgressDialog]:
+    def index_progress(self) -> QProgressDialog | None:
         return self._index_progress
 
     @index_progress.setter
-    def index_progress(self, val: Optional[QProgressDialog]) -> None:
+    def index_progress(self, val: QProgressDialog | None) -> None:
         self._index_progress = val
 
     @property
-    def filter_thread(self) -> Optional[QThread]:
+    def filter_thread(self) -> QThread | None:
         return self._filter_thread
 
     @filter_thread.setter
-    def filter_thread(self, val: Optional[QThread]) -> None:
+    def filter_thread(self, val: QThread | None) -> None:
         self._filter_thread = val
 
     @property
-    def filter_worker(self) -> Optional[FilterWorker]:
+    def filter_worker(self) -> FilterWorker | None:
         return self._filter_worker
 
     @filter_worker.setter
-    def filter_worker(self, val: Optional[FilterWorker]) -> None:
+    def filter_worker(self, val: FilterWorker | None) -> None:
         self._filter_worker = val
 
     @property
-    def filter_all_lines(self) -> Optional[Bitset]:
+    def filter_all_lines(self) -> Bitset | None:
         return getattr(self, "_filter_all_lines", None)
 
     @filter_all_lines.setter
-    def filter_all_lines(self, val: Optional[Bitset]) -> None:
+    def filter_all_lines(self, val: Bitset | None) -> None:
         self._filter_all_lines = val
 
     @property
@@ -460,35 +462,35 @@ class LogTab(QWidget):
         self._filter_context_after = val
 
     @property
-    def filter_hit_text_map(self) -> Optional[Dict[int, str]]:
+    def filter_hit_text_map(self) -> dict[int, str] | None:
         return getattr(self, "_filter_hit_text_map", None)
 
     @filter_hit_text_map.setter
-    def filter_hit_text_map(self, val: Optional[Dict[int, str]]) -> None:
+    def filter_hit_text_map(self, val: dict[int, str] | None) -> None:
         self._filter_hit_text_map = val
 
     @property
-    def filter_hit_lines(self) -> Optional[Set[int]]:
+    def filter_hit_lines(self) -> set[int] | None:
         return getattr(self, "_filter_hit_lines", None)
 
     @filter_hit_lines.setter
-    def filter_hit_lines(self, val: Optional[Set[int]]) -> None:
+    def filter_hit_lines(self, val: set[int] | None) -> None:
         self._filter_hit_lines = val
 
     @property
-    def search_thread(self) -> Optional[QThread]:
+    def search_thread(self) -> QThread | None:
         return getattr(self, "_search_thread", None)
 
     @search_thread.setter
-    def search_thread(self, val: Optional[QThread]) -> None:
+    def search_thread(self, val: QThread | None) -> None:
         self._search_thread = val
 
     @property
-    def search_engine(self) -> Optional[FilterEngine]:
+    def search_engine(self) -> FilterEngine | None:
         return getattr(self, "_search_engine", None)
 
     @search_engine.setter
-    def search_engine(self, val: Optional[FilterEngine]) -> None:
+    def search_engine(self, val: FilterEngine | None) -> None:
         self._search_engine = val
 
     @property
@@ -564,19 +566,19 @@ class LogTab(QWidget):
         self._inc_ctime_str = val
 
     @property
-    def inc_filter_thread(self) -> Optional[QThread]:
+    def inc_filter_thread(self) -> QThread | None:
         return getattr(self, "_inc_filter_thread", None)
 
     @inc_filter_thread.setter
-    def inc_filter_thread(self, val: Optional[QThread]) -> None:
+    def inc_filter_thread(self, val: QThread | None) -> None:
         self._inc_filter_thread = val
 
     @property
-    def inc_filter_worker(self) -> Optional[IncrementalFilterWorker]:
+    def inc_filter_worker(self) -> IncrementalFilterWorker | None:
         return getattr(self, "_inc_filter_worker", None)
 
     @inc_filter_worker.setter
-    def inc_filter_worker(self, val: Optional[IncrementalFilterWorker]) -> None:
+    def inc_filter_worker(self, val: IncrementalFilterWorker | None) -> None:
         self._inc_filter_worker = val
 
     @property
@@ -588,13 +590,127 @@ class LogTab(QWidget):
         self._ignore_scroll_events = val
 
     @property
+    def theme_colors(self) -> dict[str, QColor]:
+        return getattr(self, "_theme_colors", {})
+
+    @property
+    def is_loading(self) -> bool:
+        return getattr(self, "_is_loading", False)
+
+    @is_loading.setter
+    def is_loading(self, val: bool) -> None:
+        self._is_loading = val
+
+    @property
+    def last_edge_load_time(self) -> float:
+        return getattr(self, "_last_edge_load_time", 0.0)
+
+    @last_edge_load_time.setter
+    def last_edge_load_time(self, val: float) -> None:
+        self._last_edge_load_time = val
+
+    @property
+    def scroll_debounce_timer(self) -> QTimer:
+        return self._scroll_debounce_timer
+
+    @property
+    def edge_load_timer(self) -> QTimer:
+        return self._edge_load_timer
+
+    @property
+    def _search_results_label(self) -> QtWidgets.QLabel:
+        return self.search_results_label
+
+    @property
+    def _lbl_bookmarks(self) -> QtWidgets.QLabel:
+        return self.lbl_bookmarks
+
+    @property
+    def _lbl_edits(self) -> QtWidgets.QLabel:
+        return self.lbl_edits
+
+    @property
     def minimap_update_timer(self) -> QTimer:
         return self._minimap_update_timer
+
+    @property
+    def search_extra_sel(self) -> QtWidgets.QTextEdit.ExtraSelection | None:
+        return getattr(self, "_search_extra_sel", None)
+
+    @search_extra_sel.setter
+    def search_extra_sel(self, val: QtWidgets.QTextEdit.ExtraSelection | None) -> None:
+        self._search_extra_sel = val
+
+    @property
+    def search_model(self) -> SearchResultsModel | None:
+        return getattr(self, "_search_model", None)
+
+    @search_model.setter
+    def search_model(self, val: SearchResultsModel | None) -> None:
+        self._search_model = val
+
+    @property
+    def search_results_all(self) -> Bitset | list[int | tuple[int, str]]:
+        if not hasattr(self, "_search_results_all") or self._search_results_all is None:
+            total = self.indexer.line_count if self.indexer else 0
+            self._search_results_all = Bitset(total)
+        return self._search_results_all
+
+    @search_results_all.setter
+    def search_results_all(self, val: Bitset | list[int | tuple[int, str]]) -> None:
+        self._search_results_all = val
+
+    @property
+    def search_result_index(self) -> int:
+        return getattr(self, "_search_result_index", -1)
+
+    @search_result_index.setter
+    def search_result_index(self, val: int) -> None:
+        self._search_result_index = val
+
+    @property
+    def search_worker(self) -> object:
+        return getattr(self, "_search_worker", None)
+
+    @search_worker.setter
+    def search_worker(self, val: object) -> None:
+        self._search_worker = val
+
+    @property
+    def last_search_regex(self) -> bool:
+        return getattr(self, "_last_search_regex", False)
+
+    @last_search_regex.setter
+    def last_search_regex(self, val: bool) -> None:
+        self._last_search_regex = val
+
+    @property
+    def last_search_case(self) -> bool:
+        return getattr(self, "_last_search_case", False)
+
+    @last_search_case.setter
+    def last_search_case(self, val: bool) -> None:
+        self._last_search_case = val
+
+    @property
+    def last_search_negate(self) -> bool:
+        return getattr(self, "_last_search_negate", False)
+
+    @last_search_negate.setter
+    def last_search_negate(self, val: bool) -> None:
+        self._last_search_negate = val
+
+    @property
+    def last_search_in_filter(self) -> bool:
+        return getattr(self, "_last_search_in_filter", False)
+
+    @last_search_in_filter.setter
+    def last_search_in_filter(self, val: bool) -> None:
+        self._last_search_in_filter = val
 
     # ------------------------------------------------------------------ UI
     def _setup_ui_elements(self) -> None:
         return self.ui_controller._setup_ui_elements()
-
 
     def _apply_font_to_text(self) -> None:
         return self.ui_controller._apply_font_to_text()
@@ -618,11 +734,14 @@ class LogTab(QWidget):
         }
         return self.ui_controller._apply_theme()
 
-    def _update_text_colors(self) -> None:
+    def update_text_colors(self) -> None:
         return self.ui_controller._update_text_colors()
 
+    def _update_text_colors(self) -> None:
+        return self.update_text_colors()
+
     # --------------------------------------------------------- file ops ---
-    def open_file(self, path: str, title: Optional[str] = None) -> None:
+    def open_file(self, path: str, title: str | None = None) -> None:
         return self.file_controller.open_file(path, title)
 
     @Slot(float)
@@ -652,13 +771,13 @@ class LogTab(QWidget):
     def _load_window(self, at_line: int, force_reload: bool = False) -> None:
         return self.load_window(at_line, force_reload)
 
-    def _get_filtered_lines(self, chunk_lines: List[int]) -> List[Tuple[int, str]]:
+    def _get_filtered_lines(self, chunk_lines: list[int]) -> list[tuple[int, str]]:
         return self.viewport_controller._get_filtered_lines(chunk_lines)
 
     def _load_window_impl(self, at_line: int) -> None:
         return self.viewport_controller._load_window_impl(at_line)
 
-    def _prepare_line_for_display(self, file_line_no: int, original_text: str) -> Tuple[str, List[str]]:
+    def _prepare_line_for_display(self, file_line_no: int, original_text: str) -> tuple[str, list[str]]:
         return self.viewport_controller._prepare_line_for_display(file_line_no, original_text)
 
     def _apply_line_format(self, block, tag: str) -> None:
@@ -667,24 +786,36 @@ class LogTab(QWidget):
     def _check_edges(self) -> None:
         return self.viewport_controller._check_edges()
 
-    def _do_check_edges(self) -> None:
+    def do_check_edges(self) -> None:
         return self.viewport_controller._do_check_edges()
 
-    def _append_lines(self, new_lines: List[Tuple[int, str]]) -> None:
+    def _do_check_edges(self) -> None:
+        return self.do_check_edges()
+
+    def _append_lines(self, new_lines: list[tuple[int, str]]) -> None:
         return self.viewport_controller._append_lines(new_lines)
 
-    def _prepend_lines(self, new_lines: List[Tuple[int, str]]) -> None:
+    def _prepend_lines(self, new_lines: list[tuple[int, str]]) -> None:
         return self.viewport_controller._prepend_lines(new_lines)
 
     # ---------------------------------------------------- position slider ---
-    def _on_user_scrolled(self) -> None:
+    def on_user_scrolled(self) -> None:
         return self.viewport_controller._on_user_scrolled()
 
-    def _on_scroll_changed(self, value: int) -> None:
+    def _on_user_scrolled(self) -> None:
+        return self.on_user_scrolled()
+
+    def on_scroll_changed(self, value: int) -> None:
         return self.viewport_controller._on_scroll_changed(value)
 
-    def _on_minimap_click(self, line_no: int) -> None:
+    def _on_scroll_changed(self, value: int) -> None:
+        return self.on_scroll_changed(value)
+
+    def on_minimap_click(self, line_no: int) -> None:
         return self.viewport_controller._on_minimap_click(line_no)
+
+    def _on_minimap_click(self, line_no: int) -> None:
+        return self.on_minimap_click(line_no)
 
     def update_minimap(self) -> None:
         return self.ui_controller.update_minimap()
@@ -701,22 +832,30 @@ class LogTab(QWidget):
     def _update_slider_from_scroll(self) -> None:
         return self.viewport_controller._update_slider_from_scroll()
 
-    def _update_position_slider(self) -> None:
+    def update_position_slider(self) -> None:
         return self.viewport_controller._update_position_slider()
 
+    def _update_position_slider(self) -> None:
+        return self.update_position_slider()
 
     # -------------------------------------------------------------- find ----
     def cmd_find_dialog(self) -> None:
         return self.search_controller.cmd_find_dialog()
 
-    def _compile_search(self) -> Optional[str]:
+    def compile_search(self) -> str | None:
         return self.search_controller._compile_search()
+
+    def _compile_search(self) -> str | None:
+        return self.compile_search()
 
     def _search_pattern_changed(self) -> bool:
         return self.search_controller._search_pattern_changed()
 
-    def _start_background_search(self) -> None:
-        return self.search_controller._start_background_search()
+    def start_background_search(self, start_from_end: bool = False) -> None:
+        return self.search_controller._start_background_search(start_from_end)
+
+    def _start_background_search(self, start_from_end: bool = False) -> None:
+        return self.start_background_search(start_from_end)
 
     @Slot(float, int, str)
     def _on_search_progress(self, pct: float, hits: int, state: str) -> None:
@@ -724,17 +863,25 @@ class LogTab(QWidget):
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
-        return self.search_controller._on_search_finished(results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error)
+        return self.search_controller._on_search_finished(
+            results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
+        )
 
-    def _update_search_results_label(self) -> None:
+    def update_search_results_label(self) -> None:
         return self.search_controller._update_search_results_label()
 
+    def _update_search_results_label(self) -> None:
+        return self.update_search_results_label()
+
+    def navigate_to_search_result(self, index: int) -> None:
+        return self._navigate_to_search_result(index)
+
     def _navigate_to_search_result(self, index: int) -> None:
-        if not self._search_results_all or index < 0 or index >= len(self._search_results_all):
+        if not self.search_results_all or index < 0 or index >= len(self.search_results_all):
             return
         self._cancel_follow_if_active()
         self._search_result_index = index
-        item = self._search_results_all[index]
+        item = self.search_results_all[index]
         line_no = item[0] if isinstance(item, tuple) else item
 
         # Używamy ujednoliconego goto, co od razu poprawia błędy nawigacji
@@ -745,20 +892,24 @@ class LogTab(QWidget):
                 self._highlight_and_scroll(i)
                 break
         if self._search_model and index < len(self._search_results):
-            if hasattr(self._search_model, 'ensure_visible'):
+            if hasattr(self._search_model, "ensure_visible"):
                 self._search_model.ensure_visible(index)
             model_index = self._search_model.index(index, 0)
             self.search_results_view.setCurrentIndex(model_index)
             self.search_results_view.scrollTo(model_index, QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter)
-        self._update_search_results_label()
+        self.update_search_results_label()
 
     @Slot(QtCore.QModelIndex)
-    def _on_search_result_clicked(self, index: QtCore.QModelIndex) -> None:
+    def on_search_result_clicked(self, index: QtCore.QModelIndex) -> None:
         if not index.isValid():
             return
         row = index.row()
         if 0 <= row < len(self._search_results):
-            self._navigate_to_search_result(row)
+            self.navigate_to_search_result(row)
+
+    @Slot(QtCore.QModelIndex)
+    def _on_search_result_clicked(self, index: QtCore.QModelIndex) -> None:
+        return self.on_search_result_clicked(index)
 
     def cmd_find_next(self) -> None:
         return self.search_controller.cmd_find_next()
@@ -778,9 +929,11 @@ class LogTab(QWidget):
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
         return self.viewport_controller._highlight_and_scroll(widget_line_no)
 
-    def _update_current_line_highlight(self) -> None:
+    def update_current_line_highlight(self) -> None:
         return self.viewport_controller._update_current_line_highlight()
 
+    def _update_current_line_highlight(self) -> None:
+        return self.update_current_line_highlight()
 
     # ------------------------------------------------------------ filter ---
     def cmd_filter_dialog(self) -> None:
@@ -795,7 +948,9 @@ class LogTab(QWidget):
 
     @Slot(object, object, object, object, object, object)
     def _on_filter_done(self, results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error) -> None:
-        return self.filter_controller._on_filter_done(results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error)
+        return self.filter_controller._on_filter_done(
+            results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
+        )
 
     def _update_filter_cache(self) -> None:
         return self.filter_controller._update_filter_cache()
@@ -811,11 +966,10 @@ class LogTab(QWidget):
         return self.viewport_controller.cmd_goto_start()
 
     def cmd_reload(self) -> None:
-        return self.viewport_controller.cmd_reload()
+        return self.file_controller.cmd_reload()
 
     def cmd_goto_end(self) -> None:
         return self.viewport_controller.cmd_goto_end()
-
 
     # ------------------------------------------------------------ edit ----
     def cmd_format_selection(self) -> None:
@@ -901,7 +1055,6 @@ class LogTab(QWidget):
     def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
         return self.goto_file_line(ln, is_filtered_index)
 
-
     def _delete_selected_bookmarks(self):
         return self.bookmark_controller._delete_selected_bookmarks()
 
@@ -918,17 +1071,16 @@ class LogTab(QWidget):
         return self.bookmark_controller.cmd_clear_bookmarks()
 
     # ----------------------------------------------------------- follow ----
-    def _cancel_follow_if_active(self) -> None:
-        return self.file_controller._cancel_follow_if_active()
+    def cancel_follow_if_active(self) -> None:
+        return self.file_controller.cancel_follow_if_active()
+
+    _cancel_follow_if_active = cancel_follow_if_active
 
     def cmd_toggle_follow(self) -> None:
         return self.file_controller.cmd_toggle_follow()
 
     def cmd_refresh(self) -> None:
         return self.file_controller.cmd_refresh()
-
-    def cmd_reload(self) -> None:
-        return self.file_controller.cmd_reload()
 
     def _follow_poll(self) -> None:
         return self.file_controller._follow_poll()
@@ -1056,17 +1208,17 @@ class LogTab(QWidget):
             pass
 
 
-
 def _cleanup_running_tasks():
     for task_ref in list(_running_tasks):
         try:
             thread, worker = task_ref
-            if hasattr(worker, 'cancel'):
+            if hasattr(worker, "cancel"):
                 worker.cancel()
             if thread.isRunning():
                 thread.quit()
                 thread.wait(2000)
         except Exception:
             pass
+
 
 atexit.register(_cleanup_running_tasks)

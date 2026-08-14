@@ -1,56 +1,57 @@
 """app.py — LogTab (per-file widget) + LogViewerWindow (tabbed controller)."""
-from __future__ import annotations
 
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtGui import QPalette
-import re
+from __future__ import annotations
 
 import os
 import re
-import sys
-import time
-import bisect
-from typing import Optional, List, Tuple, Dict, Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QSize, QPoint
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import (
-    QAction, QKeySequence, QColor, QTextCharFormat, QFont, QDragEnterEvent,
-    QDropEvent, QCursor,
+    QAction,
+    QGuiApplication,
+    QKeySequence,
+    QPalette,
 )
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QPlainTextEdit, QWidget, QVBoxLayout,
-    QHBoxLayout, QGridLayout, QLabel, QLineEdit, QCheckBox, QPushButton,
-    QMenuBar, QMenu, QStatusBar, QFileDialog, QMessageBox, QInputDialog,
-    QProgressBar, QSplitter, QTreeWidget, QTreeWidgetItem, QSlider,
-    QDialog, QDialogButtonBox, QSpinBox, QComboBox, QFontComboBox,
-    QSizePolicy, QToolBar, QFrame, QProgressDialog, QListView, QTabWidget,
+    QCheckBox,
+    QDialog,
+    QFileDialog,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QSpinBox,
     QTabBar,
+    QToolBar,
+    QWidget,
 )
 
-from .exceptions import FileChangedError, CompressedSaveError
+from .config import UserConfig
 from .helpers import (
-    fmt_size, truncate_for_display, parse_dnd_files, dnd_files_to_open,
-    is_compressed, open_maybe_compressed,
-    WINDOW_SIZE_LINES, MAX_DISPLAY_LINES, MAX_DISPLAY_LINE_LENGTH,
-    FOLLOW_POLL_MS, FILTER_PROGRESS_MS, DEFAULT_ENCODING,
-    TAG_HIGHLIGHT, TAG_BOOKMARK, TAG_EDITED, TAG_TRUNCATED,
-    SUPPORTED_ENCODINGS, OPEN_FILETYPES, THEME_DARK, THEME_LIGHT,
+    DEFAULT_ENCODING,
+    MAX_DISPLAY_LINE_LENGTH,
+    MAX_DISPLAY_LINES,
+    OPEN_FILETYPES,
+    SUPPORTED_ENCODINGS,
+    THEME_DARK,
+    THEME_LIGHT,
+    WINDOW_SIZE_LINES,
 )
 from .i18n import I18N
-from .config import UserConfig
-from .indexer import LineIndexer, IndexEntry
-from .filter_engine import FilterEngine
-from .edit_buffer import EditBuffer
-from .workers import IndexerWorker, FilterWorker, SaveWorker
-from .widgets import LogPlainTextEdit, SettingsDialog, SearchResultsModel, MiniMap, FormatDialog, ExpandingLineEdit
-from .ui.ui_main_window import Ui_LogViewerWindow
-
 from .log_tab import LogTab
+from .ui.ui_main_window import Ui_LogViewerWindow
+from .widgets import ExpandingLineEdit, SettingsDialog
 
 # =====================================================================
 # LogViewerWindow — kontroler z QTabWidget
 # =====================================================================
+
 
 class LogViewerWindow(QMainWindow):
     """Główna aplikacja PySide6 — kontroler zarządzający zakładkami.
@@ -67,8 +68,7 @@ class LogViewerWindow(QMainWindow):
     "zapis potrwa") znajduje się w LogTab.cmd_save_edits.
     """
 
-    def __init__(self, config: Optional[UserConfig] = None,
-                 initial_file: Optional[str] = None):
+    def __init__(self, config: UserConfig | None = None, initial_file: str | None = None):
         super().__init__()
         self.ui = Ui_LogViewerWindow()
         self.ui.setupUi(self)
@@ -80,18 +80,18 @@ class LogViewerWindow(QMainWindow):
         self.max_display_lines: int = int(self.config.get("max_display_lines", MAX_DISPLAY_LINES))
         self.max_display_line_length: int = int(self.config.get("max_display_line_length", MAX_DISPLAY_LINE_LENGTH))
         self.index_interval_bytes: int = int(self.config.get("index_interval_bytes", 1024 * 1024))
-        self.font_family: Optional[str] = self.config.get("font_family", None)
+        self.font_family: str | None = self.config.get("font_family", None)
         self.font_size: int = int(self.config.get("font_size", 10))
 
         # Aktywny motyw (dark/light) — wykrywany z systemu
         self.theme: dict = THEME_DARK
-        self._follow_action: Optional[QAction] = None
-        self._enc_action_group: Optional[QtGui.QActionGroup] = None
+        self._follow_action: QAction | None = None
+        self._enc_action_group: QtGui.QActionGroup | None = None
         self._is_restoring_toolbar: bool = False
 
-        self._dnd_queue: List[str] = []
-        self._dnd_progress_dialog: Optional[QProgressDialog] = None
-        self._dnd_current_tab: Optional[LogTab] = None
+        self._dnd_queue: list[str] = []
+        self._dnd_progress_dialog: QProgressDialog | None = None
+        self._dnd_current_tab: LogTab | None = None
         self._dnd_total_files = 0
 
         # Build UI
@@ -112,13 +112,17 @@ class LogViewerWindow(QMainWindow):
             QTimer.singleShot(100, lambda: self.open_file_in_tab(initial_file))
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        if watched == self.tabs.tabBar() and event.type() == QtCore.QEvent.MouseButtonRelease:
-            if isinstance(event, QtGui.QMouseEvent) and event.button() == Qt.MiddleButton:
-                pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
-                idx = self.tabs.tabBar().tabAt(pos)
-                if idx >= 0:
-                    self._on_tab_close_requested(idx)
-                    return True
+        if (
+            watched == self.tabs.tabBar()
+            and event.type() == QtCore.QEvent.MouseButtonRelease
+            and isinstance(event, QtGui.QMouseEvent)
+            and event.button() == Qt.MiddleButton
+        ):
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            idx = self.tabs.tabBar().tabAt(pos)
+            if idx >= 0:
+                self._on_tab_close_requested(idx)
+                return True
         return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------------ delegation
@@ -175,6 +179,10 @@ class LogViewerWindow(QMainWindow):
             self.btn_apply_filter.setText(self.t("btn_apply_filter"))
         if hasattr(self, "btn_clear_filter"):
             self.btn_clear_filter.setText(self.t("btn_clear_filter"))
+        if hasattr(self, "btn_refresh"):
+            self.btn_refresh.setText(self.t("btn_refresh"))
+        if hasattr(self, "btn_reload"):
+            self.btn_reload.setText(self.t("btn_reload"))
 
         # Zaktualizuj labelki i opcje paska narzędzi
         if hasattr(self, "lbl_search"):
@@ -570,7 +578,9 @@ class LogViewerWindow(QMainWindow):
         main_layout.addWidget(search_panel, 1)
 
         # Pionowy separator między panelem Search a Filter
-        main_sep = QFrame(); main_sep.setFrameShape(QFrame.VLine); main_sep.setFrameShadow(QFrame.Sunken)
+        main_sep = QFrame()
+        main_sep.setFrameShape(QFrame.VLine)
+        main_sep.setFrameShadow(QFrame.Sunken)
         main_layout.addWidget(main_sep)
 
         # ----------------- PRAWA STRONA (Filtrowanie) -----------------
@@ -625,11 +635,11 @@ class LogViewerWindow(QMainWindow):
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
         filter_buttons_layout.addWidget(self.btn_clear_filter)
-        
+
         self.btn_refresh = QPushButton(self.t("btn_refresh"))
         self.btn_refresh.clicked.connect(self.cmd_refresh)
         filter_buttons_layout.addWidget(self.btn_refresh)
-        
+
         self.btn_reload = QPushButton(self.t("btn_reload"))
         self.btn_reload.clicked.connect(self.cmd_reload)
         filter_buttons_layout.addWidget(self.btn_reload)
@@ -676,9 +686,13 @@ class LogViewerWindow(QMainWindow):
         edit_menu = menubar.addMenu(self.t("menu_edit"))
         self._action_find = self._mkaction(self.t("mi_find"), QKeySequence.StandardKey.Find, self.cmd_find_dialog)
         edit_menu.addAction(self._action_find)
-        self._action_find_next = self._mkaction(self.t("mi_find_next"), QKeySequence.StandardKey.FindNext, self.cmd_find_next)
+        self._action_find_next = self._mkaction(
+            self.t("mi_find_next"), QKeySequence.StandardKey.FindNext, self.cmd_find_next
+        )
         edit_menu.addAction(self._action_find_next)
-        self._action_find_prev = self._mkaction(self.t("mi_find_prev"), QKeySequence.StandardKey.FindPrevious, self.cmd_find_prev)
+        self._action_find_prev = self._mkaction(
+            self.t("mi_find_prev"), QKeySequence.StandardKey.FindPrevious, self.cmd_find_prev
+        )
         edit_menu.addAction(self._action_find_prev)
         self._action_clear_search = self._mkaction(self.t("btn_clear_search"), "Ctrl+Shift+C", self.cmd_clear_search)
         edit_menu.addAction(self._action_clear_search)
@@ -700,7 +714,7 @@ class LogViewerWindow(QMainWindow):
         self._follow_action = self._mkaction(self.t("mi_follow"), "Ctrl+T", self.cmd_toggle_follow)
         self._follow_action.setCheckable(True)
         view_menu.addAction(self._follow_action)
-        
+
         self._action_refresh = self._mkaction(self.t("mi_refresh"), QKeySequence.StandardKey.Refresh, self.cmd_refresh)
         view_menu.addAction(self._action_refresh)
         view_menu.addSeparator()
@@ -734,29 +748,21 @@ class LogViewerWindow(QMainWindow):
         lang_menu.addAction(act_en)
 
         view_menu.addSeparator()
-        self._action_next_tab = self._mkaction(
-            self.t("mi_next_tab"),
-            ["Ctrl+]", "Ctrl+Tab"],
-            self.cmd_next_tab
-        )
+        self._action_next_tab = self._mkaction(self.t("mi_next_tab"), ["Ctrl+]", "Ctrl+Tab"], self.cmd_next_tab)
         view_menu.addAction(self._action_next_tab)
 
-        self._action_prev_tab = self._mkaction(
-            self.t("mi_prev_tab"),
-            ["Ctrl+[", "Ctrl+Shift+Tab"],
-            self.cmd_prev_tab
-        )
+        self._action_prev_tab = self._mkaction(self.t("mi_prev_tab"), ["Ctrl+[", "Ctrl+Shift+Tab"], self.cmd_prev_tab)
         view_menu.addAction(self._action_prev_tab)
 
         self._action_close_tab = self._mkaction(
-            self.t("mi_close_tab"),
-            QKeySequence.StandardKey.Close,
-            self.cmd_close_tab
+            self.t("mi_close_tab"), QKeySequence.StandardKey.Close, self.cmd_close_tab
         )
         view_menu.addAction(self._action_close_tab)
 
         view_menu.addSeparator()
-        view_menu.addAction(self._mkaction(self.t("mi_settings"), QKeySequence.StandardKey.Preferences, self.cmd_settings))
+        view_menu.addAction(
+            self._mkaction(self.t("mi_settings"), QKeySequence.StandardKey.Preferences, self.cmd_settings)
+        )
 
         bm_menu = menubar.addMenu(self.t("menu_bookmarks"))
         self._action_toggle_bookmark = self._mkaction(self.t("mi_toggle_bookmark"), "Ctrl+B", self.cmd_toggle_bookmark)
@@ -772,25 +778,42 @@ class LogViewerWindow(QMainWindow):
         goto_menu = menubar.addMenu(self.t("menu_goto"))
         self._action_goto = self._mkaction(self.t("mi_goto"), "Ctrl+G", self.cmd_goto)
         goto_menu.addAction(self._action_goto)
-        self._action_goto_start = self._mkaction(self.t("mi_goto_start"), QKeySequence.StandardKey.MoveToStartOfDocument, self.cmd_goto_start)
+        self._action_goto_start = self._mkaction(
+            self.t("mi_goto_start"), QKeySequence.StandardKey.MoveToStartOfDocument, self.cmd_goto_start
+        )
         goto_menu.addAction(self._action_goto_start)
-        self._action_goto_end = self._mkaction(self.t("mi_goto_end"), QKeySequence.StandardKey.MoveToEndOfDocument, self.cmd_goto_end)
+        self._action_goto_end = self._mkaction(
+            self.t("mi_goto_end"), QKeySequence.StandardKey.MoveToEndOfDocument, self.cmd_goto_end
+        )
         goto_menu.addAction(self._action_goto_end)
 
         help_menu = menubar.addMenu(self.t("menu_help"))
         help_menu.addAction(self._mkaction(self.t("mi_about"), "", self.cmd_about))
 
         self._context_actions = [
-            self._action_reload, self._action_save, self._action_save_as, self._action_export,
-            self._action_find, self._action_find_next, self._action_find_prev, self._action_clear_search,
-            self._action_filter, self._action_clear_filter,
-            self._action_edit_line, self._action_save_edits, self._action_clear_edits,
+            self._action_reload,
+            self._action_save,
+            self._action_save_as,
+            self._action_export,
+            self._action_find,
+            self._action_find_next,
+            self._action_find_prev,
+            self._action_clear_search,
+            self._action_filter,
+            self._action_clear_filter,
+            self._action_edit_line,
+            self._action_save_edits,
+            self._action_clear_edits,
             self._follow_action,
-            self._action_toggle_bookmark, self._action_next_bookmark, self._action_prev_bookmark, self._action_clear_bookmarks,
-            self._action_goto, self._action_goto_start, self._action_goto_end
+            self._action_toggle_bookmark,
+            self._action_next_bookmark,
+            self._action_prev_bookmark,
+            self._action_clear_bookmarks,
+            self._action_goto,
+            self._action_goto_start,
+            self._action_goto_end,
         ]
         self._update_ui_state()
-
 
     def _mkaction(self, label: str, shortcut, handler) -> QAction:
         act = QAction(label, self)
@@ -862,7 +885,7 @@ class LogViewerWindow(QMainWindow):
                 return candidate
             count += 1
 
-    def open_file_in_tab(self, path: str) -> Optional[LogTab]:
+    def open_file_in_tab(self, path: str) -> LogTab | None:
         """Otwiera plik w nowej zakładce."""
         if not os.path.isfile(path):
             QMessageBox.critical(self, self.t("app_title"), self.t("msg_no_file"))
@@ -927,17 +950,20 @@ class LogViewerWindow(QMainWindow):
             tab.text.setFocus()
             tab._update_current_line_highlight()
 
-
     def _save_toolbar_to_tab(self, *args, **kwargs) -> None:
-        if self._is_restoring_toolbar: return
+        if self._is_restoring_toolbar:
+            return
         tab = self.tabs.currentWidget()
-        if not isinstance(tab, LogTab): return
+        if not isinstance(tab, LogTab):
+            return
 
         tab.tb_search_text = self.search_entry.text()
         tab.tb_search_regex = self.search_regex_cb.isChecked()
         tab.tb_search_case = self.search_case_cb.isChecked()
         tab.tb_search_negate = self.search_negate_cb.isChecked()
-        tab.tb_search_in_filter = getattr(self, 'search_in_filter_cb', None) is not None and self.search_in_filter_cb.isChecked()
+        tab.tb_search_in_filter = (
+            getattr(self, "search_in_filter_cb", None) is not None and self.search_in_filter_cb.isChecked()
+        )
 
         tab.tb_filter_text = self.filter_entry.text()
         tab.tb_filter_regex = self.filter_regex_cb.isChecked()
@@ -952,7 +978,7 @@ class LogViewerWindow(QMainWindow):
             self.search_regex_cb.setChecked(tab.tb_search_regex)
             self.search_case_cb.setChecked(tab.tb_search_case)
             self.search_negate_cb.setChecked(tab.tb_search_negate)
-            if hasattr(tab, 'tb_search_in_filter'):
+            if hasattr(tab, "tb_search_in_filter"):
                 self.search_in_filter_cb.setChecked(tab.tb_search_in_filter)
             else:
                 self.search_in_filter_cb.setChecked(False)
@@ -980,7 +1006,6 @@ class LogViewerWindow(QMainWindow):
             getattr(self, "btn_find_next", None),
             getattr(self, "btn_find_prev", None),
             getattr(self, "btn_clear_search", None),
-
             getattr(self, "filter_entry", None),
             getattr(self, "filter_regex_cb", None),
             getattr(self, "filter_case_cb", None),
@@ -999,7 +1024,7 @@ class LogViewerWindow(QMainWindow):
                 w.setEnabled(has_tabs)
 
     @property
-    def follow_action(self) -> Optional[QAction]:
+    def follow_action(self) -> QAction | None:
         """Zwraca akcję śledzenia pliku (Follow mode) z paska narzędzi/menu."""
         return self._follow_action
 
@@ -1013,9 +1038,11 @@ class LogViewerWindow(QMainWindow):
             return
         if getattr(tab, "edit_buffer", None) is not None and len(tab.edit_buffer) > 0:
             choice = QMessageBox.question(
-                self, self.t("app_title"),
+                self,
+                self.t("app_title"),
                 self.t("msg_clear_edits").format(n=len(tab.edit_buffer)),
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
             )
             if choice != QMessageBox.Yes:
                 return
@@ -1197,8 +1224,12 @@ class LogViewerWindow(QMainWindow):
         else:
             event.ignore()
 
+    def on_files_dropped(self, paths: list[str]) -> None:
+        """DnD otwiera każdy plik w nowej zakładce sekwencyjnie."""
+        return self._on_files_dropped(paths)
+
     @Slot(list)
-    def _on_files_dropped(self, paths: List[str]) -> None:
+    def _on_files_dropped(self, paths: list[str]) -> None:
         """DnD otwiera każdy plik w nowej zakładce sekwencyjnie."""
         existing = [p for p in paths if os.path.isfile(p)]
         if not existing:
@@ -1224,7 +1255,9 @@ class LogViewerWindow(QMainWindow):
             self._dnd_progress_dialog = QProgressDialog(
                 self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}"),
                 self.t("btn_cancel"),
-                0, 100, self,
+                0,
+                100,
+                self,
             )
             self._dnd_progress_dialog.setWindowTitle(self.t("app_title"))
             self._dnd_progress_dialog.setWindowModality(Qt.WindowModal)
@@ -1233,7 +1266,9 @@ class LogViewerWindow(QMainWindow):
             self._dnd_progress_dialog.canceled.connect(self._cancel_dnd_queue)
             self._dnd_progress_dialog.show()
         else:
-            self._dnd_progress_dialog.setLabelText(self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}"))
+            self._dnd_progress_dialog.setLabelText(
+                self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}")
+            )
             self._dnd_progress_dialog.setValue(0)
 
         self._dnd_current_tab = self.open_file_in_tab(path)
@@ -1307,9 +1342,11 @@ class LogViewerWindow(QMainWindow):
                 continue
             if len(tab.edit_buffer) > 0:
                 choice = QMessageBox.question(
-                    self, self.t("app_title"),
+                    self,
+                    self.t("app_title"),
                     self.t("msg_clear_edits").format(n=len(tab.edit_buffer)) + "\n\n" + self.t("mi_exit") + "?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
                 )
                 if choice not in (QMessageBox.StandardButton.Yes, int(QMessageBox.StandardButton.Yes)):
                     event.ignore()

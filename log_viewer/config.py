@@ -1,17 +1,22 @@
 """Konfiguracja użytkownika w ~/.log-viewer.json."""
+
 from __future__ import annotations
 
-import sys
-
-import os
 import json
+import os
+import sys
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .helpers import (
-    DEFAULT_ENCODING, WINDOW_SIZE_LINES, MAX_DISPLAY_LINES,
-    MAX_DISPLAY_LINE_LENGTH, INDEX_INTERVAL_BYTES, CONFIG_FILE_PATH,
+    CONFIG_FILE_PATH,
+    DEFAULT_ENCODING,
+    INDEX_INTERVAL_BYTES,
+    MAX_DISPLAY_LINE_LENGTH,
+    MAX_DISPLAY_LINES,
+    WINDOW_SIZE_LINES,
 )
+
 
 def secure_opener(path, flags):
     return os.open(path, flags, 0o600)
@@ -33,7 +38,7 @@ class UserConfig:
       index_interval_bytes: gęstość indeksu (co ile bajtów)
     """
 
-    DEFAULTS: Dict[str, Any] = {
+    DEFAULTS: dict[str, Any] = {
         "language": "pl",
         "encoding": DEFAULT_ENCODING,
         "font_family": None,
@@ -44,22 +49,19 @@ class UserConfig:
         "index_interval_bytes": INDEX_INTERVAL_BYTES,
     }
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self.path = os.path.expanduser(config_path or CONFIG_FILE_PATH)
-        self._data: Dict[str, Any] = dict(self.DEFAULTS)
+        self._data: dict[str, Any] = dict(self.DEFAULTS)
         self._load()
 
     def _load(self) -> None:
         try:
-            with open(self.path, "r", encoding="utf-8") as f:
+            with open(self.path, encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 for k, v in self.DEFAULTS.items():
-                    if k in data:
-                        if v is None:
-                            self._data[k] = data[k]
-                        elif isinstance(data[k], type(v)) or data[k] is None:
-                            self._data[k] = data[k]
+                    if k in data and (v is None or isinstance(data[k], type(v)) or data[k] is None):
+                        self._data[k] = data[k]
         except (OSError, json.JSONDecodeError, ValueError) as e:
             # Brak pliku przy pierwszym uruchomieniu jest normalny — nie loguj
             if isinstance(e, FileNotFoundError):
@@ -72,8 +74,7 @@ class UserConfig:
     def save(self) -> None:
         try:
             tmp_path = os.path.join(
-                os.path.dirname(os.path.abspath(self.path)) or ".",
-                f".log-viewer_cfg_{uuid.uuid4().hex}"
+                os.path.dirname(os.path.abspath(self.path)) or ".", f".log-viewer_cfg_{uuid.uuid4().hex}"
             )
             with open(tmp_path, "w", encoding="utf-8", opener=secure_opener) as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)

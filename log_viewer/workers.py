@@ -1,24 +1,19 @@
 """QThread workers — asynchroniczne indeksowanie, filtrowanie, zapis."""
+
 from __future__ import annotations
 
-from .bitset import Bitset
-from .exceptions import FileChangedError, CompressedSaveError
-from .filter_engine import RegexStrategy, PlainTextStrategy
-from .helpers import open_maybe_compressed
 import array
 import os
-
 import threading
-import time
-import array
-from typing import Optional
 
-from PySide6 import QtCore
 from PySide6.QtCore import QObject, Signal, Slot
 
-from .indexer import LineIndexer
-from .filter_engine import FilterEngine
+from .bitset import Bitset
 from .edit_buffer import EditBuffer
+from .exceptions import CompressedSaveError, FileChangedError
+from .filter_engine import FilterEngine, PlainTextStrategy, RegexStrategy
+from .helpers import open_maybe_compressed
+from .indexer import LineIndexer
 
 
 class IndexerWorker(QObject):
@@ -28,6 +23,7 @@ class IndexerWorker(QObject):
     sprawdza w pętli imap_unordered. Po anulowaniu finished NIE jest emitowane
     (emitowany jest error z komunikatem „cancelled").
     """
+
     progress = Signal(float)
     finished = Signal(object)  # LineIndexer
     error = Signal(str)
@@ -49,8 +45,10 @@ class IndexerWorker(QObject):
     @Slot()
     def run(self):
         try:
+
             def progress_cb(pct: float):
                 self.progress.emit(pct)
+
             # Przekaż cancel_event do LineIndexer — sprawdzi go w pętli
             # imap_unordered i przerwie indeksowanie.
             idx = LineIndexer(
@@ -70,14 +68,23 @@ class IndexerWorker(QObject):
 
 class FilterWorker(QObject):
     """Worker uruchamiający FilterEngine w tle."""
-    progress = Signal(float, int, str, object)  # pct, hits, state, partial_results (array lub None)
-    finished = Signal(object, object, object, object, object, object)  # results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
 
-    def __init__(self, engine: FilterEngine, pattern: str, use_regex: bool,
-                 case_sensitive: bool, negate: bool,
-                 context_after: int = 0,
-                 search_in_filter: bool = False,
-                 filtered_lines: object = None):
+    progress = Signal(float, int, str, object)  # pct, hits, state, partial_results (array lub None)
+    finished = Signal(
+        object, object, object, object, object, object
+    )  # results, context_lines, filter_all_lines, hit_text_map, hit_lines_set, error
+
+    def __init__(
+        self,
+        engine: FilterEngine,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        context_after: int = 0,
+        search_in_filter: bool = False,
+        filtered_lines: object = None,
+    ):
         super().__init__()
         self._engine = engine
         self._pattern = pattern
@@ -90,8 +97,7 @@ class FilterWorker(QObject):
 
     @Slot()
     def run(self):
-        def on_progress(pct: float, hits: int, state: str = "filtering",
-                        partial_results: object = None):
+        def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None):
             self.progress.emit(pct, hits, state, partial_results)
 
         def on_done(results, error):
@@ -106,29 +112,40 @@ class FilterWorker(QObject):
 
             filter_all_lines = results.expand_context(self._context_after)
 
-            res_tuple = (results._size, results._words, getattr(results, '_total_count', -1))
-            all_tuple = (filter_all_lines._size, filter_all_lines._words, getattr(filter_all_lines, '_total_count', -1))
+            res_tuple = results.to_raw()
+            all_tuple = filter_all_lines.to_raw()
 
             self.finished.emit(res_tuple, set(), all_tuple, {}, set(), error)
 
         self._engine.start(
-            self._pattern, self._use_regex, self._case_sensitive, self._negate,
-            on_progress, on_done,
-            search_in_filter=self._search_in_filter, filtered_lines=self._filtered_lines
+            self._pattern,
+            self._use_regex,
+            self._case_sensitive,
+            self._negate,
+            on_progress,
+            on_done,
+            search_in_filter=self._search_in_filter,
+            filtered_lines=self._filtered_lines,
         )
 
 
 class SaveWorker(QObject):
     """Worker zapisujący edycje w tle."""
+
     progress = Signal(float)
     finished = Signal(str)  # backup_path
     error = Signal(str)
     file_changed = Signal(str)
     compressed = Signal(str)
 
-    def __init__(self, edit_buffer: EditBuffer, file_path: str,
-                 expected_mtime: float, expected_size: int,
-                 encoding: str = "utf-8"):
+    def __init__(
+        self,
+        edit_buffer: EditBuffer,
+        file_path: str,
+        expected_mtime: float,
+        expected_size: int,
+        encoding: str = "utf-8",
+    ):
         super().__init__()
         self._edit_buffer = edit_buffer
         self._file_path = file_path
@@ -139,8 +156,10 @@ class SaveWorker(QObject):
     @Slot()
     def run(self):
         try:
+
             def progress_cb(pct: float):
                 self.progress.emit(pct)
+
             backup_path = self._edit_buffer.save_to_file(
                 self._file_path,
                 progress_cb=progress_cb,
@@ -160,11 +179,14 @@ class SaveWorker(QObject):
 
 class SaveAsWorker(QObject):
     """Worker zapisujący zawartość (wraz z modyfikacjami z edit_buffer) do nowego pliku w tle."""
+
     progress = Signal(float)
     finished = Signal()
     error = Signal(str)
 
-    def __init__(self, edit_buffer: EditBuffer, src_path: str, dst_path: str, encoding: str = "utf-8", total_lines: int = 0):
+    def __init__(
+        self, edit_buffer: EditBuffer, src_path: str, dst_path: str, encoding: str = "utf-8", total_lines: int = 0
+    ):
         super().__init__()
         self._edit_buffer = edit_buffer
         self._src_path = src_path
@@ -179,14 +201,12 @@ class SaveAsWorker(QObject):
     @Slot()
     def run(self):
         try:
-            
             edits = self._edit_buffer._edits
             cancel_set = self._cancel_event.is_set
             line_no = 0
             last_progress_lines = 0
 
-            with open_maybe_compressed(self._src_path, "rb") as src, \
-                 open_maybe_compressed(self._dst_path, "wb") as dst:
+            with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as dst:
                 for raw in src:
                     if line_no in edits:
                         new_text = edits[line_no]
@@ -194,14 +214,14 @@ class SaveAsWorker(QObject):
                             dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
                     else:
                         dst.write(raw)
-                    
+
                     line_no += 1
                     if self._total_lines and (line_no - last_progress_lines) > 5000:
                         if cancel_set():
                             break
                         self.progress.emit(line_no / self._total_lines * 100.0)
                         last_progress_lines = line_no
-            
+
             if cancel_set():
                 self.error.emit("cancelled")
                 try:
@@ -217,13 +237,21 @@ class SaveAsWorker(QObject):
 
 class ExportWorker(QObject):
     """Worker eksportujący wyniki filtrowania lub pełny plik z uwzględnieniem edycji z edit_buffer."""
+
     progress = Signal(float)
     finished = Signal(int)  # count
     error = Signal(str)
 
-    def __init__(self, edit_buffer: EditBuffer, src_path: str, dst_path: str,
-                 encoding: str = "utf-8", filter_active: bool = False,
-                 filter_results=None, total_lines: int = 0):
+    def __init__(
+        self,
+        edit_buffer: EditBuffer,
+        src_path: str,
+        dst_path: str,
+        encoding: str = "utf-8",
+        filter_active: bool = False,
+        filter_results=None,
+        total_lines: int = 0,
+    ):
         super().__init__()
         self._edit_buffer = edit_buffer
         self._src_path = src_path
@@ -241,15 +269,13 @@ class ExportWorker(QObject):
     def run(self):
         try:
             count = 0
-            
+
             cancel_set = self._cancel_event.is_set
             edits = self._edit_buffer._edits
             line_no = 0
             last_progress_lines = 0
 
-            with open_maybe_compressed(self._src_path, "rb") as src, \
-                 open_maybe_compressed(self._dst_path, "wb") as out:
-                
+            with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as out:
                 if not self._filter_active:
                     for raw in src:
                         if line_no in edits:
@@ -260,7 +286,7 @@ class ExportWorker(QObject):
                         else:
                             out.write(raw)
                             count += 1
-                        
+
                         line_no += 1
                         if self._total_lines and (line_no - last_progress_lines) > 5000:
                             if cancel_set():
@@ -273,7 +299,7 @@ class ExportWorker(QObject):
                     word_idx = 0
                     bit_idx = 0
                     w = words[0] if num_words > 0 else 0
-                    
+
                     for raw in src:
                         if w & (1 << bit_idx):
                             if line_no in edits:
@@ -284,14 +310,14 @@ class ExportWorker(QObject):
                             else:
                                 out.write(raw)
                                 count += 1
-                            
+
                         line_no += 1
                         if self._total_lines and (line_no - last_progress_lines) > 5000:
                             if cancel_set():
                                 break
                             self.progress.emit(line_no / self._total_lines * 100.0)
                             last_progress_lines = line_no
-                            
+
                         bit_idx += 1
                         if bit_idx == 64:
                             bit_idx = 0
@@ -313,11 +339,23 @@ class ExportWorker(QObject):
         except BaseException as e:
             self.error.emit(str(e))
 
+
 class IncrementalFilterWorker(QObject):
     """Worker wykonujący szybkie, inkrementalne wyszukiwanie w locie (dla nowych danych w Follow)."""
+
     finished = Signal(object)  # zwraca: krotkę z danymi trafień (res_tuple)
 
-    def __init__(self, indexer: LineIndexer, start_line: int, end_line: int, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool, encoding: str) -> None:
+    def __init__(
+        self,
+        indexer: LineIndexer,
+        start_line: int,
+        end_line: int,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        encoding: str,
+    ) -> None:
         super().__init__()
         self._indexer = indexer
         self._start_line = start_line
@@ -335,19 +373,19 @@ class IncrementalFilterWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        results_array = array.array('Q')
+        results_array = array.array("Q")
         try:
             if self._use_regex:
                 strategy = RegexStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
             else:
                 strategy = PlainTextStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
-            
+
             lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
             cancel_set = self._cancel_event.is_set
-            for (line_no, text) in lines:
+            for line_no, text in lines:
                 if cancel_set():
                     return
-                text_bytes = text.encode(self._encoding, errors='replace')
+                text_bytes = text.encode(self._encoding, errors="replace")
                 if strategy.match(text_bytes):
                     results_array.append(line_no)
         except BaseException:
@@ -357,10 +395,9 @@ class IncrementalFilterWorker(QObject):
             return
 
         if len(results_array) > 0:
-            results_bitset = Bitset(self._end_line)
-            results_bitset.update_indices(results_array)
-            res_tuple = (results_bitset._size, results_bitset._words, getattr(results_bitset, '_total_count', -1))
+            results_bitset = Bitset.from_indices(results_array, self._end_line)
+            res_tuple = results_bitset.to_raw()
         else:
             res_tuple = (self._end_line, None, 0)
-        
+
         self.finished.emit(res_tuple)

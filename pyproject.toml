@@ -1,0 +1,62 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["log_viewer", "tests", "scripts", "dev-scripts"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line-too-long (obsługiwane przez formatter)
+    "B008", # funkcja/klasa jako domyślny argument (wymóg sygnatur Qt, np. QModelIndex())
+    "SIM105", # try-except-pass zamiast contextlib.suppress
+    "SIM108", # if-else zamiast wyrażenia trójargumentowego
+]
+
+[tool.ruff.lint.per-file-ignores]
+# W workerach QThread dozwolone jest przechwytywanie BaseException (wymóg stabilności PySide6 wg AGENTS.md)
+"log_viewer/workers.py" = ["BLE001"]
+# W testach i skryptach pomocniczych zezwalamy na elastyczniejsze importy i konwencje Qt
+"tests/*" = ["E402", "F841", "SIM115"]
+"dev-scripts/*" = ["E402", "E741"]
+"run.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+follow_imports = "silent"
+check_untyped_defs = true
+disable_error_code = [
+    "attr-defined",  # dynamiczne atrybuty i enumy Qt/PySide6 (np. Qt.AlignRight)
+    "name-defined",
+    "override",
+    "assignment",
+    "operator",
+    "call-overload",
+    "call-arg",
+    "valid-type",
+    "var-annotated",
+    "union-attr",
+    "arg-type",
+    "index",
+    "misc",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

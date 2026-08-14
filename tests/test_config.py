@@ -1,7 +1,8 @@
 """Testy config.py — UserConfig, save/load, defaults, type safety."""
-import os
+
 import json
-import pytest
+import os
+
 from log_viewer.config import UserConfig
 
 
@@ -36,17 +37,20 @@ class TestUserConfig:
         cfg = UserConfig(config_path=temp_config_path)
         cfg.set("language", "en")
         assert os.path.exists(temp_config_path)
-        with open(temp_config_path, "r") as f:
+        with open(temp_config_path) as f:
             data = json.load(f)
         assert data["language"] == "en"
 
     def test_type_safety(self, temp_config_path):
         with open(temp_config_path, "w") as f:
-            json.dump({
-                "language": "pl",
-                "font_size": "not a number",
-                "encoding": "utf-8",
-            }, f)
+            json.dump(
+                {
+                    "language": "pl",
+                    "font_size": "not a number",
+                    "encoding": "utf-8",
+                },
+                f,
+            )
         cfg = UserConfig(config_path=temp_config_path)
         assert cfg.get("font_size") == 10  # default, bo zły typ
 

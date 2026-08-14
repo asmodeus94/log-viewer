@@ -1,14 +1,14 @@
-import re
 import array
-import threading
 import multiprocessing
+import re
 import sys
-from typing import Callable, List, Optional, Tuple, Iterator
+import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator
 
+from log_viewer.bitset import Bitset
 from log_viewer.helpers import open_maybe_compressed
 from log_viewer.indexer import LineIndexer
-from log_viewer.bitset import Bitset
 
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
@@ -27,8 +27,8 @@ def _filter_init_worker(progress_val: "multiprocessing.Value", hits_val: "multip
 
 
 def _filter_worker_chunk(
-    args: Tuple[int, int, int, int, str, str, bool, bool, bool, str]
-) -> Tuple[int, int, "array.array[int]", int]:
+    args: tuple[int, int, int, int, str, str, bool, bool, bool, str],
+) -> tuple[int, int, "array.array[int]", int]:
     """
     Worker dla multiprocessing — przeszukuje przydzielony zakres bajtów pliku.
 
@@ -46,10 +46,9 @@ def _filter_worker_chunk(
 
     Zwraca krotkę (chunk_id, array numerów linii pasujących do wzorca).
     """
-    (chunk_id, start_offset, end_offset, start_line,
-     path, pattern, use_regex, case_sensitive, negate, encoding) = args
+    (chunk_id, start_offset, end_offset, start_line, path, pattern, use_regex, case_sensitive, negate, encoding) = args
 
-    results: "array.array[int]" = array.array('Q')
+    results: array.array[int] = array.array("Q")
 
     # Utwórz strategię wewnątrz workera — obiekty re nie są picklowalne
     try:
@@ -58,7 +57,7 @@ def _filter_worker_chunk(
         else:
             strategy = PlainTextStrategy(pattern, case_sensitive, negate, encoding)
     except Exception:
-        return (chunk_id, 0, array.array('Q'), 0)
+        return (chunk_id, 0, array.array("Q"), 0)
 
     line_no = start_line
     READ_CHUNK = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
@@ -85,7 +84,7 @@ def _filter_worker_chunk(
                     with _shared_filter_progress_bytes.get_lock():
                         _shared_filter_progress_bytes.value += chunk_len
 
-                is_last_read = (bytes_processed >= total_range)
+                is_last_read = bytes_processed >= total_range
                 data = carry + chunk if carry else chunk
 
                 if is_last_read:
@@ -96,8 +95,8 @@ def _filter_worker_chunk(
                     # Zostaw niepełną ostatnią linię jako carry do następnego chunku
                     last_nl = data.rfind(b"\n")
                     if last_nl != -1:
-                        complete_data = data[:last_nl + 1]
-                        carry = data[last_nl + 1:]
+                        complete_data = data[: last_nl + 1]
+                        carry = data[last_nl + 1 :]
                     else:
                         # Cały blok to jedna długa linia — czekaj na więcej danych
                         carry = data
@@ -130,18 +129,18 @@ def _filter_worker_chunk(
 
     hit_count = len(results)
     if hit_count == 0:
-        return (chunk_id, 0, array.array('Q'), 0)
+        return (chunk_id, 0, array.array("Q"), 0)
 
     min_idx = results[0]
     max_idx = results[-1]
-    
+
     base_word = min_idx // 64
     end_word = max_idx // 64
-    
-    words = array.array('Q', [0] * (end_word - base_word + 1))
-    
+
+    words = array.array("Q", [0] * (end_word - base_word + 1))
+
     for idx in results:
-        words[idx // 64 - base_word] |= (1 << (idx % 64))
+        words[idx // 64 - base_word] |= 1 << (idx % 64)
 
     return (chunk_id, base_word, words, hit_count)
 
@@ -151,6 +150,7 @@ class FilterStrategy(ABC):
     Abstrakcyjna klasa bazowa dla strategii filtrowania (Wzorzec Strategii).
     Definiuje wspólny interfejs sprawdzania czy dana linia pasuje do wzorca.
     """
+
     def __init__(self, negate: bool, encoding: str):
         self.negate = negate
         self.encoding = encoding
@@ -160,7 +160,7 @@ class FilterStrategy(ABC):
         """Sprawdza, czy przekazane bajty linii pasują do wzorca strategii."""
         pass
 
-    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+    def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
         """Domyślna implementacja chunkowa – dzieli na linie i wywołuje match()."""
         lines = chunk.split(b"\n")
         if lines and lines[-1] == b"":
@@ -176,6 +176,7 @@ class FilterStrategy(ABC):
 
 class PlainTextStrategy(FilterStrategy):
     """Strategia dla zwykłego wyszukiwania tekstu (bez wyrażeń regularnych)."""
+
     def __init__(self, needle: str, case_sensitive: bool, negate: bool, encoding: str):
         super().__init__(negate, encoding)
         self.case_sensitive = case_sensitive
@@ -191,9 +192,17 @@ class PlainTextStrategy(FilterStrategy):
 
         return not matched if self.negate else matched
 
-    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+    def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
         if not self.needle_bytes:
-            return [] if self.negate else list(range(start_line, start_line + chunk.count(b"\n") + (1 if chunk and not chunk.endswith(b"\n") else 0)))
+            return (
+                []
+                if self.negate
+                else list(
+                    range(
+                        start_line, start_line + chunk.count(b"\n") + (1 if chunk and not chunk.endswith(b"\n") else 0)
+                    )
+                )
+            )
 
         haystack = chunk.lower() if not self.case_sensitive else chunk
         hits = []
@@ -237,6 +246,7 @@ class PlainTextStrategy(FilterStrategy):
 
 class RegexStrategy(FilterStrategy):
     """Strategia dla wyrażeń regularnych z optymalizacją pod surowe bajty."""
+
     def __init__(self, pattern: str, case_sensitive: bool, negate: bool, encoding: str):
         super().__init__(negate, encoding)
         self.pattern = pattern
@@ -264,7 +274,7 @@ class RegexStrategy(FilterStrategy):
 
         return not matched if self.negate else matched
 
-    def match_chunk(self, chunk: bytes, start_line: int) -> List[int]:
+    def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
         if self.matcher_bytes is not None:
             matcher = self.matcher_bytes
             target = chunk
@@ -286,12 +296,13 @@ class RegexStrategy(FilterStrategy):
             if hit_pos > last_nl_pos:
                 nl_count = target.count(nl, last_nl_pos + 1, hit_pos)
                 lines_counted += nl_count
-                
+
                 if not hits or hits[-1] != lines_counted:
                     hits.append(lines_counted)
                 last_nl_pos = hit_pos
 
         return hits
+
 
 def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
@@ -313,8 +324,8 @@ def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[
             else:
                 last_nl = data.rfind(b"\n")
                 if last_nl != -1:
-                    complete_data = data[:last_nl + 1]
-                    carry = data[last_nl + 1:]
+                    complete_data = data[: last_nl + 1]
+                    carry = data[last_nl + 1 :]
                 else:
                     # Cały chunk to jedna długa linia bez \n
                     complete_data = b""
@@ -337,7 +348,7 @@ class FilterEngine:
     def __init__(self, path: str, indexer: LineIndexer):
         self.path = path
         self.indexer = indexer
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self._session_id = 0
         self._session_lock = threading.Lock()
@@ -352,15 +363,17 @@ class FilterEngine:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self,
-              pattern: str,
-              use_regex: bool,
-              case_sensitive: bool,
-              negate: bool,
-              on_progress: Callable[[float, int], None],
-              on_done: Callable[[List[Tuple[int, int, str]], Optional[str]], None],
-              search_in_filter: bool = False,
-              filtered_lines: object = None) -> None:
+    def start(
+        self,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        on_progress: Callable[[float, int], None],
+        on_done: Callable[[list[tuple[int, int, str]], str | None], None],
+        search_in_filter: bool = False,
+        filtered_lines: object = None,
+    ) -> None:
         if self._thread is not None and self._thread.is_alive():
             self._cancel.set()
             self._thread.join(timeout=5.0)
@@ -370,7 +383,17 @@ class FilterEngine:
             self._cancel.clear()
             self._thread = threading.Thread(
                 target=self._run,
-                args=(session, pattern, use_regex, case_sensitive, negate, on_progress, on_done, search_in_filter, filtered_lines),
+                args=(
+                    session,
+                    pattern,
+                    use_regex,
+                    case_sensitive,
+                    negate,
+                    on_progress,
+                    on_done,
+                    search_in_filter,
+                    filtered_lines,
+                ),
                 daemon=True,
             )
             self._thread.start()
@@ -385,7 +408,7 @@ class FilterEngine:
             return RegexStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
         return PlainTextStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
 
-    def _compute_search_ranges(self, n_workers: int) -> List[Tuple[int, int, int]]:
+    def _compute_search_ranges(self, n_workers: int) -> list[tuple[int, int, int]]:
         """
         Wyznacza zakresy (start_offset, end_offset, start_line) dla workerów.
 
@@ -404,7 +427,7 @@ class FilterEngine:
         step = max(1, (n_entries - 1) // n_workers)
         split_indices = list(range(0, n_entries, step))[:n_workers]
 
-        ranges: List[Tuple[int, int, int]] = []
+        ranges: list[tuple[int, int, int]] = []
         for i, idx in enumerate(split_indices):
             entry = index[idx]
             start_offset = entry.offset
@@ -420,12 +443,18 @@ class FilterEngine:
 
         return ranges if ranges else [(0, file_size, 0)]
 
-    def _run(self, session: int, pattern: str, use_regex: bool,
-             case_sensitive: bool, negate: bool,
-             on_progress: Callable[[float, int], None],
-             on_done: Callable,
-             search_in_filter: bool = False,
-             filtered_lines: object = None) -> None:
+    def _run(
+        self,
+        session: int,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        on_progress: Callable[[float, int], None],
+        on_done: Callable,
+        search_in_filter: bool = False,
+        filtered_lines: object = None,
+    ) -> None:
         """
         Dyspozytor — wybiera tryb równoległy lub single-thread i deleguje pracę.
 
@@ -453,23 +482,38 @@ class FilterEngine:
 
         if use_parallel:
             try:
-                self._run_parallel(session, pattern, use_regex, case_sensitive,
-                                   negate, on_progress, on_done, search_in_filter, filtered_lines)
+                self._run_parallel(
+                    session,
+                    pattern,
+                    use_regex,
+                    case_sensitive,
+                    negate,
+                    on_progress,
+                    on_done,
+                    search_in_filter,
+                    filtered_lines,
+                )
                 return
             except Exception as e:
                 # Fallback do single-thread przy błędzie multiprocessing
-                print(f"Warning: parallel search failed ({e}), falling back to single-thread",
-                      file=sys.stderr)
+                print(f"Warning: parallel search failed ({e}), falling back to single-thread", file=sys.stderr)
 
-        self._run_single(session, pattern, use_regex, case_sensitive,
-                         negate, on_progress, on_done, search_in_filter, filtered_lines)
+        self._run_single(
+            session, pattern, use_regex, case_sensitive, negate, on_progress, on_done, search_in_filter, filtered_lines
+        )
 
-    def _run_parallel(self, session: int, pattern: str, use_regex: bool,
-                      case_sensitive: bool, negate: bool,
-                      on_progress: Callable[[float, int], None],
-                      on_done: Callable,
-                      search_in_filter: bool = False,
-                      filtered_lines: object = None) -> None:
+    def _run_parallel(
+        self,
+        session: int,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        on_progress: Callable[[float, int], None],
+        on_done: Callable,
+        search_in_filter: bool = False,
+        filtered_lines: object = None,
+    ) -> None:
         """
         Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
 
@@ -485,22 +529,29 @@ class FilterEngine:
         ranges = self._compute_search_ranges(n_workers)
 
         args_list = [
-            (i, start_off, end_off, start_ln,
-             self.path, pattern, use_regex, case_sensitive, False,
-             self.indexer.encoding)
+            (
+                i,
+                start_off,
+                end_off,
+                start_ln,
+                self.path,
+                pattern,
+                use_regex,
+                case_sensitive,
+                False,
+                self.indexer.encoding,
+            )
             for i, (start_off, end_off, start_ln) in enumerate(ranges)
         ]
 
-        shared_bytes = multiprocessing.Value('Q', 0)
-        shared_hits = multiprocessing.Value('Q', 0)
+        shared_bytes = multiprocessing.Value("Q", 0)
+        shared_hits = multiprocessing.Value("Q", 0)
         # Słownik: chunk_id → (base_word, words)
-        chunk_results: dict[int, Tuple[int, "array.array[int]"]] = {}
+        chunk_results: dict[int, tuple[int, array.array[int]]] = {}
 
         try:
             with multiprocessing.Pool(
-                n_workers,
-                initializer=_filter_init_worker,
-                initargs=(shared_bytes, shared_hits)
+                n_workers, initializer=_filter_init_worker, initargs=(shared_bytes, shared_hits)
             ) as pool:
                 # imap_unordered — iterator dostarczający wyniki chunk po chunku,
                 # w kolejności ich ukończenia (nie koniecznie wg chunk_id).
@@ -539,7 +590,9 @@ class FilterEngine:
                     pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
                     try:
                         # Przekazujemy wyniki bieżącego chunku — GUI może dołączyć je do listy
-                        on_progress(min(pct, 99.0), current_hits, "filtering", (base_word, words) if hit_count > 0 else None)
+                        on_progress(
+                            min(pct, 99.0), current_hits, "filtering", (base_word, words) if hit_count > 0 else None
+                        )
                     except Exception:
                         pass
 
@@ -556,18 +609,18 @@ class FilterEngine:
             return
 
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
-        
+
         max_needed_words = 0
         for _chunk_id, (base_word, words) in chunk_results.items():
             needed = base_word + len(words)
             if needed > max_needed_words:
                 max_needed_words = needed
-                
+
         if max_needed_words > merged_bitset._num_words:
             merged_bitset.resize(max_needed_words * 64)
-            
+
         global_words = merged_bitset._words
-        
+
         for _chunk_id, (base_word, words) in sorted(chunk_results.items(), key=lambda x: x[0]):
             if len(words) == 1:
                 global_words[base_word] |= words[0]
@@ -576,7 +629,7 @@ class FilterEngine:
                 global_words[base_word + len(words) - 1] |= words[-1]
                 if len(words) > 2:
                     global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
-                    
+
         merged_bitset._counts = None
         merged_bitset._total_count = shared_hits.value
 
@@ -594,12 +647,18 @@ class FilterEngine:
             except Exception:
                 pass
 
-    def _run_single(self, session: int, pattern: str, use_regex: bool,
-                    case_sensitive: bool, negate: bool,
-                    on_progress: Callable[[float, int], None],
-                    on_done: Callable,
-                    search_in_filter: bool = False,
-                    filtered_lines: object = None) -> None:
+    def _run_single(
+        self,
+        session: int,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        on_progress: Callable[[float, int], None],
+        on_done: Callable,
+        search_in_filter: bool = False,
+        filtered_lines: object = None,
+    ) -> None:
         """
         Sekwencyjne przeszukiwanie pliku w jednym wątku.
 
@@ -608,14 +667,14 @@ class FilterEngine:
         """
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
         total_hits = 0
-        error: Optional[str] = None
+        error: str | None = None
 
         try:
             strategy = self._create_strategy(pattern, use_regex, case_sensitive, False)
         except re.error as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
-                    on_done(array.array('Q'), str(e))
+                    on_done(array.array("Q"), str(e))
                 except Exception:
                     pass
             return
@@ -624,29 +683,25 @@ class FilterEngine:
             size = self.indexer.size
             bytes_read = 0
             line_no = 0
-            chunk_count = 0
-
-            for block in read_file_chunks(self.path):
-                if chunk_count % 10 == 0:
-                    if self._cancel.is_set() or not self._is_current_session(session):
-                        return
-                chunk_count += 1
+            for chunk_count, block in enumerate(read_file_chunks(self.path)):
+                if chunk_count % 10 == 0 and (self._cancel.is_set() or not self._is_current_session(session)):
+                    return
                 bytes_read += len(block)
 
                 chunk_hits = strategy.match_chunk(block, line_no)
-                
+
                 if chunk_hits:
                     min_idx = chunk_hits[0]
                     max_idx = chunk_hits[-1]
                     base_word = min_idx // 64
                     end_word = max_idx // 64
-                    words = array.array('Q', [0] * (end_word - base_word + 1))
+                    words = array.array("Q", [0] * (end_word - base_word + 1))
                     for idx in chunk_hits:
-                        words[idx // 64 - base_word] |= (1 << (idx % 64))
-                    
+                        words[idx // 64 - base_word] |= 1 << (idx % 64)
+
                     if (end_word + 1) > merged_bitset._num_words:
                         merged_bitset.resize((end_word + 1) * 64)
-                        
+
                     global_words = merged_bitset._words
                     if len(words) == 1:
                         global_words[base_word] |= words[0]
@@ -655,7 +710,7 @@ class FilterEngine:
                         global_words[base_word + len(words) - 1] |= words[-1]
                         if len(words) > 2:
                             global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
-                            
+
                     merged_bitset._counts = None
                     total_hits += len(chunk_hits)
                     merged_bitset._total_count = total_hits

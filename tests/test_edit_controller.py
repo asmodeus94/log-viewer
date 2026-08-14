@@ -5,17 +5,16 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
-from PySide6 import QtWidgets
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
-
 from log_viewer.config import UserConfig
 from log_viewer.controllers.tab_edit_controller import EditController
 from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
 from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtWidgets
+from PySide6.QtWidgets import QMessageBox, QProgressDialog
 
 
 @pytest.fixture
@@ -30,7 +29,7 @@ def app_context():
         test_file = tmp.name
     with open(test_file, "wb") as f:
         for i in range(100):
-            f.write(f"Line {i} content\n".encode("utf-8"))
+            f.write(f"Line {i} content\n".encode())
 
     tab = window._new_tab()
     idx = LineIndexer(test_file, encoding="utf-8")
@@ -164,9 +163,11 @@ class TestEditController:
         tab.save_progress = QProgressDialog()
         tab.edit_buffer.set(1, "Edit")
 
-        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes), \
-             patch.object(QMessageBox, "information"), \
-             patch.object(tab, "start_reindex") as mock_reindex:
+        with (
+            patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.Yes),
+            patch.object(QMessageBox, "information"),
+            patch.object(tab, "start_reindex") as mock_reindex,
+        ):
             controller._on_save_file_changed("File changed externally")
             assert tab.save_progress is None
             assert len(tab.edit_buffer) == 0
@@ -178,8 +179,10 @@ class TestEditController:
         tab.save_progress = QProgressDialog()
         tab.edit_buffer.set(1, "Edit")
 
-        with patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No), \
-             patch.object(QMessageBox, "information") as mock_info:
+        with (
+            patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No),
+            patch.object(QMessageBox, "information") as mock_info,
+        ):
             controller._on_save_file_changed("File changed externally")
             assert tab.save_progress is None
             assert len(tab.edit_buffer) == 1

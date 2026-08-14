@@ -6,3 +6,7 @@ Pillow>=10.0.0
 # Testy
 pytest>=7.0.0
 pytest-qt>=4.2.0
+
+# Narzędzia kontroli jakości i analizy statycznej
+ruff>=0.4.0
+mypy>=1.10.0

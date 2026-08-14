@@ -1,4 +1,5 @@
 """Testy i18n.py — parzystość kluczy PL/EN."""
+
 from log_viewer.i18n import I18N
 
 
@@ -25,14 +26,37 @@ class TestI18N:
     def test_known_keys_exist(self):
         """Sprawdź kluczowe klucze które muszą istnieć."""
         required = [
-            "app_title", "menu_file", "menu_edit", "menu_view", "menu_goto",
-            "mi_open", "mi_save", "mi_exit", "mi_find", "mi_filter",
-            "mi_goto", "mi_goto_start", "mi_goto_end", "mi_follow", "mi_about", "mi_settings",
-            "mi_next_tab", "mi_prev_tab", "mi_close_tab", "mi_refresh", "mi_reload",
-            "st_ready", "st_indexing", "st_done", "st_refreshing",
-            "btn_refresh", "btn_reload",
-            "msg_no_file", "msg_about",
-            "btn_prev_line", "btn_next_line",
+            "app_title",
+            "menu_file",
+            "menu_edit",
+            "menu_view",
+            "menu_goto",
+            "mi_open",
+            "mi_save",
+            "mi_exit",
+            "mi_find",
+            "mi_filter",
+            "mi_goto",
+            "mi_goto_start",
+            "mi_goto_end",
+            "mi_follow",
+            "mi_about",
+            "mi_settings",
+            "mi_next_tab",
+            "mi_prev_tab",
+            "mi_close_tab",
+            "mi_refresh",
+            "mi_reload",
+            "st_ready",
+            "st_indexing",
+            "st_done",
+            "st_refreshing",
+            "btn_refresh",
+            "btn_reload",
+            "msg_no_file",
+            "msg_about",
+            "btn_prev_line",
+            "btn_next_line",
         ]
         for key in required:
             assert key in I18N["pl"], f"Missing PL key: {key}"
@@ -60,4 +84,3 @@ class TestI18N:
 
         msg_bm = I18N["pl"]["msg_bookmark_added"].format(n=12345)
         assert "12,345" in msg_bm
-

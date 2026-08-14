@@ -1,8 +1,9 @@
-import pytest
-from unittest.mock import MagicMock
-from PySide6.QtWidgets import QApplication
-import sys
 import os
+import sys
+from unittest.mock import MagicMock
+
+from PySide6.QtWidgets import QApplication
+
 
 def test_highlight_and_scroll_does_not_select_text():
     os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
@@ -20,7 +21,20 @@ def test_highlight_and_scroll_does_not_select_text():
     main_window_mock.index_interval_bytes = 1024
     main_window_mock.font_family = "Courier"
     main_window_mock.font_size = 10
-    main_window_mock.theme = {"highlight": "#ffff00", "bg_main": "#ffffff", "minimap_error": "#ff0000", "minimap_warn": "#ffaa00", "minimap_info": "#00ff00", "minimap_debug": "#0000ff", "minimap_bg": "#ffffff", "minimap_viewport": "#000000", "context": "#aaaaaa", "bookmark": "#00ff00", "edited": "#ff8800", "current_line": "#f0f0f0"}
+    main_window_mock.theme = {
+        "highlight": "#ffff00",
+        "bg_main": "#ffffff",
+        "minimap_error": "#ff0000",
+        "minimap_warn": "#ffaa00",
+        "minimap_info": "#00ff00",
+        "minimap_debug": "#0000ff",
+        "minimap_bg": "#ffffff",
+        "minimap_viewport": "#000000",
+        "context": "#aaaaaa",
+        "bookmark": "#00ff00",
+        "edited": "#ff8800",
+        "current_line": "#f0f0f0",
+    }
     main_window_mock.t.return_value = "Test"
 
     tab = LogTab(main_window_mock)

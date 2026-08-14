@@ -1,7 +1,9 @@
 """Fixtures współdzielone między testami."""
+
 import os
 import sys
 import tempfile
+
 import pytest
 
 # Dodaj katalog nadrzędny do path by móc importować pakiet log_viewer
@@ -15,6 +17,7 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 def temp_log_file():
     """Tworzy tymczasowy plik logu. Zwraca ścieżkę. Czyści po teście."""
     paths = []
+
     def _create(num_lines=1000, line_len=120, suffix=".log", content=None):
         path = tempfile.mktemp(suffix=suffix)
         paths.append(path)
@@ -30,6 +33,7 @@ def temp_log_file():
                     msg = f"{ts} [{level}] line{i:>8d} - " + ("x" * (line_len - 60)) + "\n"
                     f.write(msg.encode("utf-8"))
         return path
+
     yield _create
     # Cleanup
     for p in paths:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from PySide6 import QtGui
 from PySide6.QtCore import QObject, Qt
 from PySide6.QtWidgets import QMessageBox, QTreeWidgetItem
-from PySide6 import QtGui
 
 if TYPE_CHECKING:
     from log_viewer.log_tab import LogTab

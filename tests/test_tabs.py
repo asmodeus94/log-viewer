@@ -1,7 +1,6 @@
 import os
 import sys
 import tempfile
-import pytest
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -10,9 +9,10 @@ libegl = os.path.expanduser("~/.local/lib/libEGL.so.1")
 if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-from PySide6 import QtWidgets
-from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
+from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtWidgets
+
 
 def test_duplicate_file_tab_names(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -42,6 +42,7 @@ def test_duplicate_file_tab_names(temp_log_file):
         t3.file_path = path
         assert window.tabs.count() == 3
         assert window.tabs.tabText(2) == f"{base_name} [B]"
+
 
 def test_window_title_updates_on_tab_change(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -77,14 +78,15 @@ def test_window_title_updates_on_tab_change(temp_log_file):
         assert window.windowTitle() == f"{base_name2} - {app_title}"
 
     # Zamknięcie pierwszego pliku
-    window.cmd_close_tab() # Zamyka obecny czyli path2
+    window.cmd_close_tab()  # Zamyka obecny czyli path2
 
     assert window.windowTitle() == f"{base_name1} - {app_title}"
 
     # Zamknięcie drugiego pliku
-    window.cmd_close_tab() # Zamyka obecny czyli path1
+    window.cmd_close_tab()  # Zamyka obecny czyli path1
 
     assert window.windowTitle() == app_title
+
 
 def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -101,16 +103,19 @@ def test_cmd_reload_clears_edits_if_accepted(temp_log_file):
     tab.edit_buffer.set(0, "Zmieniona linia")
     assert len(tab.edit_buffer) == 1
 
-    with patch("PySide6.QtWidgets.QMessageBox.question", return_value=QtWidgets.QMessageBox.Yes):
-        with patch.object(tab.file_controller, "open_file", side_effect=lambda *args, **kwargs: tab.edit_buffer.clear()):
-            window.cmd_reload()
+    with (
+        patch("PySide6.QtWidgets.QMessageBox.question", return_value=QtWidgets.QMessageBox.Yes),
+        patch.object(tab.file_controller, "open_file", side_effect=lambda *args, **kwargs: tab.edit_buffer.clear()),
+    ):
+        window.cmd_reload()
 
     assert len(tab.edit_buffer) == 0
 
 
 import gc
-import time
+
 from log_viewer.log_tab import _running_tasks
+
 
 def test_qthread_survives_tab_closure(temp_log_file):
     """Weryfikuje, że w czasie działania wątku usunięcie zakładki nie powoduje utraty referencji i błędu (GC)."""
@@ -150,9 +155,10 @@ def test_qthread_survives_tab_closure(temp_log_file):
     # Zatem pomyślne zakończenie testu polega na tym, że aplikacja nie zgłosiła błędu Abort (Crash).
     # Proces w test-suite przechodzi dalej gładko.
 
+
 def test_tab_middle_click_closes_tab(temp_log_file):
     """Weryfikuje, że kliknięcie środkowego przycisku myszy (kółka) na karcie zamyka tę kartę."""
-    from PySide6.QtCore import Qt, QPoint, QEvent
+    from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QMouseEvent
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
@@ -174,12 +180,9 @@ def test_tab_middle_click_closes_tab(temp_log_file):
     click_pos = rect.center()
 
     from PySide6.QtCore import QPointF
+
     mouse_event = QMouseEvent(
-        QEvent.MouseButtonRelease,
-        QPointF(click_pos),
-        Qt.MiddleButton,
-        Qt.MiddleButton,
-        Qt.NoModifier
+        QEvent.MouseButtonRelease, QPointF(click_pos), Qt.MiddleButton, Qt.MiddleButton, Qt.NoModifier
     )
 
     # Wywołanie eventFilter na tabBar
@@ -187,4 +190,3 @@ def test_tab_middle_click_closes_tab(temp_log_file):
 
     # Karta powinna zostać zamknięta
     assert window.tabs.count() == 0
-

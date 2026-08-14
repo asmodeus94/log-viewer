@@ -7,11 +7,11 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtWidgets, QtGui
-from PySide6.QtCore import QCoreApplication, QTimer
-from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
+from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtGui, QtWidgets
+from PySide6.QtCore import QCoreApplication
 
 
 def test_incremental_follow_with_filter_edge_cases():
@@ -26,18 +26,19 @@ def test_incremental_follow_with_filter_edge_cases():
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=".log")
     for i in range(10):
         if i == 0:
-            tf.write(f"Line {i} - secret initial\n".encode("utf-8"))
+            tf.write(f"Line {i} - secret initial\n".encode())
         else:
-            tf.write(f"Line {i} - basic text\n".encode("utf-8"))
+            tf.write(f"Line {i} - basic text\n".encode())
     tf.close()
 
     try:
         # Patchujemy QMessageBox, aby żadne okna modalne nie blokowały pętli zdarzeń (zwłaszcza na macOS)
-        with patch.object(QtWidgets.QMessageBox, "information"), \
-             patch.object(QtWidgets.QMessageBox, "warning"), \
-             patch.object(QtWidgets.QMessageBox, "critical"), \
-             patch.object(QtWidgets.QMessageBox, "question"):
-
+        with (
+            patch.object(QtWidgets.QMessageBox, "information"),
+            patch.object(QtWidgets.QMessageBox, "warning"),
+            patch.object(QtWidgets.QMessageBox, "critical"),
+            patch.object(QtWidgets.QMessageBox, "question"),
+        ):
             # Blokujemy asynchroniczny open_file wewnątrz open_file_in_tab, aby kontrolować indexer synchronicznie
             with patch("log_viewer.controllers.tab_file_controller.FileController.open_file"):
                 tab = window.open_file_in_tab(tf.name)
@@ -55,7 +56,11 @@ def test_incremental_follow_with_filter_edge_cases():
             # Przetwarzamy kolejkę zdarzeń aby FilterWorker zakończył działanie
             for _ in range(50):
                 QCoreApplication.processEvents()
-                if tab.filter_active and getattr(tab, "filter_results", None) is not None and len(tab.filter_results) > 0:
+                if (
+                    tab.filter_active
+                    and getattr(tab, "filter_results", None) is not None
+                    and len(tab.filter_results) > 0
+                ):
                     break
                 time.sleep(0.01)
 
@@ -73,7 +78,7 @@ def test_incremental_follow_with_filter_edge_cases():
             # Symulujemy napływ zdarzeń (10 kolejnych linii z "secret incoming")
             with open(tf.name, "ab") as f:
                 for i in range(10, 20):
-                    f.write(f"Line {i} - secret incoming\n".encode("utf-8"))
+                    f.write(f"Line {i} - secret incoming\n".encode())
 
             new_lines_count = indexer.update_from(os.stat(tf.name).st_size)
             assert new_lines_count == 10
@@ -96,7 +101,9 @@ def test_incremental_follow_with_filter_edge_cases():
                 QCoreApplication.processEvents()
 
             max_val = tab.text.verticalScrollBar().maximum()
-            assert tab.text.verticalScrollBar().value() == max_val, "Scrollbar did not reach the bottom after Timer execution"
+            assert tab.text.verticalScrollBar().value() == max_val, (
+                "Scrollbar did not reach the bottom after Timer execution"
+            )
 
             # Drugi napływ danych (linia pusta / bez wzorca filtra)
             with open(tf.name, "ab") as f:
@@ -118,7 +125,7 @@ def test_incremental_follow_with_filter_edge_cases():
             print("All Incremental Follow Edge Cases Pass!")
     finally:
         with patch.object(QtWidgets.QMessageBox, "question", return_value=QtWidgets.QMessageBox.No):
-            if 'window' in locals() and window is not None:
+            if "window" in locals() and window is not None:
                 window.close()
             for _ in range(20):
                 QCoreApplication.processEvents()
@@ -143,15 +150,16 @@ def test_follow_incremental_context_and_highlighting():
         if i == 0:
             tf.write(b"Line 0 - [ERROR] ERR-000 initial\n")
         else:
-            tf.write(f"Line {i} - standard log\n".encode("utf-8"))
+            tf.write(f"Line {i} - standard log\n".encode())
     tf.close()
 
     try:
-        with patch.object(QtWidgets.QMessageBox, "information"), \
-             patch.object(QtWidgets.QMessageBox, "warning"), \
-             patch.object(QtWidgets.QMessageBox, "critical"), \
-             patch.object(QtWidgets.QMessageBox, "question"):
-
+        with (
+            patch.object(QtWidgets.QMessageBox, "information"),
+            patch.object(QtWidgets.QMessageBox, "warning"),
+            patch.object(QtWidgets.QMessageBox, "critical"),
+            patch.object(QtWidgets.QMessageBox, "question"),
+        ):
             with patch("log_viewer.controllers.tab_file_controller.FileController.open_file"):
                 tab = window.open_file_in_tab(tf.name)
 
@@ -189,7 +197,7 @@ def test_follow_incremental_context_and_highlighting():
             # Dopisujemy kolejne 3 linie bez błędu (linie 11, 12, 13) - powinny wejść jako kontekst
             with open(tf.name, "ab") as f:
                 for i in range(11, 14):
-                    f.write(f"Line {i} - [INFO] Background task {i} OK\n".encode("utf-8"))
+                    f.write(f"Line {i} - [INFO] Background task {i} OK\n".encode())
 
             new_lines_2 = indexer.update_from(os.stat(tf.name).st_size)
             assert new_lines_2 == 3
@@ -222,13 +230,17 @@ def test_follow_incremental_context_and_highlighting():
             hit_sels = [s for s in sels if s.format.background().color() == color_highlight]
             context_sels = [s for s in sels if s.format.background().color() == color_context]
 
-            assert len(hit_sels) == 2, f"Linie 0 i 10 (ERR-000 i ERR-102) powinny mieć żółte tło, znaleziono: {len(hit_sels)}"
-            assert len(context_sels) >= 3, f"Linie 11..13 powinny mieć szare tło kontekstu, znaleziono: {len(context_sels)}"
+            assert len(hit_sels) == 2, (
+                f"Linie 0 i 10 (ERR-000 i ERR-102) powinny mieć żółte tło, znaleziono: {len(hit_sels)}"
+            )
+            assert len(context_sels) >= 3, (
+                f"Linie 11..13 powinny mieć szare tło kontekstu, znaleziono: {len(context_sels)}"
+            )
 
             print("Follow incremental context and highlighting test passed successfully!")
     finally:
         with patch.object(QtWidgets.QMessageBox, "question", return_value=QtWidgets.QMessageBox.No):
-            if 'window' in locals() and window is not None:
+            if "window" in locals() and window is not None:
                 window.close()
             for _ in range(20):
                 QCoreApplication.processEvents()

@@ -23,23 +23,33 @@ Użycie:
 Licencja: MIT
 """
 
-from .exceptions import FileChangedError, CompressedSaveError
-from .helpers import (
-    fmt_size, truncate_for_display, parse_dnd_files, dnd_files_to_open,
-    is_compressed, open_maybe_compressed,
-)
-from .indexer import LineIndexer, IndexEntry
-from .filter_engine import FilterEngine
-from .edit_buffer import EditBuffer
 from .config import UserConfig
+from .edit_buffer import EditBuffer
+from .exceptions import CompressedSaveError, FileChangedError
+from .filter_engine import FilterEngine
+from .helpers import (
+    dnd_files_to_open,
+    fmt_size,
+    is_compressed,
+    open_maybe_compressed,
+    parse_dnd_files,
+    truncate_for_display,
+)
 from .i18n import I18N
+from .indexer import IndexEntry, LineIndexer
 
 __version__ = "1.0"
 __all__ = [
-    "FileChangedError", "CompressedSaveError",
-    "fmt_size", "truncate_for_display", "parse_dnd_files", "dnd_files_to_open",
-    "is_compressed", "open_maybe_compressed",
-    "LineIndexer", "IndexEntry",
+    "FileChangedError",
+    "CompressedSaveError",
+    "fmt_size",
+    "truncate_for_display",
+    "parse_dnd_files",
+    "dnd_files_to_open",
+    "is_compressed",
+    "open_maybe_compressed",
+    "LineIndexer",
+    "IndexEntry",
     "FilterEngine",
     "EditBuffer",
     "UserConfig",

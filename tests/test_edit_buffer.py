@@ -1,11 +1,13 @@
 """Testy edit_buffer.py — EditBuffer, save_to_file, FileChangedError, CompressedSaveError."""
-import os
+
 import gzip
+import os
 import stat
 import time
+
 import pytest
 from log_viewer.edit_buffer import EditBuffer
-from log_viewer.exceptions import FileChangedError, CompressedSaveError
+from log_viewer.exceptions import CompressedSaveError, FileChangedError
 
 
 class TestEditBuffer:
@@ -93,7 +95,7 @@ class TestEditBufferSave:
         mode = stat.S_IMODE(os.stat(backup).st_mode)
 
         # Na Linux/Mac OS ostateczny plik nie powinien mieć uprawnień odczytu dla grupy/innych.
-        if os.name != 'nt':
+        if os.name != "nt":
             assert not (mode & stat.S_IRWXG)  # brak uprawnień dla grupy
             assert not (mode & stat.S_IRWXO)  # brak uprawnień dla innych
 
@@ -200,7 +202,7 @@ class TestEditBufferFileChanged:
         # Sprawdź że polskie znaki są poprawnie zapisane w UTF-8
         with open(path, "rb") as f:
             lines = f.readlines()
-        assert "zażółć gęślą jaźń".encode("utf-8") in lines[5]
+        assert "zażółć gęślą jaźń".encode() in lines[5]
         try:
             os.unlink(backup)
         except PermissionError:
@@ -226,6 +228,7 @@ class TestEditBufferFileChanged:
 class TestEditBufferCompressed:
     def test_blocks_compressed_save(self):
         import tempfile
+
         path = tempfile.mktemp(suffix=".gz")
         try:
             with gzip.open(path, "wb") as f:
@@ -240,6 +243,7 @@ class TestEditBufferCompressed:
                     os.unlink(path)
                 except PermissionError:
                     pass
+
 
 class TestMtimeNsTolerance:
     """Testy tolerancji nanosekundowej dla st_mtime_ns."""

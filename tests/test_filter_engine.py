@@ -1,10 +1,12 @@
 """Testy filter_engine.py — FilterEngine, session isolation, cancel."""
+
 import os
-import time
 import threading
+import time
+
 import pytest
-from log_viewer.indexer import LineIndexer
 from log_viewer.filter_engine import FilterEngine
+from log_viewer.indexer import LineIndexer
 
 
 class TestFilterEngine:
@@ -15,9 +17,14 @@ class TestFilterEngine:
 
         results = []
         done = threading.Event()
-        engine.start("ERROR", use_regex=False, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            "ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -32,9 +39,14 @@ class TestFilterEngine:
 
         results = []
         done = threading.Event()
-        engine.start("ERROR", use_regex=False, case_sensitive=True, negate=True,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            "ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=True,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -49,9 +61,14 @@ class TestFilterEngine:
 
         results = []
         done = threading.Event()
-        engine.start(r"INFO", use_regex=True, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            r"INFO",
+            use_regex=True,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -67,9 +84,14 @@ class TestFilterEngine:
 
         results = []
         done = threading.Event()
-        engine.start("error", use_regex=False, case_sensitive=False, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            "error",
+            use_regex=False,
+            case_sensitive=False,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -85,9 +107,14 @@ class TestFilterEngine:
         results = []
         error = [None]
         done = threading.Event()
-        engine.start("[invalid", use_regex=True, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), error.__setitem__(0, e), done.set()))
+        engine.start(
+            "[invalid",
+            use_regex=True,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), error.__setitem__(0, e), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -103,9 +130,14 @@ class TestFilterEngineCancel:
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
 
-        engine.start("INFO", use_regex=False, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: None)
+        engine.start(
+            "INFO",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: None,
+        )
         time.sleep(0.05)
 
         t0 = time.time()
@@ -121,9 +153,14 @@ class TestFilterEngineCancel:
 
         callback_called = threading.Event()
         progress_seen = threading.Event()
-        engine.start("INFO", use_regex=False, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: progress_seen.set(),
-                     on_done=lambda r, e: callback_called.set())
+        engine.start(
+            "INFO",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: progress_seen.set(),
+            on_done=lambda r, e: callback_called.set(),
+        )
         # Czekaj aż filter na pewno zaczął
         for _ in range(50):
             if progress_seen.is_set():
@@ -152,9 +189,14 @@ class TestFilterEngineSessionIsolation:
         started2 = threading.Event()
 
         # Sesja 1 — INFO (anulujemy przed zakończeniem)
-        engine.start("INFO", use_regex=False, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: done1.set() if p > 5 else None,
-                     on_done=lambda r, e: results1.extend(r) if started2.is_set() else None)
+        engine.start(
+            "INFO",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: done1.set() if p > 5 else None,
+            on_done=lambda r, e: results1.extend(r) if started2.is_set() else None,
+        )
         # Czekaj aż progress > 5%
         for _ in range(200):
             if done1.is_set():
@@ -166,9 +208,14 @@ class TestFilterEngineSessionIsolation:
 
         # Teraz uruchom sesję 2 — start() anuluje sesję 1
         started2.set()
-        engine.start("ERROR", use_regex=False, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results2.extend(r), done2.set()))
+        engine.start(
+            "ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results2.extend(r), done2.set()),
+        )
 
         # Czekaj na sesję 2 (dłużej)
         for _ in range(500):
@@ -182,6 +229,7 @@ class TestFilterEngineSessionIsolation:
         assert len(results1) == 0, f"Old session leaked: {len(results1)}"
         idx.close()
 
+
 class TestRegexOnBytes:
     """Testy optymalizacji regex na surowych bajtach."""
 
@@ -189,14 +237,21 @@ class TestRegexOnBytes:
         """Regex na bajtach znajduje te same wyniki co regex na str."""
         path = temp_log_file(num_lines=1000)
         import threading
+
         from log_viewer.indexer import LineIndexer
+
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
         done = threading.Event()
-        engine.start(r"ERROR", use_regex=True, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            r"ERROR",
+            use_regex=True,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -208,14 +263,21 @@ class TestRegexOnBytes:
         """Regex case-insensitive na bajtach."""
         path = temp_log_file(num_lines=1000)
         import threading
+
         from log_viewer.indexer import LineIndexer
+
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
         done = threading.Event()
-        engine.start(r"error", use_regex=True, case_sensitive=False, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            r"error",
+            use_regex=True,
+            case_sensitive=False,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -227,14 +289,21 @@ class TestRegexOnBytes:
         """Regex z pattern \\d+ na bajtach."""
         path = temp_log_file(num_lines=1000)
         import threading
+
         from log_viewer.indexer import LineIndexer
+
         idx = LineIndexer(path)
         engine = FilterEngine(path, idx)
         results = []
         done = threading.Event()
-        engine.start(r"line\s*\d+", use_regex=True, case_sensitive=True, negate=False,
-                     on_progress=lambda p, h: None,
-                     on_done=lambda r, e: (results.extend(r), done.set()))
+        engine.start(
+            r"line\s*\d+",
+            use_regex=True,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda p, h: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+        )
         for _ in range(100):
             if done.is_set():
                 break
@@ -246,15 +315,16 @@ class TestRegexOnBytes:
         """Plain text i regex dają te same wyniki dla prostego wzorca."""
         path = temp_log_file(num_lines=1000)
         import threading
+
         from log_viewer.indexer import LineIndexer
+
         idx = LineIndexer(path)
 
         # Plain text
         engine1 = FilterEngine(path, idx)
         results1 = []
         done1 = threading.Event()
-        engine1.start("ERROR", False, True, False, lambda p, h: None,
-                      lambda r, e: (results1.extend(r), done1.set()))
+        engine1.start("ERROR", False, True, False, lambda p, h: None, lambda r, e: (results1.extend(r), done1.set()))
         for _ in range(100):
             if done1.is_set():
                 break
@@ -264,8 +334,7 @@ class TestRegexOnBytes:
         engine2 = FilterEngine(path, idx)
         results2 = []
         done2 = threading.Event()
-        engine2.start("ERROR", True, True, False, lambda p, h: None,
-                      lambda r, e: (results2.extend(r), done2.set()))
+        engine2.start("ERROR", True, True, False, lambda p, h: None, lambda r, e: (results2.extend(r), done2.set()))
         for _ in range(100):
             if done2.is_set():
                 break
@@ -285,6 +354,7 @@ class TestParallelSearch:
     def _make_large_file(self, num_lines: int) -> str:
         """Tworzy plik > 50 MB potrzebny do aktywacji trybu równoległego."""
         import tempfile
+
         path = tempfile.mktemp(suffix=".log")
         levels = ["INFO", "WARN", "ERROR", "DEBUG"]
         # ~200 bajtów/linię → 300k linii ≈ 60 MB (powyżej progu 50 MB)
@@ -302,6 +372,7 @@ class TestParallelSearch:
         Oba tryby są wywoływane przez start() — session_id jest poprawnie ustawiony.
         """
         from log_viewer.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+
         path = self._make_large_file(num_lines=300_000)
         try:
             idx = LineIndexer(path)
@@ -313,7 +384,10 @@ class TestParallelSearch:
             done_s = threading.Event()
             engine_s = FilterEngine(path_small, idx_small)
             engine_s.start(
-                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                "ERROR",
+                use_regex=False,
+                case_sensitive=True,
+                negate=False,
                 on_progress=lambda p, h: None,
                 on_done=lambda r, e: (results_single.extend(r), done_s.set()),
             )
@@ -328,7 +402,10 @@ class TestParallelSearch:
             done_p = threading.Event()
             engine_p = FilterEngine(path, idx)
             engine_p.start(
-                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                "ERROR",
+                use_regex=False,
+                case_sensitive=True,
+                negate=False,
                 on_progress=lambda p, h: None,
                 on_done=lambda r, e: (results_par.extend(r), done_p.set()),
             )
@@ -338,12 +415,8 @@ class TestParallelSearch:
             assert done_p.is_set(), "Parallel search did not finish in time"
             assert len(results_single) > 0, "Missing single-thread results"
             # Proporcja ERROR: 1/4 linii → 50k linii = 12500, 300k linii = 75000
-            assert len(results_single) == 12_500, (
-                f"Single: oczekiwano 12500, dostano {len(results_single)}"
-            )
-            assert len(results_par) == 75_000, (
-                f"Parallel: oczekiwano 75000, dostano {len(results_par)}"
-            )
+            assert len(results_single) == 12_500, f"Single: oczekiwano 12500, dostano {len(results_single)}"
+            assert len(results_par) == 75_000, f"Parallel: oczekiwano 75000, dostano {len(results_par)}"
             idx.close()
         finally:
             if os.path.exists(path):
@@ -365,7 +438,10 @@ class TestParallelSearch:
             done = threading.Event()
             # start() automatycznie wybierze tryb równoległy (plik > 50 MB)
             engine.start(
-                "ERROR", use_regex=True, case_sensitive=True, negate=False,
+                "ERROR",
+                use_regex=True,
+                case_sensitive=True,
+                negate=False,
                 on_progress=lambda p, h: None,
                 on_done=lambda r, e: (results.extend(r), done.set()),
             )
@@ -389,30 +465,30 @@ class TestParallelSearch:
         Weryfikuje poprawność wyników po auto-dispatch przez start().
         """
         from log_viewer.filter_engine import _PARALLEL_SEARCH_THRESHOLD
+
         path = self._make_large_file(num_lines=300_000)
         try:
             idx = LineIndexer(path)
             assert idx.size >= _PARALLEL_SEARCH_THRESHOLD, (
                 f"Plik ({idx.size} B) mniejszy niż próg ({_PARALLEL_SEARCH_THRESHOLD} B)"
             )
-            assert len(idx.index) >= 4, (
-                f"Za mało wpisów w indeksie: {len(idx.index)}"
-            )
+            assert len(idx.index) >= 4, f"Za mało wpisów w indeksie: {len(idx.index)}"
 
             engine = FilterEngine(path, idx)
             results: list = []
             done = threading.Event()
             engine.start(
-                "ERROR", use_regex=False, case_sensitive=True, negate=False,
+                "ERROR",
+                use_regex=False,
+                case_sensitive=True,
+                negate=False,
                 on_progress=lambda p, h: None,
                 on_done=lambda r, e: (results.extend(r), done.set()),
             )
             done.wait(timeout=60)
 
             assert done.is_set(), "Auto-dispatch parallel search did not finish in time"
-            assert len(results) == 75_000, (
-                f"Oczekiwano 75000, dostano {len(results)}"
-            )
+            assert len(results) == 75_000, f"Oczekiwano 75000, dostano {len(results)}"
             idx.close()
         finally:
             if os.path.exists(path):
@@ -430,7 +506,7 @@ class TestParallelSearch:
         ranges = engine._compute_search_ranges(n_workers=4)
 
         assert len(ranges) >= 1, "Must have at least one range"
-        for i, (start, end, line) in enumerate(ranges):
+        for i, (start, end, _line) in enumerate(ranges):
             assert start < end, f"Range [{i}] has empty interval: {start}..{end}"
             assert start >= 0
             assert end <= idx.size + 1

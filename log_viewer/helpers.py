@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
+import bz2
+import gzip
+import lzma
 import os
 import sys
-import gzip
-import bz2
-import lzma
-from typing import List, Tuple
 from urllib.parse import unquote
-
 
 # Stałe konfiguracyjne (wartości domyślne — mogą być nadpisane przez UserConfig)
 INDEX_INTERVAL_BYTES = 1 * 1024 * 1024
@@ -143,14 +141,15 @@ OPEN_FILETYPES = (
 
 def fmt_size(n: int) -> str:
     """Formatuje rozmiar bajtów w czytelny sposób."""
+    val: float = float(n)
     for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024.0:
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} {unit}"
-        n /= 1024.0
-    return f"{n:.1f} PB"
+        if abs(val) < 1024.0:
+            return f"{val:.1f} {unit}" if unit != "B" else f"{int(val)} {unit}"
+        val /= 1024.0
+    return f"{val:.1f} PB"
 
 
-def truncate_for_display(text: str, max_length: int = MAX_DISPLAY_LINE_LENGTH) -> Tuple[str, bool]:
+def truncate_for_display(text: str, max_length: int = MAX_DISPLAY_LINE_LENGTH) -> tuple[str, bool]:
     """Przycina tekst do max_length znaków z sufiksem informacyjnym."""
     if len(text) <= max_length:
         return text, False
@@ -159,11 +158,11 @@ def truncate_for_display(text: str, max_length: int = MAX_DISPLAY_LINE_LENGTH) -
     return text[:keep] + suffix, True
 
 
-def parse_dnd_files(dnd_data: str) -> List[str]:
+def parse_dnd_files(dnd_data: str) -> list[str]:
     """Parsuje dane z DnD eventa — format zależy od platformy."""
     if not dnd_data:
         return []
-    paths: List[str] = []
+    paths: list[str] = []
     s = dnd_data.strip()
     i = 0
     while i < len(s):
@@ -171,7 +170,7 @@ def parse_dnd_files(dnd_data: str) -> List[str]:
             end = s.find("}", i)
             if end == -1:
                 break
-            paths.append(s[i + 1:end])
+            paths.append(s[i + 1 : end])
             i = end + 1
             while i < len(s) and s[i] in " \t":
                 i += 1
@@ -183,7 +182,7 @@ def parse_dnd_files(dnd_data: str) -> List[str]:
                 end += 1
             paths.append(s[i:end])
             i = end
-    result: List[str] = []
+    result: list[str] = []
     for p in paths:
         if p.startswith("file://"):
             p = p[7:]
@@ -200,7 +199,7 @@ def parse_dnd_files(dnd_data: str) -> List[str]:
     return result
 
 
-def dnd_files_to_open(dnd_data: str) -> List[str]:
+def dnd_files_to_open(dnd_data: str) -> list[str]:
     """Jak parse_dnd_files, ale filtruje tylko istniejące pliki."""
     return [p for p in parse_dnd_files(dnd_data) if os.path.isfile(p)]
 
@@ -208,9 +207,15 @@ def dnd_files_to_open(dnd_data: str) -> List[str]:
 def is_compressed(path: str) -> bool:
     """Zwraca True jeśli ścieżka ma rozszerzenie kompresji."""
     p = path.lower()
-    return p.endswith(".gz") or p.endswith(".gzip") \
-        or p.endswith(".bz2") or p.endswith(".bzip2") \
-        or p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz")
+    return (
+        p.endswith(".gz")
+        or p.endswith(".gzip")
+        or p.endswith(".bz2")
+        or p.endswith(".bzip2")
+        or p.endswith(".xz")
+        or p.endswith(".lzma")
+        or p.endswith(".lz")
+    )
 
 
 def open_maybe_compressed(path: str, mode: str = "rb"):
@@ -224,12 +229,13 @@ def open_maybe_compressed(path: str, mode: str = "rb"):
         return lzma.open(path, mode)
     return open(path, mode)
 
+
 def get_resource_path(relative_path: str) -> str:
     """Zwraca bezwzględną ścieżkę do zasobu, działa zarówno w środowisku deweloperskim jak i po spakowaniu PyInstallerem."""
-    try:
-        # PyInstaller tworzy folder tymczasowy i zapisuje ścieżkę do niego w _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        base_path = meipass
+    else:
         # Jeśli nie spakowane, root to folder nadrzędny wobec log_viewer
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)

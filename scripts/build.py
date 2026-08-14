@@ -8,21 +8,24 @@ Automatycznie:
 """
 
 import os
-import sys
 import platform
 import subprocess
+import sys
+
 
 def get_repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def compile_ui_files(repo_root):
     print(">>> Compiling UI files...")
     compile_script = os.path.join(repo_root, "scripts", "compile_ui.py")
     try:
         subprocess.run([sys.executable, compile_script], check=True)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print("Error compiling UI files. Aborting build.")
         sys.exit(1)
+
 
 def convert_icon(repo_root, target_format):
     print(f">>> Converting icon to {target_format} format...")
@@ -44,7 +47,9 @@ def convert_icon(repo_root, target_format):
         if target_format == ".icns":
             img.save(icon_out_path, format="ICNS")
         elif target_format == ".ico":
-            img.save(icon_out_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+            img.save(
+                icon_out_path, format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+            )
         print(f"Successfully generated {icon_out_path}")
         return icon_out_path
     except Exception as e:
@@ -52,6 +57,7 @@ def convert_icon(repo_root, target_format):
         if platform.system() == "Linux":
             return icon_png_path
         sys.exit(1)
+
 
 def build_app():
     repo_root = get_repo_root()
@@ -80,7 +86,9 @@ def build_app():
     # gdy próbujemy odpalić paczkę używając log_viewer/main.py jako bezpośredniego script-file'a.
     frozen_main = os.path.join(repo_root, "run_frozen.py")
     with open(frozen_main, "w") as f:
-        f.write("import multiprocessing\nfrom log_viewer.main import main\n\nif __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n")
+        f.write(
+            "import multiprocessing\nfrom log_viewer.main import main\n\nif __name__ == '__main__':\n    multiprocessing.freeze_support()\n    main()\n"
+        )
 
     main_script = frozen_main
 
@@ -92,7 +100,8 @@ def build_app():
         "pyinstaller",
         "--noconfirm",
         "--windowed",
-        "--name", "log-viewer",
+        "--name",
+        "log-viewer",
         f"--add-data={add_data_arg}",
     ]
 
@@ -119,6 +128,7 @@ def build_app():
         print("\nError: 'pyinstaller' command not found.")
         print("Install dev dependencies: pip install -r requirements-dev.txt")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     build_app()
