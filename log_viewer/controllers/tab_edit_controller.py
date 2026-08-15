@@ -452,3 +452,9 @@ class EditController(QObject):
         export_worker.error.connect(export_thread.quit, Qt.ConnectionType.QueuedConnection)
         export_thread.finished.connect(export_thread.deleteLater)
         export_thread.start()
+
+    # Publiczne aliasy metod kontrolera
+    on_save_done = _on_save_done
+    on_save_error = _on_save_error
+    on_save_file_changed = _on_save_file_changed
+    on_save_compressed = _on_save_compressed

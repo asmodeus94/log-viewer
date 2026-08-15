@@ -5,13 +5,14 @@ from __future__ import annotations
 import array
 import os
 import threading
+from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
 
 from .bitset import Bitset
 from .edit_buffer import EditBuffer
 from .exceptions import CompressedSaveError, FileChangedError
-from .filter_engine import FilterEngine, PlainTextStrategy, RegexStrategy
+from .filter_engine import FilterEngine, FilterStrategy, PlainTextStrategy, RegexStrategy
 from .helpers import open_maybe_compressed
 from .indexer import LineIndexer
 
@@ -43,10 +44,10 @@ class IndexerWorker(QObject):
         return self._cancel_event.is_set()
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
 
-            def progress_cb(pct: float):
+            def progress_cb(pct: float) -> None:
                 self.progress.emit(pct)
 
             # Przekaż cancel_event do LineIndexer — sprawdzi go w pętli
@@ -83,7 +84,7 @@ class FilterWorker(QObject):
         negate: bool,
         context_after: int = 0,
         search_in_filter: bool = False,
-        filtered_lines: object = None,
+        filtered_lines: Bitset | None = None,
     ):
         super().__init__()
         self._engine = engine
@@ -96,11 +97,11 @@ class FilterWorker(QObject):
         self._filtered_lines = filtered_lines
 
     @Slot()
-    def run(self):
-        def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None):
+    def run(self) -> None:
+        def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None) -> None:
             self.progress.emit(pct, hits, state, partial_results)
 
-        def on_done(results, error):
+        def on_done(results: Any, error: str | None) -> None:
             if error or not results or len(results) == 0:
                 self.finished.emit(None, set(), None, {}, set(), error)
                 return
@@ -154,10 +155,10 @@ class SaveWorker(QObject):
         self._encoding = encoding
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
 
-            def progress_cb(pct: float):
+            def progress_cb(pct: float) -> None:
                 self.progress.emit(pct)
 
             backup_path = self._edit_buffer.save_to_file(
@@ -195,13 +196,13 @@ class SaveAsWorker(QObject):
         self._total_lines = total_lines
         self._cancel_event = threading.Event()
 
-    def cancel(self):
+    def cancel(self) -> None:
         self._cancel_event.set()
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
-            edits = self._edit_buffer._edits
+            edits = self._edit_buffer.edits
             cancel_set = self._cancel_event.is_set
             line_no = 0
             last_progress_lines = 0
@@ -249,9 +250,9 @@ class ExportWorker(QObject):
         dst_path: str,
         encoding: str = "utf-8",
         filter_active: bool = False,
-        filter_results=None,
+        filter_results: Bitset | None = None,
         total_lines: int = 0,
-    ):
+    ) -> None:
         super().__init__()
         self._edit_buffer = edit_buffer
         self._src_path = src_path
@@ -262,16 +263,16 @@ class ExportWorker(QObject):
         self._total_lines = total_lines
         self._cancel_event = threading.Event()
 
-    def cancel(self):
+    def cancel(self) -> None:
         self._cancel_event.set()
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
             count = 0
 
             cancel_set = self._cancel_event.is_set
-            edits = self._edit_buffer._edits
+            edits = self._edit_buffer.edits
             line_no = 0
             last_progress_lines = 0
 
@@ -293,8 +294,8 @@ class ExportWorker(QObject):
                                 break
                             self.progress.emit(line_no / self._total_lines * 100.0)
                             last_progress_lines = line_no
-                else:
-                    words = self._filter_results._words
+                elif self._filter_results is not None:
+                    words = self._filter_results.words
                     num_words = len(words)
                     word_idx = 0
                     bit_idx = 0
@@ -374,7 +375,10 @@ class IncrementalFilterWorker(QObject):
     @Slot()
     def run(self) -> None:
         results_array = array.array("Q")
+        # Bezpieczne tłumienie wyjątków w wątku pobocznym przy przerwaniu wyszukiwania (stabilność QThread)
+        # noinspection PyBroadException
         try:
+            strategy: FilterStrategy
             if self._use_regex:
                 strategy = RegexStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
             else:
@@ -394,10 +398,11 @@ class IncrementalFilterWorker(QObject):
         if self._cancel_event.is_set():
             return
 
+        res_tuple: tuple[int, array.array[int], int]
         if len(results_array) > 0:
             results_bitset = Bitset.from_indices(results_array, self._end_line)
             res_tuple = results_bitset.to_raw()
         else:
-            res_tuple = (self._end_line, None, 0)
+            res_tuple = (self._end_line, array.array("Q"), 0)
 
         self.finished.emit(res_tuple)

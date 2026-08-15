@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import bisect
+from collections.abc import Sequence
+from typing import Any
 
-from PySide6 import QtGui
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QPoint, QSize, Qt, Signal
+from PySide6 import QtCore, QtGui
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -49,7 +51,7 @@ class LineNumberArea(QWidget):
         self._bg_color = QColor("#f0f0f0")
         self._text_pen = QPen(QColor("#666666"))
         self._bookmark_brush = QBrush(QColor("#6a9955"))
-        self._bookmark_pen = QPen(Qt.NoPen)
+        self._bookmark_pen = QPen(Qt.PenStyle.NoPen)
         self.update_width()
 
     def set_line_map(self, line_map: list[int]) -> None:
@@ -76,9 +78,9 @@ class LineNumberArea(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(self.width(), 0)
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(event.rect(), self._bg_color)
         painter.setPen(self._text_pen)
         painter.setFont(self._editor.font())
@@ -109,15 +111,13 @@ class LineNumberArea(QWidget):
                     top,
                     self.width() - 8,
                     font_height,
-                    Qt.AlignRight | Qt.AlignVCenter,
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                     file_line_str,
                 )
             block = block.next()
             block_number += 1
             top = bottom
             bottom = top + round(self._editor.blockBoundingRect(block).height())
-            if block is None:
-                break
 
 
 class LogPlainTextEdit(QPlainTextEdit):
@@ -126,14 +126,14 @@ class LogPlainTextEdit(QPlainTextEdit):
     files_dropped = Signal(list)
     user_scrolled = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.custom_context_actions = []
+        self.custom_context_actions: list[QAction] = []
         self._line_number_area = LineNumberArea(self)
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
         self._update_line_number_area_width(0)
-        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.setReadOnly(True)
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setPointSize(10)
@@ -173,77 +173,77 @@ class LogPlainTextEdit(QPlainTextEdit):
         """Zwraca skojarzony widget rysujący numery linii."""
         return self._line_number_area
 
-    def _setup_actions(self):
+    def _setup_actions(self) -> None:
         self._action_copy = QAction(self)
         self._action_copy.setShortcut(QKeySequence("Ctrl+C"))
-        self._action_copy.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
         self._action_copy.setShortcutVisibleInContextMenu(True)
         self._action_copy.triggered.connect(self._do_copy)
         self.addAction(self._action_copy)
 
         self._action_copy_line = QAction(self)
         self._action_copy_line.setShortcut(QKeySequence("Ctrl+Shift+L"))
-        self._action_copy_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_copy_line.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
         self._action_copy_line.setShortcutVisibleInContextMenu(True)
         self._action_copy_line.triggered.connect(self._do_copy_line)
         self.addAction(self._action_copy_line)
 
         self._action_format_sel = QAction(self)
         self._action_format_sel.setShortcut(QKeySequence("Ctrl+I"))
-        self._action_format_sel.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_sel.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
         self._action_format_sel.setShortcutVisibleInContextMenu(True)
         self._action_format_sel.triggered.connect(self._do_format_selection)
         self.addAction(self._action_format_sel)
 
         self._action_format_line = QAction(self)
         self._action_format_line.setShortcut(QKeySequence("Ctrl+Shift+I"))
-        self._action_format_line.setShortcutContext(Qt.WidgetShortcut)
+        self._action_format_line.setShortcutContext(Qt.ShortcutContext.WidgetShortcut)
         self._action_format_line.setShortcutVisibleInContextMenu(True)
         self._action_format_line.triggered.connect(self._do_format_line)
         self.addAction(self._action_format_line)
 
         self.selectionChanged.connect(self._update_actions_state)
 
-    def _update_actions_state(self):
+    def _update_actions_state(self) -> None:
         has_sel = self.textCursor().hasSelection()
         self._action_copy.setEnabled(has_sel)
         self._action_format_sel.setEnabled(has_sel)
 
-    def _do_copy(self):
+    def _do_copy(self) -> None:
         if self.textCursor().hasSelection():
             self.copy()
 
-    def _do_copy_line(self):
+    def _do_copy_line(self) -> None:
         cursor = self.textCursor()
-        cursor.select(QTextCursor.LineUnderCursor)
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
         selected_text = cursor.selectedText()
         if selected_text:
             QApplication.clipboard().setText(selected_text)
 
-    def _do_format_selection(self):
+    def _do_format_selection(self) -> None:
         if not self.textCursor().hasSelection():
             return
         app = self.window() if hasattr(self, "window") else None
         if app and hasattr(app, "cmd_format_selection"):
             app.cmd_format_selection()
 
-    def _do_format_line(self):
+    def _do_format_line(self) -> None:
         cursor = self.textCursor()
-        cursor.select(QTextCursor.LineUnderCursor)
+        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
         selected_text = cursor.selectedText().replace("\u2029", "\n")
         if not selected_text.strip():
             return
 
         tab = self.parent()
-        while tab and not hasattr(tab, "_last_formatter"):
+        while tab and not hasattr(tab, "last_formatter"):
             tab = tab.parent()
 
-        last_formatter = getattr(tab, "_last_formatter", "JSON")
+        last_formatter = getattr(tab, "last_formatter", "JSON")
         dialog = FormatDialog(self, selected_text, last_formatter)
         dialog.exec()
 
-        if tab and hasattr(tab, "_last_formatter"):
-            tab._last_formatter = dialog.get_selected_formatter()
+        if tab and hasattr(tab, "last_formatter"):
+            tab.last_formatter = dialog.get_selected_formatter()
 
         dialog.deleteLater()
 
@@ -253,7 +253,7 @@ class LogPlainTextEdit(QPlainTextEdit):
     def set_bookmarks(self, bookmarks: set[int]) -> None:
         self._line_number_area.set_bookmarks(bookmarks)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         super().resizeEvent(event)
         cr = self.contentsRect()
         self._line_number_area.setGeometry(
@@ -263,10 +263,13 @@ class LogPlainTextEdit(QPlainTextEdit):
             cr.height(),
         )
 
-    def _update_line_number_area_width(self, new_block_count: int) -> None:
+    def update_line_number_area_width(self, new_block_count: int = 0) -> None:
+        self._update_line_number_area_width(new_block_count)
+
+    def _update_line_number_area_width(self, _new_block_count: int = 0) -> None:
         self.setViewportMargins(self._line_number_area.width(), 0, 0, 0)
 
-    def _update_line_number_area(self, rect, dy: int) -> None:
+    def _update_line_number_area(self, rect: QtCore.QRect, dy: int) -> None:
         if dy:
             self._line_number_area.scroll(0, dy)
         else:
@@ -274,24 +277,24 @@ class LogPlainTextEdit(QPlainTextEdit):
         if rect.contains(self.viewport().rect()):
             self._update_line_number_area_width(0)
 
-    def dragEnterEvent(self, event: QDragEnterEvent):
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def wheelEvent(self, e):
+    def wheelEvent(self, e: QtGui.QWheelEvent) -> None:
         # Wykrycie przewijania kółkiem myszy i zatrzymanie np. trybu follow
         self.user_scrolled.emit()
         super().wheelEvent(e)
 
-    def dragMoveEvent(self, event):
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event: QDropEvent):
+    def dropEvent(self, event: QDropEvent) -> None:
         if not event.mimeData().hasUrls():
             event.ignore()
             return
@@ -306,7 +309,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         else:
             event.ignore()
 
-    def contextMenuEvent(self, event):
+    def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         app = self.window() if hasattr(self, "window") else None
         t = getattr(app, "t", lambda k: k)
 
@@ -339,7 +342,7 @@ class LogPlainTextEdit(QPlainTextEdit):
 class SettingsDialog(QDialog):
     """Dialog zmiany fontu i parametrów wyświetlania."""
 
-    def __init__(self, parent, app):
+    def __init__(self, parent: QWidget | None, app: Any) -> None:
         super().__init__(parent)
         self.ui = Ui_SettingsDialog()
         self.ui.setupUi(self)
@@ -394,21 +397,22 @@ class SearchResultsModel(QAbstractListModel):
     "  linia: tekst" (przycięty do 200 znaków). UserRole zwraca line_no.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._all_results: list[tuple[int, str]] = []
+        self._all_results: list[int | tuple[int, str]] = []
         self._visible_count = 0
         self._batch_size = 1000
+        self._indexer: Any = None
 
         self._color_error = QColor(THEME_DARK["error"])
         self._color_warn = QColor(THEME_DARK["warn"])
         self._color_info = QColor(THEME_DARK["info"])
         self._color_debug = QColor(THEME_DARK["debug"])
 
-    def set_results(self, results: list[int], indexer=None) -> None:
+    def set_results(self, results: Sequence[int | tuple[int, str]] | Any, indexer: Any = None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
-        self._all_results = results
+        self._all_results = list(results)
         self._indexer = indexer
         self._visible_count = min(len(results), self._batch_size)
         self.endResetModel()
@@ -468,7 +472,7 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = new_visible
         self.endInsertRows()
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid() or index.row() >= self._visible_count:
             return None
         item = self._all_results[index.row()]
@@ -482,15 +486,15 @@ class SearchResultsModel(QAbstractListModel):
             else:
                 text = ""
 
-        if role == Qt.DisplayRole:
+        if role == Qt.ItemDataRole.DisplayRole:
             display = text[:200]
             if len(text) > 200:
                 display += "..."
             formatted_line = f"{line_no + 1:>8,}"
             return f"  {formatted_line}:  {display}"
-        if role == Qt.UserRole:
+        if role == Qt.ItemDataRole.UserRole:
             return line_no
-        if role == Qt.ForegroundRole:
+        if role == Qt.ItemDataRole.ForegroundRole:
             return None
         return None
 
@@ -515,7 +519,8 @@ class SearchResultsModel(QAbstractListModel):
         Zwraca -1 jeśli nie znaleziono dokładnego dopasowania.
         """
         if hasattr(self._all_results, "bisect_left"):
-            idx = self._all_results.bisect_left(line_no)
+            idx_obj = self._all_results.bisect_left(line_no)
+            idx = int(idx_obj)
             if idx < len(self._all_results) and self._all_results[idx] == line_no:
                 # Doładowanie widocznych wierszy
                 if idx >= self._visible_count:
@@ -557,7 +562,7 @@ class MiniMap(QWidget):
     # Priorytety: niższy = ważniejszy
     _PRIORITY = {"error": 0, "warn": 1, "info": 2, "debug": 3}
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedWidth(48)
         self.setMinimumHeight(100)
@@ -572,6 +577,8 @@ class MiniMap(QWidget):
             "debug": QColor(THEME["minimap_debug"]),
             "": QColor(THEME["minimap_bg"]),
         }
+        self._bg: QColor = QColor(THEME["minimap_bg"])
+        self._viewport_color: QColor = QColor(THEME["minimap_viewport"])
 
     @property
     def total_lines(self) -> int:
@@ -608,9 +615,9 @@ class MiniMap(QWidget):
             self._viewport_end = new_end
             self.update()
 
-    def paintEvent(self, event):
+    def paintEvent(self, _event: QtGui.QPaintEvent) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         rect = self.rect()
         painter.fillRect(rect, self._bg)
 
@@ -649,10 +656,10 @@ class MiniMap(QWidget):
 
         # Obramowanie
         painter.setPen(QColor(THEME["border"]))
-        painter.setBrush(Qt.NoBrush)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(0, 0, self.width() - 1, h - 1)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Klik = skok do pozycji w pliku proporcjonalnej do klikniętej pozycji."""
         if self._total_lines == 0:
             return
@@ -668,20 +675,24 @@ class FormatDialog(QDialog):
     (np. JSON) i jego podgląd. Pamięta wybrany formatter w trakcie sesji.
     """
 
-    def __init__(self, parent, text: str, initial_formatter: str = "JSON"):
+    editor: QPlainTextEdit | QTextEdit | None
+
+    def __init__(self, parent: QWidget | None, text: str, initial_formatter: str = "JSON") -> None:
         super().__init__(parent)
         self.ui = Ui_FormatDialog()
         self.ui.setupUi(self)
 
         self.original_text = text
-        self.app = parent.window() if hasattr(parent, "window") else parent
-        self.t = self.app.t if hasattr(self.app, "t") else lambda k: k
+        self.app = parent.window() if (parent and hasattr(parent, "window")) else parent
+        self.t = self.app.t if (self.app and hasattr(self.app, "t")) else lambda k: k
 
         self.editor = None
-        if hasattr(parent, "textCursor"):
+        if isinstance(parent, (QPlainTextEdit, QTextEdit)):
             self.editor = parent
-        elif hasattr(parent, "text"):
-            self.editor = parent.text
+        elif parent is not None:
+            parent_text = getattr(parent, "text", None)
+            if isinstance(parent_text, (QPlainTextEdit, QTextEdit)):
+                self.editor = parent_text
 
         self.setWindowTitle(self.t("dlg_format_title"))
         self.ui.lbl_formatter.setText(self.t("lbl_formatter"))
@@ -705,11 +716,11 @@ class FormatDialog(QDialog):
         self.ui.btn_next.clicked.connect(self._on_next_line)
 
         # Tłumaczenie systemowego przycisku 'Close'
-        self.ui.buttons.button(QDialogButtonBox.Close).setText(self.t("btn_close"))
+        self.ui.buttons.button(QDialogButtonBox.StandardButton.Close).setText(self.t("btn_close"))
 
         self.text_edit = self.ui.text_edit
         # Zastosuj czcionkę stałej szerokości
-        font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+        font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setPointSize(10)
 
         self.text_edit.setFont(font)
@@ -717,7 +728,7 @@ class FormatDialog(QDialog):
         # Zastosuj formatowanie przy otwarciu
         self._apply_format(self.formatter_combo.currentText())
 
-    def _reformat_current_text(self):
+    def _reformat_current_text(self) -> None:
         """Pobiera obecny tekst, aktualizuje oryginał i ponawia formatowanie."""
         current_text = self.text_edit.toPlainText()
         failed_msg = self.t("msg_format_failed") + "\n\n"
@@ -743,9 +754,9 @@ class FormatDialog(QDialog):
         if not self.editor:
             return
         cursor = self.editor.textCursor()
-        if not cursor.movePosition(QtGui.QTextCursor.Up):
-            cursor.movePosition(QtGui.QTextCursor.End)
-        cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        if not cursor.movePosition(QtGui.QTextCursor.MoveOperation.Up):
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
         self.editor.setTextCursor(cursor)
         self.editor.ensureCursorVisible()
         self._load_cursor_text(cursor)
@@ -754,9 +765,9 @@ class FormatDialog(QDialog):
         if not self.editor:
             return
         cursor = self.editor.textCursor()
-        if not cursor.movePosition(QtGui.QTextCursor.Down):
-            cursor.movePosition(QtGui.QTextCursor.Start)
-        cursor.select(QtGui.QTextCursor.LineUnderCursor)
+        if not cursor.movePosition(QtGui.QTextCursor.MoveOperation.Down):
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
         self.editor.setTextCursor(cursor)
         self.editor.ensureCursorVisible()
         self._load_cursor_text(cursor)
@@ -779,7 +790,7 @@ class ExpandingLineEdit(QTextEdit):
 
     returnPressed = Signal()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.base_min_width = 80
         self.focused_min_width = 150
@@ -794,20 +805,20 @@ class ExpandingLineEdit(QTextEdit):
         self.max_height_limit = 150
 
         self.textChanged.connect(self._adjust_size)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setLineWrapMode(QTextEdit.WidgetWidth)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.setAcceptRichText(False)
 
-    def text(self):
+    def text(self) -> str:
         return self.toPlainText()
 
-    def setText(self, t):
+    def setText(self, t: str) -> None:
         self.setPlainText(t)
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
-            if event.modifiers() & Qt.ShiftModifier:
+    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                 super().keyPressEvent(event)
             else:
                 self.returnPressed.emit()
@@ -815,19 +826,19 @@ class ExpandingLineEdit(QTextEdit):
         else:
             super().keyPressEvent(event)
 
-    def focusInEvent(self, event):
+    def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
         super().focusInEvent(event)
         self._adjust_size()
 
-    def focusOutEvent(self, event):
+    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
         super().focusOutEvent(event)
         self.setMinimumWidth(self.base_min_width)
         self.setMaximumHeight(self.base_height)
         self.setMinimumHeight(self.base_height)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.verticalScrollBar().setValue(0)
 
-    def _adjust_size(self):
+    def _adjust_size(self) -> None:
         if self.hasFocus():
             fm = self.fontMetrics()
             doc = self.document()
@@ -848,6 +859,6 @@ class ExpandingLineEdit(QTextEdit):
             self.setMinimumHeight(new_height)
 
             if doc_height > self.max_height_limit:
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             else:
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)

@@ -28,6 +28,10 @@ class FileController(QObject):
         super().__init__(tab)
         self.tab: LogTab = tab
 
+    def stop_background_threads(self) -> None:
+        """Bezpiecznie zatrzymuje aktywne workery i wątki pracujące w tle dla karty."""
+        self._stop_background_threads()
+
     def _stop_background_threads(self) -> None:
         """Bezpiecznie zatrzymuje aktywne workery i wątki pracujące w tle dla karty."""
         workers = (
@@ -206,7 +210,7 @@ class FileController(QObject):
 
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
-        if self.tab.edit_buffer is None:
+        if getattr(self.tab, "edit_buffer", None) is None:
             return
         if self.tab.indexer is not None:
             try:
@@ -673,3 +677,19 @@ class FileController(QObject):
     @Slot(str)
     def _on_follow_reindex_failed(self, _err: str) -> None:
         self.tab.set_status(self.tab.t("st_follow_reindex_failed"))
+
+    # Publiczne aliasy metod kontrolera
+    on_index_progress = _on_index_progress
+    cancel_indexing = _cancel_indexing
+    close_index_progress = _close_index_progress
+    on_index_error = _on_index_error
+    on_index_done = _on_index_done
+    on_reindex_finished = _on_reindex_finished
+    on_reindex_after_save = _on_reindex_after_save
+    follow_poll = _follow_poll
+    start_follow_reindex = _start_follow_reindex
+    on_follow_reindex_slot = _on_follow_reindex_slot
+    on_follow_reindex_clear_flag = _on_follow_reindex_clear_flag
+    on_follow_new_lines = _on_follow_new_lines
+    on_follow_reindex = _on_follow_reindex
+    on_follow_reindex_failed = _on_follow_reindex_failed

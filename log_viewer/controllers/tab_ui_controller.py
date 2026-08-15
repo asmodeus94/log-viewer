@@ -19,6 +19,9 @@ class UIController(QObject):
         super().__init__(tab)
         self.tab: LogTab = tab
 
+    def setup_ui_elements(self) -> None:
+        self._setup_ui_elements()
+
     def _setup_ui_elements(self) -> None:
         self.tab.splitter = self.tab.ui.splitter
         self.tab.v_splitter = self.tab.ui.v_splitter
@@ -98,8 +101,8 @@ class UIController(QObject):
                     return True
                 return super().eventFilter(obj, event)
 
-        self.tab._return_key_filter = ReturnKeyFilter(self.tab)
-        self.tab.search_results_view.installEventFilter(self.tab._return_key_filter)
+        self._return_key_filter = ReturnKeyFilter(self.tab)
+        self.tab.search_results_view.installEventFilter(self._return_key_filter)
 
         # Poprawka: nawigacja klawiszem enter i double-click
         self.tab.search_results_view.doubleClicked.connect(self.tab.on_search_result_clicked)
@@ -118,6 +121,9 @@ class UIController(QObject):
         self.tab.btn_del_edits.setText(self.tab.t("btn_delete_sel"))
         self.tab.search_results_label.setText(self.tab.t("lbl_search_results_empty"))
 
+    def apply_font_to_text(self) -> None:
+        self._apply_font_to_text()
+
     def _apply_font_to_text(self) -> None:
         family = self.tab.font_family
         if family:
@@ -130,6 +136,9 @@ class UIController(QObject):
         if hasattr(self.tab.text, "line_number_area"):
             self.tab.text.line_number_area.update_width()
             self.tab.text.line_number_area.update()
+
+    def apply_theme(self) -> None:
+        self._apply_theme()
 
     def _apply_theme(self) -> None:
         """Aktualizuje kolory per-tab po zmianie motywu."""

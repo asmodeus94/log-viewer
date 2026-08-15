@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import array
 import bisect
 import itertools
 import operator
-from collections.abc import Sequence
-from typing import overload
+from collections.abc import Iterable, Sequence
+from typing import Any, overload
 
 
 class Bitset(Sequence[int]):
@@ -12,7 +14,7 @@ class Bitset(Sequence[int]):
     wyników wyszukiwania i filtrowania przy minimalnym zużyciu RAM.
     """
 
-    def __init__(self, size: int):
+    def __init__(self, size: int) -> None:
         self._size = size
         self._num_words = (size + 63) // 64
         self._words = array.array("Q", [0] * self._num_words)
@@ -21,13 +23,13 @@ class Bitset(Sequence[int]):
         self._total_count = -1
 
     @classmethod
-    def from_indices(cls, indices: "array.array[int]", size: int) -> "Bitset":
+    def from_indices(cls, indices: array.array[int], size: int) -> Bitset:
         b = cls(size)
         b.update_indices(indices)
         return b
 
     @classmethod
-    def from_raw(cls, size: int, words: "array.array[int]", total_count: int = -1) -> "Bitset":
+    def from_raw(cls, size: int, words: array.array[int], total_count: int = -1) -> Bitset:
         """Tworzy instancję Bitset z bezpośredniego bufora 64-bitowych słów."""
         b = cls(size)
         b._words = words
@@ -36,11 +38,11 @@ class Bitset(Sequence[int]):
         b._counts = None
         return b
 
-    def to_raw(self) -> tuple[int, "array.array[int]", int]:
+    def to_raw(self) -> tuple[int, array.array[int], int]:
         """Zwraca uniwersalną krotkę (size, words, total_count) bezpieczną do przesyłania przez sygnały Qt."""
-        return (self._size, self._words, self._total_count)
+        return self._size, self._words, self._total_count
 
-    def merge_chunk_words(self, base_word: int, words: "Sequence[int] | array.array[int]") -> None:
+    def merge_chunk_words(self, base_word: int, words: Sequence[int] | array.array[int]) -> None:
         """Scalanie zakresu słów bitowych z workera (używane przy wyszukiwaniu/filtrowaniu równoległym)."""
         if not words:
             return
@@ -59,14 +61,14 @@ class Bitset(Sequence[int]):
                     global_words[base_word + i] = words[i]
         self._counts = None
 
-    def update_indices(self, indices):
+    def update_indices(self, indices: Iterable[int]) -> None:
         words = self._words
         for idx in indices:
             if 0 <= idx < self._size:
                 words[idx // 64] |= 1 << (idx % 64)
         self._counts = None
 
-    def _build_cache(self):
+    def _build_cache(self) -> None:
         if self._counts is not None:
             return
 
@@ -90,7 +92,7 @@ class Bitset(Sequence[int]):
         return self._size
 
     @property
-    def words(self) -> "array.array[int]":
+    def words(self) -> array.array[int]:
         """Zwraca wewnętrzny bufor 64-bitowych słów bitsetu."""
         return self._words
 
@@ -100,14 +102,14 @@ class Bitset(Sequence[int]):
             self._words[i] |= words[i]
         self._counts = None
 
-    def copy_from(self, other: "Bitset") -> None:
+    def copy_from(self, other: Bitset) -> None:
         """Kopiuje zawartość z innego Bitsetu do bieżącej instancji."""
-        self.resize(other._size)
-        self._words = array.array("Q", other._words)
-        self._num_words = other._num_words
+        self.resize(other.size)
+        self._words = array.array("Q", other.words)
+        self._num_words = len(other.words)
         self._counts = None
 
-    def clone(self) -> "Bitset":
+    def clone(self) -> Bitset:
         """Zwraca głęboką kopię bieżącego Bitsetu."""
         new_bs = Bitset(self._size)
         new_bs._words = array.array("Q", self._words)
@@ -148,9 +150,9 @@ class Bitset(Sequence[int]):
     @overload
     def __getitem__(self, index: int) -> int: ...
     @overload
-    def __getitem__(self, index: slice) -> "array.array[int]": ...
+    def __getitem__(self, index: slice) -> array.array[int]: ...
 
-    def __getitem__(self, index: int | slice):
+    def __getitem__(self, index: int | slice) -> int | array.array[int]:
         self._build_cache()
         assert self._counts is not None
 
@@ -188,30 +190,30 @@ class Bitset(Sequence[int]):
                     break
 
             return result
-        else:
-            if index < 0:
-                index += self._total_count
-            if index < 0 or index >= self._total_count:
-                raise IndexError("Bitset index out of range")
 
-            word_idx = bisect.bisect_right(self._counts, index) - 1
-            if word_idx < 0:
-                word_idx = 0
+        if index < 0:
+            index += self._total_count
+        if index < 0 or index >= self._total_count:
+            raise IndexError("Bitset index out of range")
 
-            current_count = self._counts[word_idx]
-            items_skipped = index - current_count
-            w = self._words[word_idx]
+        word_idx = bisect.bisect_right(self._counts, index) - 1
+        if word_idx < 0:
+            word_idx = 0
 
-            while w:
-                tz = (w & -w).bit_length() - 1
-                if items_skipped == 0:
-                    return word_idx * 64 + tz
-                items_skipped -= 1
-                w &= w - 1
+        current_count = self._counts[word_idx]
+        items_skipped = index - current_count
+        w = self._words[word_idx]
 
-            raise IndexError("Bitset corrupted state")
+        while w:
+            tz = (w & -w).bit_length() - 1
+            if items_skipped == 0:
+                return word_idx * 64 + tz
+            items_skipped -= 1
+            w &= w - 1
 
-    def expand_context(self, context_after: int) -> "Bitset":
+        raise IndexError("Bitset corrupted state")
+
+    def expand_context(self, context_after: int) -> Bitset:
         """Zwraca nowy Bitset rozszerzony o podaną liczbę linii w dół (kontekst)."""
         new_bs = Bitset(self._size)
         if context_after <= 0:
@@ -277,7 +279,7 @@ class Bitset(Sequence[int]):
 
         return new_bs
 
-    def __and__(self, other: "Bitset") -> "Bitset":
+    def __and__(self, other: Bitset) -> Bitset:
         if not isinstance(other, Bitset):
             raise TypeError(f"Unsupported operand type(s) for &: 'Bitset' and '{type(other).__name__}'")
 
@@ -305,7 +307,7 @@ class Bitset(Sequence[int]):
 
         return new_bs
 
-    def __invert__(self) -> "Bitset":
+    def __invert__(self) -> Bitset:
         new_bs = Bitset(self._size)
         new_words = new_bs._words
         old_words = self._words
@@ -327,13 +329,13 @@ class Bitset(Sequence[int]):
         return new_bs
 
 
-def bisect_left_custom(a, x):
+def bisect_left_custom(a: Any, x: int) -> int:
     if hasattr(a, "bisect_left"):
-        return a.bisect_left(x)
-    return bisect.bisect_left(a, x)
+        return int(a.bisect_left(x))
+    return int(bisect.bisect_left(a, x))
 
 
-def bisect_right_custom(a, x):
+def bisect_right_custom(a: Any, x: int) -> int:
     if hasattr(a, "bisect_right"):
-        return a.bisect_right(x)
-    return bisect.bisect_right(a, x)
+        return int(a.bisect_right(x))
+    return int(bisect.bisect_right(a, x))

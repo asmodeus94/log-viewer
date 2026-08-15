@@ -64,6 +64,7 @@ def run_command(cmd: list[str], cwd: Path, description: str) -> tuple[int, str]:
         cmd,
         cwd=cwd,
         capture_output=False,
+        check=False,
     )
     return proc.returncode, ""
 

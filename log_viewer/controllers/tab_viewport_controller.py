@@ -32,6 +32,11 @@ class ViewportController(QObject):
     def __init__(self, tab: LogTab):
         super().__init__(tab)
         self.tab = tab
+        self._static_extra_sels: list[QtWidgets.QTextEdit.ExtraSelection] = []
+        self._bookmark_widget_lines: list[int] = []
+        self._edited_widget_lines: list[int] = []
+        self._context_widget_lines: list[int] = []
+        self._filter_hit_widget_lines: list[int] = []
 
     def rebuild_extra_selections(self) -> None:
         """Publiczny interfejs do przebudowywania zaznaczeń dodatkowych."""
@@ -167,10 +172,10 @@ class ViewportController(QObject):
             block = block.next()
             i += 1
 
-        self.tab._bookmark_widget_lines = bookmark_widget_lines
-        self.tab._edited_widget_lines = edited_widget_lines
-        self.tab._context_widget_lines = context_widget_lines
-        self.tab._filter_hit_widget_lines = filter_hit_widget_lines
+        self._bookmark_widget_lines = bookmark_widget_lines
+        self._edited_widget_lines = edited_widget_lines
+        self._context_widget_lines = context_widget_lines
+        self._filter_hit_widget_lines = filter_hit_widget_lines
         self.tab.search_extra_sel = None
         self.tab.text.set_line_map(line_map)
 
@@ -199,11 +204,11 @@ class ViewportController(QObject):
         poprawne podświetlenie filtra i kontekstu."""
         line_map = self.tab.line_map
         if not line_map:
-            self.tab._static_extra_sels = []
-            self.tab._filter_hit_widget_lines = []
-            self.tab._context_widget_lines = []
-            self.tab._bookmark_widget_lines = []
-            self.tab._edited_widget_lines = []
+            self._static_extra_sels = []
+            self._filter_hit_widget_lines = []
+            self._context_widget_lines = []
+            self._bookmark_widget_lines = []
+            self._edited_widget_lines = []
             return
 
         filter_hit_widget_lines: list[int] = []
@@ -226,13 +231,13 @@ class ViewportController(QObject):
                 else:
                     context_widget_lines.append(i)
 
-        self.tab._filter_hit_widget_lines = filter_hit_widget_lines
-        self.tab._context_widget_lines = context_widget_lines
-        self.tab._bookmark_widget_lines = bookmark_widget_lines
-        self.tab._edited_widget_lines = edited_widget_lines
+        self._filter_hit_widget_lines = filter_hit_widget_lines
+        self._context_widget_lines = context_widget_lines
+        self._bookmark_widget_lines = bookmark_widget_lines
+        self._edited_widget_lines = edited_widget_lines
 
         # Buduj ExtraSelections dla kontekstu i trafień filtra
-        self.tab._static_extra_sels = []
+        self._static_extra_sels = []
         colors = self.tab.theme_colors
         color_context = colors.get("context", QtGui.QColor("#3a3d3a"))
         color_highlight = colors.get("highlight", QtGui.QColor("#fff176"))
@@ -268,28 +273,28 @@ class ViewportController(QObject):
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format = fmt_context
-                self.tab._static_extra_sels.append(sel)
+                self._static_extra_sels.append(sel)
 
             if i in filter_hit_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format = fmt_highlight
-                self.tab._static_extra_sels.append(sel)
+                self._static_extra_sels.append(sel)
 
             if i in bookmark_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format = fmt_bookmark
-                self.tab._static_extra_sels.append(sel)
+                self._static_extra_sels.append(sel)
 
             if i in edited_set:
                 sel = QtWidgets.QTextEdit.ExtraSelection()
                 sel.cursor = QtGui.QTextCursor(block)
                 sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
                 sel.format = fmt_edited
-                self.tab._static_extra_sels.append(sel)
+                self._static_extra_sels.append(sel)
 
             block = block.next()
             i += 1
@@ -298,7 +303,7 @@ class ViewportController(QObject):
         is_edited = False
         if getattr(self.tab, "edit_buffer", None) is not None:
             is_edited = self.tab.edit_buffer.has(file_line_no)
-        text = self.tab.edit_buffer.get(file_line_no) if is_edited else original_text
+        text = (self.tab.edit_buffer.get(file_line_no) if is_edited else original_text) or ""
         display_text, was_truncated = truncate_for_display(text, max_length=self.tab.max_display_line_length)
         tags: list[str] = []
         if is_edited:
@@ -621,11 +626,11 @@ class ViewportController(QObject):
         if hasattr(self.tab.text, "set_bookmarks"):
             self.tab.text.set_bookmarks(set(self.tab.bookmarks.keys()))
 
-        sels: list[QtWidgets.QTextEdit.ExtraSelection] = list(getattr(self.tab, "_static_extra_sels", []))
+        sels: list[QtWidgets.QTextEdit.ExtraSelection] = list(self._static_extra_sels)
 
-        bookmark_set = getattr(self.tab, "_bookmark_widget_lines", [])
-        edited_set = getattr(self.tab, "_edited_widget_lines", [])
-        filter_hit_set = getattr(self.tab, "_filter_hit_widget_lines", [])
+        bookmark_set = self._bookmark_widget_lines
+        edited_set = self._edited_widget_lines
+        filter_hit_set = self._filter_hit_widget_lines
 
         color_current_line = self.tab.theme_colors.get("current_line", QColor("#2a2d2e"))
 
@@ -818,3 +823,20 @@ class ViewportController(QObject):
         # Ponieważ okno zaczyna się dokładnie w miejscu widocznej wcześniej linii,
         # suwak wewnątrz nowo utworzonego widoku powinien być na samej górze.
         scrollbar.setValue(0)
+
+    # Publiczne aliasy metod kontrolera
+    get_filtered_lines = _get_filtered_lines
+    load_window_impl = _load_window_impl
+    prepare_line_for_display = _prepare_line_for_display
+    apply_line_format = _apply_line_format
+    check_edges = _check_edges
+    do_check_edges = _do_check_edges
+    append_lines = _append_lines
+    prepend_lines = _prepend_lines
+    on_user_scrolled = _on_user_scrolled
+    on_scroll_changed = _on_scroll_changed
+    on_minimap_click = _on_minimap_click
+    update_slider_from_scroll = _update_slider_from_scroll
+    update_position_slider = _update_position_slider
+    highlight_and_scroll = _highlight_and_scroll
+    get_display_text = _get_display_text

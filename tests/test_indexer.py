@@ -73,12 +73,12 @@ class TestLineIndexerCompression:
 
         path = tempfile.mktemp(suffix=".log.gz")
         try:
-            N = 1000
+            n_lines = 1000
             with gzip.open(path, "wb") as f:
-                for i in range(N):
+                for i in range(n_lines):
                     f.write(f"line {i} [INFO] hello\n".encode())
             idx = LineIndexer(path)
-            assert idx.line_count == N
+            assert idx.line_count == n_lines
             assert idx.is_compressed is True
             lines = idx.read_lines(100, 2)
             assert len(lines) == 2
@@ -118,24 +118,24 @@ class TestLineIndexerEncoding:
 class TestLineIndexerParallel:
     def test_parallel_correctness(self, temp_log_file):
         """Parallel indexing daje poprawny line_count i read_lines."""
-        N = 1_000_000  # ~100 MB
-        path = temp_log_file(num_lines=N)
+        n_lines = 1_000_000  # ~100 MB
+        path = temp_log_file(num_lines=n_lines)
         size = os.path.getsize(path)
         if size <= 100 * 1024 * 1024:
             pytest.skip("File too small for parallel threshold")
 
         idx = LineIndexer(path)  # użyje parallel
-        assert idx.line_count == N
+        assert idx.line_count == n_lines
 
         # Single-thread (wymuś)
         idx2 = LineIndexer(path)
         idx2.index = [IndexEntry(0, 0)]
         idx2._last_indexed_offset = 0
         idx2._build_single()
-        assert idx2.line_count == N
+        assert idx2.line_count == n_lines
 
         # Porównaj read_lines
-        for target in [0, 1000, N // 2, N - 1]:
+        for target in [0, 1000, n_lines // 2, n_lines - 1]:
             lines_p = idx.read_lines(target, 3)
             lines_s = idx2.read_lines(target, 3)
             assert lines_p == lines_s, f"Mismatch at line {target}"

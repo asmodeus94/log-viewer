@@ -70,7 +70,7 @@ def format_json(text: str) -> str:
             result.append(suffix.strip())
 
         return "\n".join(result)
-    except Exception:
+    except (json.JSONDecodeError, ValueError, TypeError):
         return text
 
 
@@ -112,7 +112,8 @@ def extract_xml(text: str) -> tuple[str, str, str, bool]:
             if inner and getattr(inner, "code", None) == 9:
                 # W expat inner.offset to kolumna, dla wielu linii bywa zawodne.
                 # Do ucięcia bajtów wykorzystujemy bezwzględny ErrorByteIndex.
-                byte_offset = getattr(parser._parser, "ErrorByteIndex", None)
+                raw_parser = getattr(parser, "_parser", None)  # noqa: SLF001
+                byte_offset = getattr(raw_parser, "ErrorByteIndex", None)
                 if byte_offset is not None:
                     # Wyodrębniamy podciąg w bajtach i dekodujemy na znaki
                     candidate_bytes = encoded_text[:byte_offset]
@@ -128,7 +129,7 @@ def extract_xml(text: str) -> tuple[str, str, str, bool]:
                                 p2.feed(candidate_stripped.encode("utf-8"))
                                 p2.close()
                                 return text[:i], candidate_stripped, text[i + len(candidate_stripped) :], True
-                            except Exception:
+                            except (xml.sax.SAXException, ValueError):
                                 pass
                     except UnicodeDecodeError:
                         pass
@@ -163,7 +164,7 @@ def format_xml(text: str) -> str:
             result.append(suffix.strip())
 
         return "\n".join(result)
-    except Exception:
+    except (xml.sax.SAXException, ValueError, TypeError, AttributeError):
         return text
 
 

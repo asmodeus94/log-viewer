@@ -5,8 +5,9 @@ from __future__ import annotations
 import bz2
 import gzip
 import lzma
-import os
 import sys
+import typing
+from pathlib import Path
 from urllib.parse import unquote
 
 # Stałe konfiguracyjne (wartości domyślne — mogą być nadpisane przez UserConfig)
@@ -183,25 +184,26 @@ def parse_dnd_files(dnd_data: str) -> list[str]:
             paths.append(s[i:end])
             i = end
     result: list[str] = []
-    for p in paths:
-        if p.startswith("file://"):
-            p = p[7:]
-            if p.startswith("localhost/"):
-                p = p[9:]
-        if "%" in p:
+    for raw_p in paths:
+        curr_p = raw_p
+        if curr_p.startswith("file://"):
+            curr_p = curr_p[7:]
+            if curr_p.startswith("localhost/"):
+                curr_p = curr_p[9:]
+        if "%" in curr_p:
             try:
-                p = unquote(p)
-            except Exception:
+                curr_p = unquote(curr_p)
+            except (ValueError, UnicodeError):
                 pass
         if sys.platform == "win32":
-            p = p.replace("/", "\\")
-        result.append(p)
+            curr_p = curr_p.replace("/", "\\")
+        result.append(curr_p)
     return result
 
 
 def dnd_files_to_open(dnd_data: str) -> list[str]:
     """Jak parse_dnd_files, ale filtruje tylko istniejące pliki."""
-    return [p for p in parse_dnd_files(dnd_data) if os.path.isfile(p)]
+    return [p for p in parse_dnd_files(dnd_data) if Path(p).is_file()]
 
 
 def is_compressed(path: str) -> bool:
@@ -218,24 +220,24 @@ def is_compressed(path: str) -> bool:
     )
 
 
-def open_maybe_compressed(path: str, mode: str = "rb"):
+def open_maybe_compressed(path: str, mode: str = "rb") -> typing.IO[bytes]:
     """Otwiera plik, transparentnie dekompresując na podstawie rozszerzenia."""
     p = path.lower()
     if p.endswith(".gz") or p.endswith(".gzip"):
-        return gzip.open(path, mode)
+        return gzip.open(path, mode)  # type: ignore[return-value]
     if p.endswith(".bz2") or p.endswith(".bzip2"):
-        return bz2.open(path, mode)
+        return bz2.open(path, mode)  # type: ignore[return-value]
     if p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
-        return lzma.open(path, mode)
+        return lzma.open(path, mode)  # type: ignore[return-value]
     return open(path, mode)
 
 
 def get_resource_path(relative_path: str) -> str:
     """Zwraca bezwzględną ścieżkę do zasobu, działa zarówno w środowisku deweloperskim jak i po spakowaniu PyInstallerem."""
     meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        base_path = meipass
+    if meipass is not None:
+        base_dir = Path(str(meipass))
     else:
         # Jeśli nie spakowane, root to folder nadrzędny wobec log_viewer
-        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base_path, relative_path)
+        base_dir = Path(__file__).resolve().parent.parent
+    return str(base_dir / relative_path)

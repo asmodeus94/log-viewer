@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Sequence
+from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
 from PySide6.QtWidgets import QMessageBox
@@ -13,17 +14,18 @@ from log_viewer.workers import FilterWorker
 
 
 class SearchController(QObject):
-    def __init__(self, tab):
+    def __init__(self, tab: Any) -> None:
         super().__init__(tab)
         self.tab = tab
         self._search_start_from_end = False
+        self._last_search_model_update: float = 0.0
 
     def cmd_find_dialog(self) -> None:
         self.tab.main_window.search_entry.setFocus()
         self.tab.main_window.search_entry.selectAll()
 
     def _compile_search(self) -> str | None:
-        pattern = self.tab.main_window.search_entry.text().strip()
+        pattern: str = self.tab.main_window.search_entry.text().strip()
         if not pattern:
             return None
         use_regex = self.tab.main_window.search_regex_cb.isChecked()
@@ -102,7 +104,7 @@ class SearchController(QObject):
         if self.tab.search_engine is None or self.tab.search_engine.path != self.tab.file_path:
             self.tab.search_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
 
-        self.tab._search_results = []
+        self.tab.search_results = []
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab.search_results_all = Bitset(total)
         self.tab.search_result_index = -1
@@ -133,7 +135,13 @@ class SearchController(QObject):
         self.tab.search_thread.start()
 
     @Slot(float, int, str, object)
-    def _on_search_progress(self, pct: float, hits: int, state: str, partial_results: object = None) -> None:
+    def _on_search_progress(
+        self,
+        pct: float,
+        hits: int,
+        state: str,
+        partial_results: tuple[int, Sequence[int]] | list[int] | Bitset | None = None,
+    ) -> None:
         if state == "context":
             self.tab.set_status(self.tab.t("st_context_building"))
             return
@@ -152,20 +160,26 @@ class SearchController(QObject):
             if isinstance(partial_results, tuple) and len(partial_results) == 2:
                 base_word, words = partial_results
                 self.tab.search_results_all.merge_chunk_words(base_word, words)
-            else:
+            elif isinstance(partial_results, Bitset):
+                self.tab.search_results_all.or_words(partial_results.words)
+            elif isinstance(partial_results, list):
                 self.tab.search_results_all.update_indices(partial_results)
 
             now = time.time()
-            if not hasattr(self.tab, "_last_search_model_update"):
-                self.tab._last_search_model_update = 0
             # Throttle model updates to max 2 times per second to prevent GUI freeze on huge results
-            if now - self.tab._last_search_model_update > 0.5:
+            if now - self._last_search_model_update > 0.5:
                 self.tab.search_model.set_results(self.tab.search_results_all, indexer=self.tab.indexer)
-                self.tab._last_search_model_update = now
+                self._last_search_model_update = now
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(
-        self, results_data, _context_lines, filter_all_data, _hit_text_map, _hit_lines_set, error
+        self,
+        results_data: Any,
+        _context_lines: Any,
+        filter_all_data: Any,
+        _hit_text_map: Any,
+        _hit_lines_set: Any,
+        error: str | None,
     ) -> None:
         if error:
             if error != "cancelled":
@@ -179,17 +193,17 @@ class SearchController(QObject):
             _results = Bitset.from_raw(results_data[0], results_data[1], results_data[2])
             filter_all_lines = Bitset.from_raw(filter_all_data[0], filter_all_data[1], filter_all_data[2])
         else:
-            filter_all_lines = []
+            filter_all_lines = Bitset(0)
 
         self.tab.search_results_all = filter_all_lines
 
         total_hits = len(self.tab.search_results_all)
 
-        self.tab._search_results = self.tab.search_results_all
+        self.tab.search_results = self.tab.search_results_all
 
         if self.tab.search_model:
             # Używamy tylko numerów linii, model sam pobierze tekst za pomocą indexera
-            self.tab.search_model.set_results(self.tab._search_results, indexer=self.tab.indexer)
+            self.tab.search_model.set_results(self.tab.search_results, indexer=self.tab.indexer)
 
         self.tab.set_status(self.tab.t("st_search_done").format(n=total_hits))
 
@@ -206,6 +220,9 @@ class SearchController(QObject):
             QTimer.singleShot(0, lambda: self.tab.navigate_to_search_result(0))
 
         self.tab.update_search_results_label()
+
+    def update_search_results_label(self) -> None:
+        self._update_search_results_label()
 
     def _update_search_results_label(self) -> None:
         total = len(self.tab.search_results_all)
@@ -253,11 +270,11 @@ class SearchController(QObject):
         self.tab.search_worker = None
 
         self.tab.search_pattern = ""
-        self.tab._search_results = []
+        self.tab.search_results = []
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab.search_results_all = Bitset(total)
         self.tab.search_result_index = -1
-        self.tab._search_extra_sel = None
+        self.tab.search_extra_sel = None
 
         if self.tab.search_model:
             self.tab.search_model.clear()
@@ -267,3 +284,10 @@ class SearchController(QObject):
 
         self.tab.update_current_line_highlight()
         self.tab.refresh_status()
+
+    # Publiczne aliasy metod kontrolera
+    compile_search = _compile_search
+    search_pattern_changed = _search_pattern_changed
+    start_background_search = _start_background_search
+    on_search_progress = _on_search_progress
+    on_search_finished = _on_search_finished

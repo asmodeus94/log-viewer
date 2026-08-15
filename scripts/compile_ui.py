@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 
-def main():
+def main() -> None:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ui_dir = os.path.join(repo_root, "log_viewer", "ui")
 

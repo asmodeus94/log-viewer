@@ -5,27 +5,40 @@ src = ["log_viewer", "tests", "scripts", "dev-scripts"]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # Pyflakes
-    "I",   # isort (import sorting)
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "SIM", # flake8-simplify
+    "E",       # pycodestyle errors
+    "W",       # pycodestyle warnings
+    "F",       # Pyflakes
+    "I",       # isort (import sorting)
+    "UP",      # pyupgrade
+    "B",       # flake8-bugbear
+    "SIM",     # flake8-simplify
+    "N",       # pep8-naming (konwencje nazewnictwa zmiennych, klas, funkcji)
+    "RET",     # flake8-return (zbędne instrukcje else/elif po return)
+    "PGH",     # pygrep-hooks
+    "PLE",     # Pylint errors
+    "PLW",     # Pylint warnings (m.in. przesłanianie zmiennych pętli PLW2901)
+    "SLF",     # flake8-self (dostęp do prywatnych składowych _private poza klasą)
+    "BLE",     # flake8-blind-except (wyłapywanie ogólnych wyjątków Exception)
+    "A",       # flake8-builtins (przesłanianie wbudowanych nazw Pythona)
+    "ARG",     # flake8-unused-arguments (nieużywane argumenty funkcji/metod)
 ]
 ignore = [
-    "E501", # line-too-long (obsługiwane przez formatter)
-    "B008", # funkcja/klasa jako domyślny argument (wymóg sygnatur Qt, np. QModelIndex())
-    "SIM105", # try-except-pass zamiast contextlib.suppress
-    "SIM108", # if-else zamiast wyrażenia trójargumentowego
+    "E501",    # line-too-long (obsługiwane przez formatter)
+    "B008",    # funkcja/klasa jako domyślny argument (wymóg sygnatur Qt, np. QModelIndex())
+    "SIM105",  # try-except-pass zamiast contextlib.suppress
+    "SIM108",  # if-else zamiast wyrażenia trójargumentowego
+    "N802",    # nazwy metod powinny być małą literą (wyłączone dla przeciążeń Qt: paintEvent, rowCount itp.)
+    "N815",    # zmienne w klasie w mixedCase (wyłączone dla sygnałów Qt: returnPressed = Signal() itp.)
+    "PLW0603", # użycie global w workerach multiprocessing
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # W workerach QThread dozwolone jest przechwytywanie BaseException (wymóg stabilności PySide6 wg AGENTS.md)
 "log_viewer/workers.py" = ["BLE001"]
-# W testach i skryptach pomocniczych zezwalamy na elastyczniejsze importy i konwencje Qt
-"tests/*" = ["E402", "F841", "SIM115"]
-"dev-scripts/*" = ["E402", "E741"]
+# W testach i skryptach pomocniczych zezwalamy na badanie prywatnych pól (_data), elastyczniejsze importy i sygnatury fixture'ów
+"tests/*" = ["E402", "F841", "SIM115", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005"]
+"dev-scripts/*" = ["E402", "E741", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PLW0108"]
+"scripts/*" = ["BLE001", "SLF001", "ARG001", "ARG002"]
 "run.py" = ["E402"]
 
 [tool.ruff.format]
@@ -39,21 +52,24 @@ ignore_missing_imports = true
 warn_unused_configs = true
 follow_imports = "silent"
 check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+strict_optional = true
+warn_return_any = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
 disable_error_code = [
-    "attr-defined",  # dynamiczne atrybuty i enumy Qt/PySide6 (np. Qt.AlignRight)
     "name-defined",
-    "override",
-    "assignment",
-    "operator",
-    "call-overload",
-    "call-arg",
-    "valid-type",
-    "var-annotated",
-    "union-attr",
-    "arg-type",
-    "index",
-    "misc",
+    "override",      # sygnatury przeciążeń C++ w PySide6 (np. QWidget.close, QAbstractItemModel)
 ]
+
+[[tool.mypy.overrides]]
+module = "log_viewer.ui.*"
+disable_error_code = ["attr-defined"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

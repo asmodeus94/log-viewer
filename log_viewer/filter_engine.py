@@ -1,10 +1,14 @@
+from __future__ import annotations
+
 import array
 import multiprocessing
+import multiprocessing.sharedctypes
 import re
 import sys
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
+from typing import Any
 
 from log_viewer.bitset import Bitset
 from log_viewer.helpers import open_maybe_compressed
@@ -13,13 +17,18 @@ from log_viewer.indexer import LineIndexer
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
 _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
+_WORKER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
+_FILE_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB
 
 # Współdzielone liczniki postępu — globalne w kontekście procesu roboczego.
-_shared_filter_progress_bytes = None
-_shared_filter_hits = None
+_shared_filter_progress_bytes: multiprocessing.sharedctypes.Synchronized[int] | Any = None
+_shared_filter_hits: multiprocessing.sharedctypes.Synchronized[int] | Any = None
 
 
-def _filter_init_worker(progress_val: "multiprocessing.Value", hits_val: "multiprocessing.Value") -> None:
+def _filter_init_worker(
+    progress_val: multiprocessing.sharedctypes.Synchronized[int] | Any,
+    hits_val: multiprocessing.sharedctypes.Synchronized[int] | Any,
+) -> None:
     """Inicjalizator procesu roboczego — ustawia globalne liczniki postępu."""
     global _shared_filter_progress_bytes, _shared_filter_hits
     _shared_filter_progress_bytes = progress_val
@@ -28,7 +37,7 @@ def _filter_init_worker(progress_val: "multiprocessing.Value", hits_val: "multip
 
 def _filter_worker_chunk(
     args: tuple[int, int, int, int, str, str, bool, bool, bool, str],
-) -> tuple[int, int, "array.array[int]", int]:
+) -> tuple[int, int, array.array[int], int]:
     """
     Worker dla multiprocessing — przeszukuje przydzielony zakres bajtów pliku.
 
@@ -44,7 +53,7 @@ def _filter_worker_chunk(
         negate        – czy negować wynik dopasowania
         encoding      – kodowanie pliku
 
-    Zwraca krotkę (chunk_id, array numerów linii pasujących do wzorca).
+    Zwraca krotkę (chunk_id, base_word, words, hit_count).
     """
     (chunk_id, start_offset, end_offset, start_line, path, pattern, use_regex, case_sensitive, negate, encoding) = args
 
@@ -56,12 +65,11 @@ def _filter_worker_chunk(
             strategy: FilterStrategy = RegexStrategy(pattern, case_sensitive, negate, encoding)
         else:
             strategy = PlainTextStrategy(pattern, case_sensitive, negate, encoding)
-    except Exception:
-        return (chunk_id, 0, array.array("Q"), 0)
+    except (re.error, UnicodeError, ValueError, OSError):
+        return chunk_id, 0, array.array("Q"), 0
 
     line_no = start_line
-    READ_CHUNK = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
-    carry = b""
+    carry: bytes = b""
     total_range = end_offset - start_offset
     bytes_processed = 0
 
@@ -70,8 +78,8 @@ def _filter_worker_chunk(
             f.seek(start_offset)
 
             while bytes_processed < total_range:
-                to_read = min(READ_CHUNK, total_range - bytes_processed)
-                chunk = f.read(to_read)
+                to_read = min(_WORKER_READ_CHUNK_SIZE, total_range - bytes_processed)
+                chunk: bytes = f.read(to_read)
                 if not chunk:
                     break
 
@@ -79,13 +87,12 @@ def _filter_worker_chunk(
                 bytes_processed += chunk_len
 
                 # Aktualizuj współdzielony licznik postępu
-                global _shared_filter_progress_bytes
                 if _shared_filter_progress_bytes is not None:
                     with _shared_filter_progress_bytes.get_lock():
                         _shared_filter_progress_bytes.value += chunk_len
 
                 is_last_read = bytes_processed >= total_range
-                data = carry + chunk if carry else chunk
+                data: bytes = carry + chunk if carry else chunk
 
                 if is_last_read:
                     # Ostatni odczyt — przetwórz wszystko (nawet bez końcowego \n)
@@ -111,7 +118,6 @@ def _filter_worker_chunk(
                     lines_count += 1
                 line_no += lines_count
 
-                global _shared_filter_hits
                 if local_hits > 0 and _shared_filter_hits is not None:
                     with _shared_filter_hits.get_lock():
                         _shared_filter_hits.value += local_hits
@@ -124,12 +130,12 @@ def _filter_worker_chunk(
                 with _shared_filter_hits.get_lock():
                     _shared_filter_hits.value += len(carry_hits)
 
-    except Exception:
+    except OSError:
         pass
 
     hit_count = len(results)
     if hit_count == 0:
-        return (chunk_id, 0, array.array("Q"), 0)
+        return chunk_id, 0, array.array("Q"), 0
 
     min_idx = results[0]
     max_idx = results[-1]
@@ -142,7 +148,7 @@ def _filter_worker_chunk(
     for idx in results:
         words[idx // 64 - base_word] |= 1 << (idx % 64)
 
-    return (chunk_id, base_word, words, hit_count)
+    return chunk_id, base_word, words, hit_count
 
 
 class FilterStrategy(ABC):
@@ -151,7 +157,7 @@ class FilterStrategy(ABC):
     Definiuje wspólny interfejs sprawdzania czy dana linia pasuje do wzorca.
     """
 
-    def __init__(self, negate: bool, encoding: str):
+    def __init__(self, negate: bool, encoding: str) -> None:
         self.negate = negate
         self.encoding = encoding
 
@@ -166,7 +172,7 @@ class FilterStrategy(ABC):
         if lines and lines[-1] == b"":
             lines.pop()
 
-        hits = []
+        hits: list[int] = []
         for line_bytes in lines:
             if self.match(line_bytes):
                 hits.append(start_line)
@@ -177,10 +183,10 @@ class FilterStrategy(ABC):
 class PlainTextStrategy(FilterStrategy):
     """Strategia dla zwykłego wyszukiwania tekstu (bez wyrażeń regularnych)."""
 
-    def __init__(self, needle: str, case_sensitive: bool, negate: bool, encoding: str):
+    def __init__(self, needle: str, case_sensitive: bool, negate: bool, encoding: str) -> None:
         super().__init__(negate, encoding)
         self.case_sensitive = case_sensitive
-        self.needle_bytes = needle.encode(encoding, errors="replace")
+        self.needle_bytes: bytes = needle.encode(encoding, errors="replace")
         if not case_sensitive:
             self.needle_bytes = self.needle_bytes.lower()
 
@@ -205,7 +211,7 @@ class PlainTextStrategy(FilterStrategy):
             )
 
         haystack = chunk.lower() if not self.case_sensitive else chunk
-        hits = []
+        hits: list[int] = []
 
         if self.negate:
             lines = haystack.split(b"\n")
@@ -247,17 +253,17 @@ class PlainTextStrategy(FilterStrategy):
 class RegexStrategy(FilterStrategy):
     """Strategia dla wyrażeń regularnych z optymalizacją pod surowe bajty."""
 
-    def __init__(self, pattern: str, case_sensitive: bool, negate: bool, encoding: str):
+    def __init__(self, pattern: str, case_sensitive: bool, negate: bool, encoding: str) -> None:
         super().__init__(negate, encoding)
         self.pattern = pattern
         self.flags = re.MULTILINE if case_sensitive else (re.IGNORECASE | re.MULTILINE)
-        self.matcher_str = re.compile(pattern, self.flags)
+        self.matcher_str: re.Pattern[str] = re.compile(pattern, self.flags)
 
-        self.matcher_bytes = None
+        self.matcher_bytes: re.Pattern[bytes] | None = None
         try:
             pattern_bytes = pattern.encode(encoding, errors="replace")
             self.matcher_bytes = re.compile(pattern_bytes, self.flags)
-        except Exception:
+        except (re.error, UnicodeError, ValueError):
             pass  # Fallback na sprawdzanie łańcuchów znaków
 
     def match(self, line_bytes: bytes) -> bool:
@@ -268,7 +274,7 @@ class RegexStrategy(FilterStrategy):
             # Fallback: dekoduj i sprawdź na str
             try:
                 text = line_bytes.decode(self.encoding, errors="replace")
-            except Exception:
+            except (UnicodeError, LookupError, ValueError, TypeError):
                 text = repr(line_bytes)
             matched = self.matcher_str.search(text) is not None
 
@@ -276,25 +282,41 @@ class RegexStrategy(FilterStrategy):
 
     def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
         if self.matcher_bytes is not None:
-            matcher = self.matcher_bytes
-            target = chunk
-            nl = b"\n"
-        else:
-            matcher = self.matcher_str
-            try:
-                target = chunk.decode(self.encoding, errors="replace")
-            except Exception:
-                target = repr(chunk)
-            nl = "\n"
+            return self._match_chunk_bytes(chunk, start_line)
+        return self._match_chunk_str(chunk, start_line)
 
-        hits = []
+    def _match_chunk_bytes(self, chunk: bytes, start_line: int) -> list[int]:
+        assert self.matcher_bytes is not None
+        hits: list[int] = []
         last_nl_pos = -1
         lines_counted = start_line
 
-        for match in matcher.finditer(target):
+        for match in self.matcher_bytes.finditer(chunk):
             hit_pos = match.start()
             if hit_pos > last_nl_pos:
-                nl_count = target.count(nl, last_nl_pos + 1, hit_pos)
+                nl_count = chunk.count(b"\n", last_nl_pos + 1, hit_pos)
+                lines_counted += nl_count
+
+                if not hits or hits[-1] != lines_counted:
+                    hits.append(lines_counted)
+                last_nl_pos = hit_pos
+
+        return hits
+
+    def _match_chunk_str(self, chunk: bytes, start_line: int) -> list[int]:
+        try:
+            target = chunk.decode(self.encoding, errors="replace")
+        except (UnicodeError, LookupError, ValueError, TypeError):
+            target = repr(chunk)
+
+        hits: list[int] = []
+        last_nl_pos = -1
+        lines_counted = start_line
+
+        for match in self.matcher_str.finditer(target):
+            hit_pos = match.start()
+            if hit_pos > last_nl_pos:
+                nl_count = target.count("\n", last_nl_pos + 1, hit_pos)
                 lines_counted += nl_count
 
                 if not hits or hits[-1] != lines_counted:
@@ -304,20 +326,21 @@ class RegexStrategy(FilterStrategy):
         return hits
 
 
-def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[bytes]:
+def read_file_chunks(path: str, chunk_size: int = _FILE_READ_CHUNK_SIZE) -> Iterator[bytes]:
     """Generator odczytujący plik partiami (chunking) po zadanym rozmiarze."""
     with open_maybe_compressed(path, "rb") as f:
-        carry = b""
-        eof = False
+        carry: bytes = b""
+        eof: bool = False
         while not eof:
-            chunk = f.read(chunk_size)
+            chunk: bytes = f.read(chunk_size)
             if not chunk:
                 eof = True
 
-            data = carry + chunk
+            data: bytes = carry + chunk
             if not data:
                 break
 
+            complete_data: bytes
             if eof:
                 complete_data = data
                 carry = b""
@@ -335,6 +358,27 @@ def read_file_chunks(path: str, chunk_size: int = 32 * 1024 * 1024) -> Iterator[
                 yield complete_data
 
 
+def _notify_progress(
+    callback: Callable[..., None] | None,
+    pct: float,
+    hits: int,
+    state: str = "filtering",
+    partial_results: tuple[int, array.array[int]] | None = None,
+) -> None:
+    """Bezpieczne wywołanie callbacka postępu obsługujące funkcje 2- lub 4-argumentowe."""
+    if callback is None:
+        return
+    try:
+        callback(pct, hits, state, partial_results)
+    except TypeError:
+        try:
+            callback(pct, hits)
+        except (ValueError, RuntimeError, AttributeError, TypeError):
+            pass
+    except (ValueError, RuntimeError, AttributeError):
+        pass
+
+
 class FilterEngine:
     """
     Przeszukuje plik w tle. Każde wywołanie start() dostaje nowy _session_id.
@@ -345,7 +389,7 @@ class FilterEngine:
     Dla plików mniejszych i skompresowanych stosuje tryb single-thread.
     """
 
-    def __init__(self, path: str, indexer: LineIndexer):
+    def __init__(self, path: str, indexer: LineIndexer) -> None:
         self.path = path
         self.indexer = indexer
         self._thread: threading.Thread | None = None
@@ -369,10 +413,10 @@ class FilterEngine:
         use_regex: bool,
         case_sensitive: bool,
         negate: bool,
-        on_progress: Callable[[float, int], None],
-        on_done: Callable[[list[tuple[int, int, str]], str | None], None],
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
         search_in_filter: bool = False,
-        filtered_lines: object = None,
+        filtered_lines: Bitset | None = None,
     ) -> None:
         if self._thread is not None and self._thread.is_alive():
             self._cancel.set()
@@ -381,7 +425,7 @@ class FilterEngine:
             self._session_id += 1
             session = self._session_id
             self._cancel.clear()
-            self._thread = threading.Thread(
+            thread = threading.Thread(
                 target=self._run,
                 args=(
                     session,
@@ -396,7 +440,8 @@ class FilterEngine:
                 ),
                 daemon=True,
             )
-            self._thread.start()
+            self._thread = thread
+            thread.start()
 
     def _is_current_session(self, session: int) -> bool:
         with self._session_lock:
@@ -450,10 +495,10 @@ class FilterEngine:
         use_regex: bool,
         case_sensitive: bool,
         negate: bool,
-        on_progress: Callable[[float, int], None],
-        on_done: Callable,
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
         search_in_filter: bool = False,
-        filtered_lines: object = None,
+        filtered_lines: Bitset | None = None,
     ) -> None:
         """
         Dyspozytor — wybiera tryb równoległy lub single-thread i deleguje pracę.
@@ -469,7 +514,7 @@ class FilterEngine:
                 if self._is_current_session(session) and not self._cancel.is_set():
                     try:
                         on_done(Bitset(0), str(e))
-                    except Exception:
+                    except (TypeError, ValueError, RuntimeError, AttributeError):
                         pass
                 return
 
@@ -494,7 +539,7 @@ class FilterEngine:
                     filtered_lines,
                 )
                 return
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 # Fallback do single-thread przy błędzie multiprocessing
                 print(f"Warning: parallel search failed ({e}), falling back to single-thread", file=sys.stderr)
 
@@ -509,10 +554,10 @@ class FilterEngine:
         use_regex: bool,
         case_sensitive: bool,
         negate: bool,
-        on_progress: Callable[[float, int], None],
-        on_done: Callable,
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
         search_in_filter: bool = False,
-        filtered_lines: object = None,
+        filtered_lines: Bitset | None = None,
     ) -> None:
         """
         Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
@@ -572,10 +617,7 @@ class FilterEngine:
                         bytes_done = shared_bytes.value
                         current_hits = shared_hits.value
                         pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
-                        try:
-                            on_progress(min(pct, 99.0), current_hits)
-                        except Exception:
-                            pass
+                        _notify_progress(on_progress, min(pct, 99.0), current_hits)
                         continue
                     except StopIteration:
                         # Wszystkie chunki zostały odebrane — kończymy pętlę.
@@ -588,19 +630,19 @@ class FilterEngine:
                     bytes_done = shared_bytes.value
                     current_hits = shared_hits.value
                     pct = (bytes_done / self.indexer.size * 100.0) if self.indexer.size else 0.0
-                    try:
-                        # Przekazujemy wyniki bieżącego chunku — GUI może dołączyć je do listy
-                        on_progress(
-                            min(pct, 99.0), current_hits, "filtering", (base_word, words) if hit_count > 0 else None
-                        )
-                    except Exception:
-                        pass
+                    _notify_progress(
+                        on_progress,
+                        min(pct, 99.0),
+                        current_hits,
+                        "filtering",
+                        (base_word, words) if hit_count > 0 else None,
+                    )
 
-        except Exception as e:
+        except (OSError, RuntimeError, ValueError) as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
                     on_done(Bitset(0), str(e))
-                except Exception:
+                except (TypeError, ValueError, RuntimeError, AttributeError):
                     pass
             return
 
@@ -610,41 +652,19 @@ class FilterEngine:
 
         merged_bitset = Bitset(self.indexer.line_count if self.indexer else 0)
 
-        max_needed_words = 0
-        for _chunk_id, (base_word, words) in chunk_results.items():
-            needed = base_word + len(words)
-            if needed > max_needed_words:
-                max_needed_words = needed
-
-        if max_needed_words > merged_bitset._num_words:
-            merged_bitset.resize(max_needed_words * 64)
-
-        global_words = merged_bitset._words
-
         for _chunk_id, (base_word, words) in sorted(chunk_results.items(), key=lambda x: x[0]):
-            if len(words) == 1:
-                global_words[base_word] |= words[0]
-            elif len(words) > 1:
-                global_words[base_word] |= words[0]
-                global_words[base_word + len(words) - 1] |= words[-1]
-                if len(words) > 2:
-                    global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
-
-        merged_bitset._counts = None
-        merged_bitset._total_count = shared_hits.value
+            merged_bitset.merge_chunk_words(base_word, words)
 
         if negate:
             merged_bitset = ~merged_bitset
 
         if search_in_filter and filtered_lines is not None:
             merged_bitset = merged_bitset & filtered_lines
-            merged_bitset._total_count = -1
-            _ = len(merged_bitset)
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
                 on_done(merged_bitset, None)
-            except Exception:
+            except (TypeError, ValueError, RuntimeError, AttributeError):
                 pass
 
     def _run_single(
@@ -654,10 +674,10 @@ class FilterEngine:
         use_regex: bool,
         case_sensitive: bool,
         negate: bool,
-        on_progress: Callable[[float, int], None],
-        on_done: Callable,
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
         search_in_filter: bool = False,
-        filtered_lines: object = None,
+        filtered_lines: Bitset | None = None,
     ) -> None:
         """
         Sekwencyjne przeszukiwanie pliku w jednym wątku.
@@ -674,8 +694,8 @@ class FilterEngine:
         except re.error as e:
             if self._is_current_session(session) and not self._cancel.is_set():
                 try:
-                    on_done(array.array("Q"), str(e))
-                except Exception:
+                    on_done(Bitset(0), str(e))
+                except (TypeError, ValueError, RuntimeError, AttributeError):
                     pass
             return
 
@@ -689,6 +709,7 @@ class FilterEngine:
                 bytes_read += len(block)
 
                 chunk_hits = strategy.match_chunk(block, line_no)
+                partial_res = None
 
                 if chunk_hits:
                     min_idx = chunk_hits[0]
@@ -699,21 +720,9 @@ class FilterEngine:
                     for idx in chunk_hits:
                         words[idx // 64 - base_word] |= 1 << (idx % 64)
 
-                    if (end_word + 1) > merged_bitset._num_words:
-                        merged_bitset.resize((end_word + 1) * 64)
-
-                    global_words = merged_bitset._words
-                    if len(words) == 1:
-                        global_words[base_word] |= words[0]
-                    elif len(words) > 1:
-                        global_words[base_word] |= words[0]
-                        global_words[base_word + len(words) - 1] |= words[-1]
-                        if len(words) > 2:
-                            global_words[base_word + 1 : base_word + len(words) - 1] = words[1:-1]
-
-                    merged_bitset._counts = None
+                    merged_bitset.merge_chunk_words(base_word, words)
                     total_hits += len(chunk_hits)
-                    merged_bitset._total_count = total_hits
+                    partial_res = (base_word, words)
 
                 lines_count = block.count(b"\n")
                 if block and not block.endswith(b"\n"):
@@ -722,12 +731,15 @@ class FilterEngine:
 
                 if self._is_current_session(session) and not self._cancel.is_set():
                     pct = (bytes_read / size * 100.0) if size else 0.0
-                    try:
-                        on_progress(pct, total_hits, "filtering", (base_word, words) if chunk_hits else None)
-                    except Exception:
-                        pass
+                    _notify_progress(
+                        on_progress,
+                        pct,
+                        total_hits,
+                        "filtering",
+                        partial_res,
+                    )
 
-        except Exception as e:
+        except (OSError, UnicodeError) as e:
             error = str(e)
 
         if negate and error is None:
@@ -735,11 +747,9 @@ class FilterEngine:
 
         if error is None and search_in_filter and filtered_lines is not None:
             merged_bitset = merged_bitset & filtered_lines
-            merged_bitset._total_count = -1
-            _ = len(merged_bitset)
 
         if self._is_current_session(session) and not self._cancel.is_set():
             try:
                 on_done(merged_bitset, error)
-            except Exception:
+            except (TypeError, ValueError, RuntimeError, AttributeError):
                 pass

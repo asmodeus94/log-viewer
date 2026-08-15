@@ -6,21 +6,25 @@ import os
 import shutil
 import sys
 import uuid
-from collections.abc import Callable, Iterator, KeysView
+from collections.abc import Callable, ItemsView, Iterator, KeysView
 
 from .exceptions import CompressedSaveError, FileChangedError
 from .helpers import is_compressed
 
 
-def secure_opener(path, flags):
+def secure_opener(path: str, flags: int) -> int:
     return os.open(path, flags, 0o600)
 
 
 class EditBuffer:
     """Przechowuje zmiany line_no -> new_text. Bez modyfikacji pliku do czasu save()."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._edits: dict[int, str] = {}
+
+    @property
+    def edits(self) -> dict[int, str]:
+        return self._edits
 
     def __len__(self) -> int:
         return len(self._edits)
@@ -40,7 +44,7 @@ class EditBuffer:
     def clear(self) -> None:
         self._edits.clear()
 
-    def items(self):
+    def items(self) -> ItemsView[int, str]:
         return self._edits.items()
 
     def keys(self) -> KeysView[int]:
@@ -53,7 +57,7 @@ class EditBuffer:
         self,
         src_path: str,
         progress_cb: Callable[[float], None] | None = None,
-        expected_mtime: float | None = None,
+        expected_mtime: float | int | None = None,
         expected_size: int | None = None,
         encoding: str = "utf-8",
     ) -> str:

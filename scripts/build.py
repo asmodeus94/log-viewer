@@ -13,11 +13,11 @@ import subprocess
 import sys
 
 
-def get_repo_root():
+def get_repo_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def compile_ui_files(repo_root):
+def compile_ui_files(repo_root: str) -> None:
     print(">>> Compiling UI files...")
     compile_script = os.path.join(repo_root, "scripts", "compile_ui.py")
     try:
@@ -27,7 +27,7 @@ def compile_ui_files(repo_root):
         sys.exit(1)
 
 
-def convert_icon(repo_root, target_format):
+def convert_icon(repo_root: str, target_format: str) -> str:
     print(f">>> Converting icon to {target_format} format...")
     try:
         from PIL import Image
@@ -59,7 +59,7 @@ def convert_icon(repo_root, target_format):
         sys.exit(1)
 
 
-def build_app():
+def build_app() -> None:
     repo_root = get_repo_root()
     os.chdir(repo_root)
 

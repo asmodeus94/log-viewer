@@ -18,7 +18,7 @@ from .helpers import (
 )
 
 
-def secure_opener(path, flags):
+def secure_opener(path: str, flags: int) -> int:
     return os.open(path, flags, 0o600)
 
 
@@ -62,14 +62,12 @@ class UserConfig:
                 for k, v in self.DEFAULTS.items():
                     if k in data and (v is None or isinstance(data[k], type(v)) or data[k] is None):
                         self._data[k] = data[k]
-        except (OSError, json.JSONDecodeError, ValueError) as e:
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
             # Brak pliku przy pierwszym uruchomieniu jest normalny — nie loguj
             if isinstance(e, FileNotFoundError):
                 pass
             else:
                 print(f"Warning: could not load config from {self.path}: {e}", file=sys.stderr)
-        except Exception as e:
-            print(f"Warning: unexpected error loading config: {e}", file=sys.stderr)
 
     def save(self) -> None:
         try:
@@ -79,7 +77,7 @@ class UserConfig:
             with open(tmp_path, "w", encoding="utf-8", opener=secure_opener) as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)
             os.replace(tmp_path, self.path)
-        except Exception as e:
+        except OSError as e:
             print(f"Warning: could not save config to {self.path}: {e}", file=sys.stderr)
 
     def get(self, key: str, default: Any = None) -> Any:

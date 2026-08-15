@@ -75,6 +75,7 @@ def main() -> None:
         cwd=repo_root,
         capture_output=True,
         text=True,
+        check=False,
     )
 
     if proc.returncode == 0:

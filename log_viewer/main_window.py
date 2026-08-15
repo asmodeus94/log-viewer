@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, QTimer, Slot
@@ -68,6 +70,46 @@ class LogViewerWindow(QMainWindow):
     "zapis potrwa") znajduje się w LogTab.cmd_save_edits.
     """
 
+    # UI elements type hints (toolbar widgets)
+    main_toolbar: QToolBar
+    lbl_search: QLabel
+    search_entry: ExpandingLineEdit
+    search_regex_cb: QCheckBox
+    search_case_cb: QCheckBox
+    search_negate_cb: QCheckBox
+    search_in_filter_cb: QCheckBox
+    btn_find_next: QPushButton
+    btn_find_prev: QPushButton
+    btn_clear_search: QPushButton
+    lbl_filter: QLabel
+    filter_entry: ExpandingLineEdit
+    filter_regex_cb: QCheckBox
+    filter_case_cb: QCheckBox
+    filter_negate_cb: QCheckBox
+    lbl_filter_context: QLabel
+    filter_context_spin: QSpinBox
+    btn_apply_filter: QPushButton
+    btn_clear_filter: QPushButton
+    btn_refresh: QPushButton
+    btn_reload: QPushButton
+
+    _action_reload: QAction
+    _action_save: QAction
+    _action_save_as: QAction
+    _action_export: QAction
+    _action_find: QAction
+    _action_find_next: QAction
+    _action_find_prev: QAction
+    _action_clear_search: QAction
+    _action_filter: QAction
+    _action_clear_filter: QAction
+    _action_edit_line: QAction
+    _action_save_edits: QAction
+    _action_clear_edits: QAction
+    _follow_action: QAction
+    _enc_action_group: QtGui.QActionGroup
+    _lang_action_group: QtGui.QActionGroup
+
     def __init__(self, config: UserConfig | None = None, initial_file: str | None = None):
         super().__init__()
         self.ui = Ui_LogViewerWindow()
@@ -85,8 +127,6 @@ class LogViewerWindow(QMainWindow):
 
         # Aktywny motyw (dark/light) — wykrywany z systemu
         self.theme: dict = THEME_DARK
-        self._follow_action: QAction | None = None
-        self._enc_action_group: QtGui.QActionGroup | None = None
         self._is_restoring_toolbar: bool = False
 
         self._dnd_queue: list[str] = []
@@ -109,14 +149,15 @@ class LogViewerWindow(QMainWindow):
         self.statusBar().showMessage(self.t("st_ready"))
 
         if initial_file:
-            QTimer.singleShot(100, lambda: self.open_file_in_tab(initial_file))
+            init_file_path: str = initial_file
+            QTimer.singleShot(100, lambda: self.open_file_in_tab(init_file_path))
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if (
             watched == self.tabs.tabBar()
-            and event.type() == QtCore.QEvent.MouseButtonRelease
+            and event.type() == QtCore.QEvent.Type.MouseButtonRelease
             and isinstance(event, QtGui.QMouseEvent)
-            and event.button() == Qt.MiddleButton
+            and event.button() == Qt.MouseButton.MiddleButton
         ):
             pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
             idx = self.tabs.tabBar().tabAt(pos)
@@ -126,7 +167,7 @@ class LogViewerWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------------ delegation
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str) -> Any:
         """Deleguje tab-specific atrybuty/metody do aktywnej zakładki.
 
         Wywoływane tylko gdy normalne wyszukiwanie atrybutu zawiedzie.
@@ -136,17 +177,17 @@ class LogViewerWindow(QMainWindow):
         """
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
-        tabs = self.__dict__.get("tabs")
-        if tabs is None:
+        tabs = getattr(self, "tabs", None)
+        if not isinstance(tabs, QtWidgets.QTabWidget):
             raise AttributeError(name)
         tab = tabs.currentWidget()
         if tab is None:
             raise AttributeError(name)
         return getattr(tab, name)
 
-    def _delegate_to_tab(self, method_name: str, *args, **kwargs):
+    def _delegate_to_tab(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Woła metodę na aktywnej zakładce. No-op jeśli brak zakładki."""
-        tab = self.tabs.currentWidget()
+        tab: QWidget | None = self.tabs.currentWidget()
         if tab is None:
             return None
         method = getattr(tab, method_name, None)
@@ -158,8 +199,11 @@ class LogViewerWindow(QMainWindow):
     def t(self, key: str) -> str:
         return I18N[self.lang].get(key, key)
 
-    def _fmt(self, msg_key: str, **kw) -> str:
+    def fmt(self, msg_key: str, **kw: Any) -> str:
         return self.t(msg_key).format(**kw)
+
+    def _fmt(self, msg_key: str, **kw: Any) -> str:
+        return self.fmt(msg_key, **kw)
 
     def set_language(self, lang: str) -> None:
         if lang not in I18N:
@@ -212,17 +256,17 @@ class LogViewerWindow(QMainWindow):
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
             if isinstance(tab, LogTab):
-                tab._lbl_bookmarks.setText(self.t("lbl_bookmarks"))
-                tab._lbl_edits.setText(self.t("lbl_edits"))
+                tab.lbl_bookmarks.setText(self.t("lbl_bookmarks"))
+                tab.lbl_edits.setText(self.t("lbl_edits"))
                 tab.bm_tree.setHeaderLabels([self.t("col_line")])
                 tab.ed_tree.setHeaderLabels([self.t("col_line")])
                 tab.btn_del_bookmarks.setText(self.t("btn_delete_sel"))
                 tab.btn_del_edits.setText(self.t("btn_delete_sel"))
-                tab._search_results_label.setText(self.t("lbl_search_results_empty"))
-                tab._refresh_status()
+                tab.search_results_label.setText(self.t("lbl_search_results_empty"))
+                tab.refresh_status()
         tab = self.tabs.currentWidget()
         if isinstance(tab, LogTab):
-            tab._refresh_status()
+            tab.refresh_status()
         else:
             self.statusBar().showMessage(self.t("st_ready"))
 
@@ -230,27 +274,31 @@ class LogViewerWindow(QMainWindow):
         self.setWindowTitle(self.t("app_title"))
 
     # ------------------------------------------------------------------ UI
-    def _detect_system_theme(self) -> dict:
+    @staticmethod
+    def _detect_system_theme() -> dict:
         """Wykrywa motyw systemowy (dark/light) i zwraca odpowiedni THEME."""
         try:
             hints = QGuiApplication.styleHints()
             scheme = hints.colorScheme()
             if scheme == Qt.ColorScheme.Dark:
                 return THEME_DARK
-            elif scheme == Qt.ColorScheme.Light:
+            if scheme == Qt.ColorScheme.Light:
                 return THEME_LIGHT
-        except Exception:
+        except (AttributeError, RuntimeError):
             pass
         try:
             pal = QtWidgets.QApplication.palette()
-            bg = pal.color(QPalette.Window)
-            text_color = pal.color(QPalette.WindowText)
+            bg = pal.color(QPalette.ColorRole.Window)
+            text_color = pal.color(QPalette.ColorRole.WindowText)
             if text_color.lightness() > bg.lightness():
                 return THEME_DARK
             return THEME_LIGHT
-        except Exception:
+        except (AttributeError, RuntimeError):
             pass
         return THEME_DARK
+
+    def apply_theme(self) -> None:
+        self._apply_theme()
 
     def _apply_theme(self) -> None:
         """Aplikuje motyw (dark lub light) zgodny z systemem operacyjnym."""
@@ -511,12 +559,12 @@ class LogViewerWindow(QMainWindow):
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
             if isinstance(tab, LogTab):
-                tab._apply_theme()
+                tab.apply_theme()
 
     def _build_toolbar(self) -> None:
         self.main_toolbar = QToolBar()
         self.main_toolbar.setMovable(False)
-        self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.main_toolbar)
 
         container = QWidget()
         main_layout = QHBoxLayout(container)
@@ -530,11 +578,11 @@ class LogViewerWindow(QMainWindow):
         search_layout.setSpacing(4)
 
         self.lbl_search = QLabel(self.t("lbl_search"))
-        self.lbl_search.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_search.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         search_layout.addWidget(self.lbl_search, 0, 0)
 
         self.search_entry = ExpandingLineEdit()
-        self.search_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.search_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.search_entry.returnPressed.connect(self.cmd_find_next)
         search_layout.addWidget(self.search_entry, 0, 1)
 
@@ -579,8 +627,8 @@ class LogViewerWindow(QMainWindow):
 
         # Pionowy separator między panelem Search a Filter
         main_sep = QFrame()
-        main_sep.setFrameShape(QFrame.VLine)
-        main_sep.setFrameShadow(QFrame.Sunken)
+        main_sep.setFrameShape(QFrame.Shape.VLine)
+        main_sep.setFrameShadow(QFrame.Shadow.Sunken)
         main_layout.addWidget(main_sep)
 
         # ----------------- PRAWA STRONA (Filtrowanie) -----------------
@@ -590,11 +638,11 @@ class LogViewerWindow(QMainWindow):
         filter_layout.setSpacing(4)
 
         self.lbl_filter = QLabel(self.t("lbl_filter"))
-        self.lbl_filter.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.lbl_filter.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         filter_layout.addWidget(self.lbl_filter, 0, 0)
 
         self.filter_entry = ExpandingLineEdit()
-        self.filter_entry.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.filter_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
         filter_layout.addWidget(self.filter_entry, 0, 1)
 
@@ -723,11 +771,12 @@ class LogViewerWindow(QMainWindow):
         self._enc_action_group = QtGui.QActionGroup(self)
         self._enc_action_group.setExclusive(True)
         for enc_code, enc_label in SUPPORTED_ENCODINGS:
-            act = enc_menu.addAction(enc_label)
+            act = QtGui.QAction(enc_label, self)
             act.setCheckable(True)
             act.setChecked(enc_code == self.encoding)
-            act.triggered.connect(lambda checked, c=enc_code: self.cmd_set_encoding(c))
+            act.triggered.connect(lambda _checked, c=enc_code: self.cmd_set_encoding(c))
             self._enc_action_group.addAction(act)
+            enc_menu.addAction(act)
         view_menu.addSeparator()
 
         lang_menu = view_menu.addMenu(self.t("mi_lang"))
@@ -735,13 +784,13 @@ class LogViewerWindow(QMainWindow):
         self._lang_action_group = QtGui.QActionGroup(self)
         self._lang_action_group.setExclusive(True)
 
-        act_pl = self._mkaction(self.t("mi_lang_pl"), "", lambda checked=False: self.set_language("pl"))
+        act_pl = self._mkaction(self.t("mi_lang_pl"), "", lambda _checked=False: self.set_language("pl"))
         act_pl.setCheckable(True)
         act_pl.setChecked(self.lang == "pl")
         self._lang_action_group.addAction(act_pl)
         lang_menu.addAction(act_pl)
 
-        act_en = self._mkaction(self.t("mi_lang_en"), "", lambda checked=False: self.set_language("en"))
+        act_en = self._mkaction(self.t("mi_lang_en"), "", lambda _checked=False: self.set_language("en"))
         act_en.setCheckable(True)
         act_en.setChecked(self.lang == "en")
         self._lang_action_group.addAction(act_en)
@@ -815,22 +864,21 @@ class LogViewerWindow(QMainWindow):
         ]
         self._update_ui_state()
 
-    def _mkaction(self, label: str, shortcut, handler) -> QAction:
+    def _mkaction(
+        self,
+        label: str,
+        shortcut: str | Sequence[str | QKeySequence] | QKeySequence.StandardKey | QKeySequence | None,
+        handler: Callable[..., Any],
+    ) -> QAction:
         act = QAction(label, self)
         if shortcut:
-            if isinstance(shortcut, list):
-                shortcuts = []
-                for s in shortcut:
-                    if isinstance(s, str):
-                        shortcuts.append(QKeySequence(s))
-                    else:
-                        shortcuts.append(s)
+            if isinstance(shortcut, (list, tuple)):
+                shortcuts = [QKeySequence(s) if isinstance(s, str) else s for s in shortcut]
                 act.setShortcuts(shortcuts)
-            else:
-                if isinstance(shortcut, str):
-                    act.setShortcut(QKeySequence(shortcut))
-                else:
-                    act.setShortcut(shortcut)
+            elif isinstance(shortcut, str):
+                act.setShortcut(QKeySequence(shortcut))
+            elif isinstance(shortcut, (QKeySequence, QKeySequence.StandardKey)):
+                act.setShortcut(shortcut)
         act.triggered.connect(handler)
         return act
 
@@ -838,7 +886,7 @@ class LogViewerWindow(QMainWindow):
     def _on_tab_title_changed_current(self, title_str: str) -> None:
         """Slot: aktualizuje tytuł zakładki. Nadawca jest ustalany przez sender()."""
         tab = self.sender()
-        if tab is not None:
+        if isinstance(tab, LogTab):
             self._on_tab_title_changed(tab, title_str)
 
     def _new_tab(self, title: str = "") -> LogTab:
@@ -852,8 +900,8 @@ class LogViewerWindow(QMainWindow):
         self.tabs.tabBar().setTabButton(idx, QTabBar.ButtonPosition.LeftSide, None)
         self.tabs.setCurrentWidget(tab)
         # Aplikuj motyw do nowej zakładki
-        tab._apply_theme()
-        tab._apply_font_to_text()
+        tab.apply_theme()
+        tab.apply_font_to_text()
         return tab
 
     def _generate_tab_title(self, path: str) -> str:
@@ -937,20 +985,20 @@ class LogViewerWindow(QMainWindow):
         if isinstance(tab, LogTab):
             self.setWindowTitle(f"{self.tabs.tabText(index)} - {self.t('app_title')}")
             self._load_toolbar_from_tab(tab)
-            tab._refresh_status()
-            tab._update_position_slider()
-            tab._update_minimap_viewport()
+            tab.refresh_status()
+            tab.update_position_slider()
+            tab.update_minimap_viewport()
             if self._follow_action is not None:
                 self._follow_action.setChecked(tab.follow_active)
             # Auto-focus na text widget — bez tego szare podświetlenie
             # bieżącej linii nie jest widoczne po przełączeniu zakładki
             # (kursor jest tam, ale Qt nie renderuje ExtraSelections dla
-            # nieważnego widżetu). setFocus + _update_current_line_highlight
+            # nieważnego widżetu). setFocus + update_current_line_highlight
             # wymusza przerysowanie.
             tab.text.setFocus()
-            tab._update_current_line_highlight()
+            tab.update_current_line_highlight()
 
-    def _save_toolbar_to_tab(self, *args, **kwargs) -> None:
+    def _save_toolbar_to_tab(self, *_args: Any, **_kwargs: Any) -> None:
         if self._is_restoring_toolbar:
             return
         tab = self.tabs.currentWidget()
@@ -1041,10 +1089,10 @@ class LogViewerWindow(QMainWindow):
                 self,
                 self.t("app_title"),
                 self.t("msg_clear_edits").format(n=len(tab.edit_buffer)),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
-            if choice != QMessageBox.Yes:
+            if choice != QMessageBox.StandardButton.Yes:
                 return
         # Rozłącz sygnały przed zamknięciem — zapobiega utrzymywaniu
         # referencji do zamkniętej karty przez połączenia Qt.
@@ -1069,89 +1117,89 @@ class LogViewerWindow(QMainWindow):
     # podpiąć przy budowie UI (zanim istnieje jakakolwiek zakładka). Delegują
     # wywołanie do aktywnej zakładki (tabs.currentWidget()).
 
-    def cmd_reload(self):
+    def cmd_reload(self) -> Any:
         return self._delegate_to_tab("cmd_reload")
 
-    def cmd_refresh(self):
+    def cmd_refresh(self) -> Any:
         return self._delegate_to_tab("cmd_refresh")
 
-    def cmd_find_dialog(self):
+    def cmd_find_dialog(self) -> Any:
         return self._delegate_to_tab("cmd_find_dialog")
 
-    def cmd_find_next(self):
+    def cmd_find_next(self) -> Any:
         return self._delegate_to_tab("cmd_find_next")
 
-    def cmd_find_prev(self):
+    def cmd_find_prev(self) -> Any:
         return self._delegate_to_tab("cmd_find_prev")
 
-    def cmd_clear_search(self):
+    def cmd_clear_search(self) -> Any:
         return self._delegate_to_tab("cmd_clear_search")
 
-    def cmd_filter_dialog(self):
+    def cmd_filter_dialog(self) -> Any:
         return self._delegate_to_tab("cmd_filter_dialog")
 
-    def cmd_apply_filter(self):
+    def cmd_apply_filter(self) -> Any:
         return self._delegate_to_tab("cmd_apply_filter")
 
-    def cmd_clear_filter(self, silent: bool = False):
+    def cmd_clear_filter(self, silent: bool = False) -> Any:
         return self._delegate_to_tab("cmd_clear_filter", silent)
 
-    def cmd_goto(self):
+    def cmd_goto(self) -> Any:
         return self._delegate_to_tab("cmd_goto")
 
-    def cmd_goto_start(self):
+    def cmd_goto_start(self) -> Any:
         return self._delegate_to_tab("cmd_goto_start")
 
-    def cmd_goto_end(self):
+    def cmd_goto_end(self) -> Any:
         return self._delegate_to_tab("cmd_goto_end")
 
-    def cmd_edit_line(self):
+    def cmd_edit_line(self) -> Any:
         return self._delegate_to_tab("cmd_edit_line")
 
-    def cmd_format_selection(self):
+    def cmd_format_selection(self) -> Any:
         return self._delegate_to_tab("cmd_format_selection")
 
-    def cmd_save_edits(self):
+    def cmd_save_edits(self) -> Any:
         return self._delegate_to_tab("cmd_save_edits")
 
-    def cmd_save_as(self):
+    def cmd_save_as(self) -> Any:
         return self._delegate_to_tab("cmd_save_as")
 
-    def cmd_export(self):
+    def cmd_export(self) -> Any:
         return self._delegate_to_tab("cmd_export")
 
-    def cmd_clear_edits(self):
+    def cmd_clear_edits(self) -> Any:
         return self._delegate_to_tab("cmd_clear_edits")
 
-    def cmd_toggle_bookmark(self):
+    def cmd_toggle_bookmark(self) -> Any:
         return self._delegate_to_tab("cmd_toggle_bookmark")
 
-    def cmd_next_bookmark(self):
+    def cmd_next_bookmark(self) -> Any:
         return self._delegate_to_tab("cmd_next_bookmark")
 
-    def cmd_prev_bookmark(self):
+    def cmd_prev_bookmark(self) -> Any:
         return self._delegate_to_tab("cmd_prev_bookmark")
 
-    def cmd_clear_bookmarks(self):
+    def cmd_clear_bookmarks(self) -> Any:
         return self._delegate_to_tab("cmd_clear_bookmarks")
 
-    def cmd_toggle_follow(self):
+    def cmd_toggle_follow(self) -> Any:
         return self._delegate_to_tab("cmd_toggle_follow")
 
-    def cmd_set_encoding(self, encoding: str):
+    def cmd_set_encoding(self, encoding: str) -> Any:
         return self._delegate_to_tab("cmd_set_encoding", encoding)
 
-    def cmd_next_tab(self):
+    def cmd_next_tab(self) -> None:
         if self.tabs.count() > 1:
             idx = (self.tabs.currentIndex() + 1) % self.tabs.count()
             self.tabs.setCurrentIndex(idx)
 
-    def cmd_prev_tab(self):
+    def cmd_prev_tab(self) -> None:
         if self.tabs.count() > 1:
             idx = (self.tabs.currentIndex() - 1) % self.tabs.count()
             self.tabs.setCurrentIndex(idx)
 
-    def cmd_close_tab(self):
+    def cmd_close_tab(self) -> None:
         idx = self.tabs.currentIndex()
         if idx >= 0:
             self._on_tab_close_requested(idx)
@@ -1159,7 +1207,7 @@ class LogViewerWindow(QMainWindow):
     # --------------------------------------------------------- settings ---
     def cmd_settings(self) -> None:
         dialog = SettingsDialog(self, self)
-        if dialog.exec() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             family, size, ws, md, ml, ii = dialog.get_values()
             font_changed = (family != self.font_family) or (size != self.font_size)
             self.font_family = family
@@ -1180,36 +1228,37 @@ class LogViewerWindow(QMainWindow):
                 if not isinstance(t, LogTab):
                     continue
                 if font_changed:
-                    t._apply_font_to_text()
+                    t.apply_font_to_text()
                 if t.file_path and t.indexer:
                     if t.indexer.index_interval_bytes != ii:
                         try:
                             cursor = t.text.textCursor()
                             saved_line = t.line_map[cursor.blockNumber()] if t.line_map else 0
-                        except Exception:
+                        except (IndexError, TypeError, AttributeError):
                             saved_line = 0
                         try:
                             t.indexer.close()
-                        except Exception:
                             pass
-                        t._start_reindex(saved_line)
+                        except OSError:
+                            pass
+                        t.start_reindex(saved_line)
                     else:
                         try:
                             cursor = t.text.textCursor()
                             saved_line = t.line_map[cursor.blockNumber()] if t.line_map else 0
-                        except Exception:
+                        except (IndexError, TypeError, AttributeError):
                             saved_line = 0
-                        t._load_window(at_line=saved_line)
+                        t.load_window(at_line=saved_line)
             QMessageBox.information(self, self.t("app_title"), self.t("msg_settings_applied"))
 
     # ----------------------------------------------------------- DnD ----
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:
         if not event.mimeData().hasUrls():
             event.ignore()
             return
@@ -1226,7 +1275,7 @@ class LogViewerWindow(QMainWindow):
 
     def on_files_dropped(self, paths: list[str]) -> None:
         """DnD otwiera każdy plik w nowej zakładce sekwencyjnie."""
-        return self._on_files_dropped(paths)
+        self._on_files_dropped(paths)
 
     @Slot(list)
     def _on_files_dropped(self, paths: list[str]) -> None:
@@ -1252,19 +1301,20 @@ class LogViewerWindow(QMainWindow):
         current_num = self._dnd_total_files - len(self._dnd_queue)
 
         if self._dnd_progress_dialog is None:
-            self._dnd_progress_dialog = QProgressDialog(
+            dlg = QProgressDialog(
                 self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}"),
                 self.t("btn_cancel"),
                 0,
                 100,
                 self,
             )
-            self._dnd_progress_dialog.setWindowTitle(self.t("app_title"))
-            self._dnd_progress_dialog.setWindowModality(Qt.WindowModal)
-            self._dnd_progress_dialog.setAutoClose(False)
-            self._dnd_progress_dialog.setAutoReset(False)
-            self._dnd_progress_dialog.canceled.connect(self._cancel_dnd_queue)
-            self._dnd_progress_dialog.show()
+            dlg.setWindowTitle(self.t("app_title"))
+            dlg.setWindowModality(Qt.WindowModality.WindowModal)
+            dlg.setAutoClose(False)
+            dlg.setAutoReset(False)
+            dlg.canceled.connect(self._cancel_dnd_queue)
+            dlg.show()
+            self._dnd_progress_dialog = dlg
         else:
             self._dnd_progress_dialog.setLabelText(
                 self.t("msg_dnd_loading").format(n=f"{current_num}/{self._dnd_total_files}")
@@ -1276,10 +1326,12 @@ class LogViewerWindow(QMainWindow):
             # Upewniamy się, że nie wyświetli się wewnętrzny dialog ładowania pojedynczego pliku z tab_file_controller
             # Zauważ że QProgressDialog jest inicjalizowany w _index_progress w LogTab
             if getattr(self._dnd_current_tab, "_index_progress", None) is not None:
-                self._dnd_current_tab._close_index_progress()
+                self._dnd_current_tab.close_index_progress()
 
-            self._dnd_current_tab.file_loaded.connect(self._on_dnd_file_loaded, Qt.QueuedConnection)
-            self._dnd_current_tab.status_changed.connect(self._on_dnd_tab_status_changed, Qt.QueuedConnection)
+            self._dnd_current_tab.file_loaded.connect(self._on_dnd_file_loaded, Qt.ConnectionType.QueuedConnection)
+            self._dnd_current_tab.status_changed.connect(
+                self._on_dnd_tab_status_changed, Qt.ConnectionType.QueuedConnection
+            )
         else:
             self._process_next_dnd_file()
 
@@ -1294,7 +1346,7 @@ class LogViewerWindow(QMainWindow):
                 self._dnd_progress_dialog.setValue(int(val))
 
     @Slot(bool)
-    def _on_dnd_file_loaded(self, success: bool) -> None:
+    def _on_dnd_file_loaded(self, _success: bool) -> None:
         if self._dnd_current_tab:
             try:
                 self._dnd_current_tab.file_loaded.disconnect(self._on_dnd_file_loaded)
@@ -1312,7 +1364,7 @@ class LogViewerWindow(QMainWindow):
     def _cancel_dnd_queue(self) -> None:
         self._dnd_queue.clear()
         if self._dnd_current_tab:
-            self._dnd_current_tab._close_index_progress()
+            self._dnd_current_tab.close_index_progress()
         self._cleanup_dnd_dialog()
 
     def _cleanup_dnd_dialog(self) -> None:
@@ -1334,7 +1386,7 @@ class LogViewerWindow(QMainWindow):
     def cmd_about(self) -> None:
         QMessageBox.about(self, self.t("app_title"), self.t("msg_about"))
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Zamknij wszystkie zakładki (z pytaniem o niezapisane edycje)."""
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
