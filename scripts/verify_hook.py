@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-scripts/verify_hook.py — Adapter Lifecycle Hooka 'Stop' dla Antigravity CLI.
+scripts/verify_hook.py — Lifecycle Hook Adapter (Quality Gate verification on agent stop).
 
-Gdy agent AI próbuje zakończyć turę (model_stop), hook:
-1. Sprawdza, czy zmodyfikowano pliki źródłowe (.py, .ui).
-2. Jeśli tak, uruchamia weryfikację jakości (scripts/verify.py).
-3. W przypadku błędów, blokuje zatrzymanie (decision: continue) i wstrzykuje komunikat o błędach.
-4. W przypadku powodzenia lub braku modyfikacji kodu, pozwala na zakończenie (decision: allow).
+When an agent attempts to stop or complete its turn, this hook:
+1. Checks if source files (.py, .ui, .toml) were modified.
+2. If so, executes the Quality Gate (scripts/verify.py).
+3. On failure, blocks completion (decision: continue) and injects the error summary.
+4. On success or if no source files were modified, allows completion (decision: allow).
 """
 
 from __future__ import annotations
@@ -89,9 +89,9 @@ def main() -> None:
             output = output[-4000:]
 
         reason = (
-            "BRAMKA JAKOŚCI (Antigravity Quality Gate): Wykryto błędy lintera, typowania lub testów "
-            "w zmodyfikowanym kodzie. Zanim zakończysz odpowiedź, napraw błędy i doprowadź scripts/verify.py "
-            f"do kodu wyjścia 0.\n\nWynik weryfikacji:\n{output}"
+            "QUALITY GATE: Linter, type check or test failures detected in modified code. "
+            "Fix the errors and ensure scripts/verify.py exits with code 0 before completing your turn.\n\n"
+            f"Verification output:\n{output}"
         )
         print(json.dumps({"decision": "continue", "reason": reason}))
 

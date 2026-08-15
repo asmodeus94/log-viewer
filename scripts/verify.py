@@ -72,19 +72,19 @@ def run_command(cmd: list[str], cwd: Path, description: str) -> tuple[int, str]:
 def step_compile_ui(repo_root: Path, py_exe: str) -> bool:
     """Krok 1: Kompilacja plików interfejsu .ui."""
     compile_script = repo_root / "scripts" / "compile_ui.py"
-    code, _ = run_command([py_exe, str(compile_script)], repo_root, "Krok 1: Kompilacja UI (compile_ui.py)")
+    code, _ = run_command([py_exe, str(compile_script)], repo_root, "Step 1: UI Compilation (compile_ui.py)")
     return code == 0
 
 
 def step_format_and_fix(repo_root: Path, py_exe: str) -> bool:
     """Automatyczne formatowanie i naprawa importów za pomocą ruff."""
     targets = ["log_viewer", "tests", "scripts", "dev-scripts", "run.py"]
-    print(f"{CYAN}{BOLD}--> Automatyczna naprawa lintera i formatowania (ruff)...{RESET}")
+    print(f"{CYAN}{BOLD}--> Auto-fixing linter and formatting (ruff)...{RESET}")
     cmd_fmt = [py_exe, "-m", "ruff", "format"] + targets
-    code1, _ = run_command(cmd_fmt, repo_root, "Formatowanie kodu (ruff format)")
+    code1, _ = run_command(cmd_fmt, repo_root, "Code formatting (ruff format)")
 
     cmd_fix = [py_exe, "-m", "ruff", "check", "--fix"] + targets
-    code2, _ = run_command(cmd_fix, repo_root, "Naprawa reguł lintera (ruff check --fix)")
+    code2, _ = run_command(cmd_fix, repo_root, "Fixing linter rules (ruff check --fix)")
     return code1 == 0 and code2 == 0
 
 
@@ -94,18 +94,16 @@ def step_lint(repo_root: Path, py_exe: str) -> bool:
 
     # 1. Sprawdzenie formatowania
     cmd_fmt_check = [py_exe, "-m", "ruff", "format", "--check"] + targets
-    code_fmt, _ = run_command(cmd_fmt_check, repo_root, "Krok 2a: Sprawdzenie formatowania kodu (ruff format --check)")
+    code_fmt, _ = run_command(cmd_fmt_check, repo_root, "Step 2a: Format check (ruff format --check)")
     if code_fmt != 0:
-        print(f"{YELLOW}Wskazówka: Uruchom 'python scripts/verify.py --fix' aby automatycznie sformatować kod.{RESET}")
+        print(f"{YELLOW}Hint: Run 'python scripts/verify.py --fix' to automatically format code.{RESET}")
         return False
 
     # 2. Sprawdzenie reguł lintera
     cmd_check = [py_exe, "-m", "ruff", "check"] + targets
-    code_check, _ = run_command(cmd_check, repo_root, "Krok 2b: Sprawdzenie reguł lintera (ruff check)")
+    code_check, _ = run_command(cmd_check, repo_root, "Step 2b: Linter rules check (ruff check)")
     if code_check != 0:
-        print(
-            f"{YELLOW}Wskazówka: Uruchom 'python scripts/verify.py --fix' aby automatycznie naprawić bezpieczne reguły.{RESET}"
-        )
+        print(f"{YELLOW}Hint: Run 'python scripts/verify.py --fix' to automatically fix safe rules.{RESET}")
         return False
 
     return True
@@ -115,45 +113,45 @@ def step_typecheck(repo_root: Path, py_exe: str) -> bool:
     """Krok 3: Analiza typów statycznych (mypy)."""
     targets = ["log_viewer", "scripts"]
     cmd = [py_exe, "-m", "mypy"] + targets
-    code, _ = run_command(cmd, repo_root, "Krok 3: Kontrola typów (mypy)")
+    code, _ = run_command(cmd, repo_root, "Step 3: Static type check (mypy)")
     return code == 0
 
 
 def step_tests(repo_root: Path, py_exe: str) -> bool:
     """Krok 4: Testy jednostkowe (pytest)."""
     cmd = [py_exe, "-m", "pytest", "tests/"]
-    code, _ = run_command(cmd, repo_root, "Krok 4: Testy jednostkowe (pytest)")
+    code, _ = run_command(cmd, repo_root, "Step 4: Unit and GUI tests (pytest)")
     return code == 0
 
 
 def main() -> int:
     enable_windows_ansi()
 
-    parser = argparse.ArgumentParser(description="Bramka jakości kodu projektu Log Viewer")
+    parser = argparse.ArgumentParser(description="Log Viewer Quality Gate")
     parser.add_argument(
         "--fix",
         "-f",
         action="store_true",
-        help="Automatycznie formatuje kod i naprawia bezpieczne błędy lintera przed weryfikacją",
+        help="Automatically format code and fix safe linter errors before verification",
     )
     parser.add_argument(
-        "--quick", "-q", action="store_true", help="Szybka weryfikacja (UI + Lint + MyPy, pomija testy pytest)"
+        "--quick", "-q", action="store_true", help="Quick verification (UI + Lint + MyPy, skips pytest)"
     )
-    parser.add_argument("--step", choices=["ui", "lint", "mypy", "test"], help="Uruchom tylko wybrany krok weryfikacji")
+    parser.add_argument("--step", choices=["ui", "lint", "mypy", "test"], help="Run only specific verification step")
 
     args = parser.parse_args()
     repo_root = get_repo_root()
     py_exe = get_python_executable(repo_root)
 
-    print(f"{BOLD}=== BRAMKA JAKOŚCI KODU (Quality Gate) ==={RESET}")
-    print(f"Katalog roboczy: {repo_root}")
-    print(f"Interpreter:     {py_exe}\n")
+    print(f"{BOLD}=== QUALITY GATE ==={RESET}")
+    print(f"Working directory: {repo_root}")
+    print(f"Interpreter:       {py_exe}\n")
 
     if args.fix:
         if not step_format_and_fix(repo_root, py_exe):
-            print(f"\n{RED}{BOLD}[BŁĄD] Automatyczna naprawa nie powiodła się.{RESET}")
+            print(f"\n{RED}{BOLD}[ERROR] Auto-fix failed.{RESET}")
             return 1
-        print(f"{GREEN}Automatyczna naprawa i formatowanie zakończone pomyślnie.{RESET}\n")
+        print(f"{GREEN}Auto-fix and formatting completed successfully.{RESET}\n")
 
     steps_to_run = []
     if args.step:
@@ -175,11 +173,11 @@ def main() -> int:
             success = step_tests(repo_root, py_exe)
 
         if not success:
-            print(f"\n{RED}{BOLD}[BŁĄD BRAMKI JAKOŚCI] Krok '{step}' zakończył się niepowodzeniem.{RESET}")
+            print(f"\n{RED}{BOLD}[QUALITY GATE ERROR] Step '{step}' failed.{RESET}")
             return 1
-        print(f"{GREEN}[OK] Krok '{step}' zaliczony pomyślnie.{RESET}\n")
+        print(f"{GREEN}[OK] Step '{step}' passed successfully.{RESET}\n")
 
-    print(f"{GREEN}{BOLD}=== SUKCES: Wszystkie weryfikacje jakości zakończone powodzeniem! ==={RESET}")
+    print(f"{GREEN}{BOLD}=== SUCCESS: All quality checks passed successfully! ==={RESET}")
     return 0
 
 

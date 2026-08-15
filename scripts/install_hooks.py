@@ -18,7 +18,7 @@ def main() -> int:
     hooks_dir = repo_root / ".git" / "hooks"
 
     if not hooks_dir.parent.exists():
-        print("Błąd: Nie znaleziono katalogu .git. Upewnij się, że jesteś w repozytorium Git.")
+        print("Error: .git directory not found. Make sure you are in a Git repository.")
         return 1
 
     hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -27,7 +27,7 @@ def main() -> int:
     # Skrypt pre-commit w powłoce sh (obsługiwany przez Git na Windowsie przez Git Bash oraz na Linux/macOS)
     hook_content = """#!/bin/sh
 # Git Pre-commit Hook — Log Viewer Quality Gate
-echo "[PRE-COMMIT] Uruchamianie bramki jakości (scripts/verify.py)..."
+echo "[PRE-COMMIT] Running Quality Gate (scripts/verify.py)..."
 
 if [ -f ".venv/Scripts/python.exe" ]; then
     PYTHON_EXE=".venv/Scripts/python.exe"
@@ -42,13 +42,13 @@ EXIT_CODE=$?
 
 if [ $EXIT_CODE -ne 0 ]; then
     echo ""
-    echo "[BŁĄD PRE-COMMIT] Bramka jakości nie przeszła (kod wyjścia: $EXIT_CODE)."
-    echo "Zatwierdzenie zmian (commit) zostało zablokowane."
-    echo "Popraw błędy lub uruchom 'python scripts/verify.py --fix'."
+    echo "[PRE-COMMIT ERROR] Quality Gate failed (exit code: $EXIT_CODE)."
+    echo "Commit was blocked."
+    echo "Fix the errors or run 'python scripts/verify.py --fix'."
     exit $EXIT_CODE
 fi
 
-echo "[PRE-COMMIT] Bramka jakości zakończona sukcesem. Zatwierdzanie commita..."
+echo "[PRE-COMMIT] Quality Gate passed successfully. Proceeding with commit..."
 exit 0
 """
 
@@ -62,7 +62,7 @@ exit 0
     except Exception:
         pass
 
-    print(f"Pomyślnie zainstalowano Git pre-commit hook w: {pre_commit_file}")
+    print(f"Successfully installed Git pre-commit hook in: {pre_commit_file}")
     return 0
 
 
