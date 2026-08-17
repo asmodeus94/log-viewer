@@ -6,7 +6,6 @@ dist/
 build/
 *.spec
 !log-viewer.spec
-!log-generator.spec
 assets/*.icns
 assets/*.ico
 
