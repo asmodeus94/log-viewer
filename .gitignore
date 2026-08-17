@@ -9,5 +9,6 @@ assets/*.icns
 assets/*.ico
 
 run_frozen.py
+*.iml
 .idea/
 docs/

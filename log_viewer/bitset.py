@@ -1,40 +1,78 @@
+from __future__ import annotations
+
+import array
 import bisect
 import itertools
-import array
 import operator
-from typing import Sequence, Iterator, Union, overload
+from collections.abc import Iterable, Sequence
+from typing import Any, overload
+
 
 class Bitset(Sequence[int]):
     """
     Zoptymalizowana struktura Rank & Select Bitset do przechowywania milionów
     wyników wyszukiwania i filtrowania przy minimalnym zużyciu RAM.
     """
-    def __init__(self, size: int):
+
+    def __init__(self, size: int) -> None:
         self._size = size
         self._num_words = (size + 63) // 64
-        self._words = array.array('Q', [0] * self._num_words)
-        
-        self._counts = None
+        self._words = array.array("Q", [0] * self._num_words)
+
+        self._counts: array.array[int] | None = None
         self._total_count = -1
 
     @classmethod
-    def from_indices(cls, indices: "array.array[int]", size: int) -> "Bitset":
+    def from_indices(cls, indices: array.array[int], size: int) -> Bitset:
         b = cls(size)
         b.update_indices(indices)
         return b
 
-    def update_indices(self, indices):
+    @classmethod
+    def from_raw(cls, size: int, words: array.array[int], total_count: int = -1) -> Bitset:
+        """Tworzy instancję Bitset z bezpośredniego bufora 64-bitowych słów."""
+        b = cls(size)
+        b._words = words
+        b._num_words = len(words)
+        b._total_count = total_count
+        b._counts = None
+        return b
+
+    def to_raw(self) -> tuple[int, array.array[int], int]:
+        """Zwraca uniwersalną krotkę (size, words, total_count) bezpieczną do przesyłania przez sygnały Qt."""
+        return self._size, self._words, self._total_count
+
+    def merge_chunk_words(self, base_word: int, words: Sequence[int] | array.array[int]) -> None:
+        """Scalanie zakresu słów bitowych z workera (używane przy wyszukiwaniu/filtrowaniu równoległym)."""
+        if not words:
+            return
+        needed = base_word + len(words)
+        if needed > self._num_words:
+            self.resize(needed * 64)
+
+        global_words = self._words
+        if len(words) == 1:
+            global_words[base_word] |= words[0]
+        elif len(words) > 1:
+            global_words[base_word] |= words[0]
+            global_words[base_word + len(words) - 1] |= words[-1]
+            if len(words) > 2:
+                for i in range(1, len(words) - 1):
+                    global_words[base_word + i] = words[i]
+        self._counts = None
+
+    def update_indices(self, indices: Iterable[int]) -> None:
         words = self._words
         for idx in indices:
             if 0 <= idx < self._size:
-                words[idx // 64] |= (1 << (idx % 64))
+                words[idx // 64] |= 1 << (idx % 64)
         self._counts = None
 
-    def _build_cache(self):
+    def _build_cache(self) -> None:
         if self._counts is not None:
             return
-            
-        counts = array.array('Q', itertools.accumulate(map(int.bit_count, self._words), initial=0))
+
+        counts = array.array("Q", itertools.accumulate(map(int.bit_count, self._words), initial=0))
         self._total_count = counts.pop()
         self._counts = counts
 
@@ -47,6 +85,35 @@ class Bitset(Sequence[int]):
             self._num_words = new_num_words
         self._size = new_size
         self._counts = None
+
+    @property
+    def size(self) -> int:
+        """Zwraca całkowity rozmiar uniwersum bitsetu (liczbę indeksowanych linii)."""
+        return self._size
+
+    @property
+    def words(self) -> array.array[int]:
+        """Zwraca wewnętrzny bufor 64-bitowych słów bitsetu."""
+        return self._words
+
+    def or_words(self, words: Sequence[int]) -> None:
+        """Łączy alternatywą bitową (OR) słowa bitsetu z przekazaną sekwencją."""
+        for i in range(min(len(words), self._num_words)):
+            self._words[i] |= words[i]
+        self._counts = None
+
+    def copy_from(self, other: Bitset) -> None:
+        """Kopiuje zawartość z innego Bitsetu do bieżącej instancji."""
+        self.resize(other.size)
+        self._words = array.array("Q", other.words)
+        self._num_words = len(other.words)
+        self._counts = None
+
+    def clone(self) -> Bitset:
+        """Zwraca głęboką kopię bieżącego Bitsetu."""
+        new_bs = Bitset(self._size)
+        new_bs._words = array.array("Q", self._words)
+        return new_bs
 
     def __len__(self) -> int:
         self._build_cache()
@@ -65,11 +132,12 @@ class Bitset(Sequence[int]):
             return 0
         if index >= self._size:
             return len(self)
-            
+
         self._build_cache()
+        assert self._counts is not None
         word_idx = index // 64
         bit_idx = index % 64
-        
+
         count = self._counts[word_idx]
         if bit_idx > 0:
             mask = (1 << bit_idx) - 1
@@ -82,28 +150,29 @@ class Bitset(Sequence[int]):
     @overload
     def __getitem__(self, index: int) -> int: ...
     @overload
-    def __getitem__(self, index: slice) -> "array.array[int]": ...
+    def __getitem__(self, index: slice) -> array.array[int]: ...
 
-    def __getitem__(self, index: Union[int, slice]):
+    def __getitem__(self, index: int | slice) -> int | array.array[int]:
         self._build_cache()
-        
+        assert self._counts is not None
+
         if isinstance(index, slice):
             start, stop, step = index.indices(self._total_count)
             if step != 1:
                 raise ValueError("Bitset slice step must be 1")
-            
-            result = array.array('Q')
+
+            result = array.array("Q")
             if start >= stop:
                 return result
-                
+
             word_idx = bisect.bisect_right(self._counts, start) - 1
             if word_idx < 0:
                 word_idx = 0
-                
+
             current_count = self._counts[word_idx]
             items_needed = stop - start
             items_skipped = start - current_count
-            
+
             words = self._words
             for i in range(word_idx, self._num_words):
                 w = words[i]
@@ -119,48 +188,48 @@ class Bitset(Sequence[int]):
                         w &= w - 1
                 if items_needed == 0:
                     break
-                    
-            return result
-        else:
-            if index < 0:
-                index += self._total_count
-            if index < 0 or index >= self._total_count:
-                raise IndexError("Bitset index out of range")
-                
-            word_idx = bisect.bisect_right(self._counts, index) - 1
-            if word_idx < 0:
-                word_idx = 0
-                
-            current_count = self._counts[word_idx]
-            items_skipped = index - current_count
-            w = self._words[word_idx]
-            
-            while w:
-                tz = (w & -w).bit_length() - 1
-                if items_skipped == 0:
-                    return word_idx * 64 + tz
-                items_skipped -= 1
-                w &= w - 1
-            
-            raise IndexError("Bitset corrupted state")
 
-    def expand_context(self, context_after: int) -> "Bitset":
+            return result
+
+        if index < 0:
+            index += self._total_count
+        if index < 0 or index >= self._total_count:
+            raise IndexError("Bitset index out of range")
+
+        word_idx = bisect.bisect_right(self._counts, index) - 1
+        if word_idx < 0:
+            word_idx = 0
+
+        current_count = self._counts[word_idx]
+        items_skipped = index - current_count
+        w = self._words[word_idx]
+
+        while w:
+            tz = (w & -w).bit_length() - 1
+            if items_skipped == 0:
+                return word_idx * 64 + tz
+            items_skipped -= 1
+            w &= w - 1
+
+        raise IndexError("Bitset corrupted state")
+
+    def expand_context(self, context_after: int) -> Bitset:
         """Zwraca nowy Bitset rozszerzony o podaną liczbę linii w dół (kontekst)."""
         new_bs = Bitset(self._size)
         if context_after <= 0:
-            new_bs._words = array.array('Q', self._words)
+            new_bs._words = array.array("Q", self._words)
             return new_bs
-            
+
         new_words = new_bs._words
         words = self._words
         num_words = self._num_words
-        
+
         horizon = -1
-        
+
         for i in range(num_words):
             w = words[i]
             base = i * 64
-            
+
             if horizon >= base + 63:
                 new_words[i] = 0xFFFFFFFFFFFFFFFF
                 if w:
@@ -169,7 +238,10 @@ class Bitset(Sequence[int]):
                     if reach > horizon:
                         horizon = reach
                 continue
-                
+
+            if not w and horizon < base:
+                continue
+
             new_w = 0
             if horizon >= base:
                 covered_bits = min(horizon - base + 1, 64)
@@ -177,14 +249,14 @@ class Bitset(Sequence[int]):
                     new_w = 0xFFFFFFFFFFFFFFFF
                 else:
                     new_w = (1 << covered_bits) - 1
-                
+
             if w:
                 if context_after < 64:
                     expanded_w = w
                     for shift in range(1, context_after + 1):
-                        expanded_w |= (w << shift)
-                    new_w |= (expanded_w & 0xFFFFFFFFFFFFFFFF)
-                    
+                        expanded_w |= w << shift
+                    new_w |= expanded_w & 0xFFFFFFFFFFFFFFFF
+
                     highest_bit = w.bit_length() - 1
                     reach = base + highest_bit + context_after
                     if reach > horizon:
@@ -193,13 +265,13 @@ class Bitset(Sequence[int]):
                     lowest_bit = (w & -w).bit_length() - 1
                     mask = (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
                     new_w |= mask
-                    
+
                     highest_bit = w.bit_length() - 1
                     reach = base + highest_bit + context_after
                     if reach > horizon:
                         horizon = reach
             new_words[i] = new_w
-            
+
         # Ostatnie słowo musi być ucięte do size, żeby nie mieć jedynek poza plikiem
         if self._size > 0:
             last_valid_bit = (self._size - 1) % 64
@@ -207,12 +279,99 @@ class Bitset(Sequence[int]):
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF
             new_words[num_words - 1] &= mask
-            
+
         return new_bs
 
-    def __and__(self, other: "Bitset") -> "Bitset":
+    def expand_context_incremental(self, target: Bitset, from_line: int, context_after: int) -> None:
+        """
+        Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+        Optymalizacja O(nowe_linie) zamiast O(cały_plik) dla trybu Follow przy dopisywaniu logów.
+        """
+        target.resize(self._size)
+        if context_after <= 0:
+            start_word = max(0, from_line // 64)
+            for i in range(start_word, self._num_words):
+                target._words[i] = self._words[i]
+            target._counts = None
+            return
+
+        num_words = self._num_words
+        words = self._words
+        target_words = target._words
+
+        # Wyznacz słowo początkowe, biorąc pod uwagę zasięg poprzednich trafień
+        lookback_words = (context_after + 63) // 64
+        start_word = max(0, (from_line // 64) - lookback_words)
+
+        # Znajdź początkowy horizon z poprzednich słów
+        horizon = -1
+        for j in range(max(0, start_word - lookback_words), start_word):
+            w = words[j]
+            if w:
+                highest_bit = w.bit_length() - 1
+                reach = j * 64 + highest_bit + context_after
+                if reach > horizon:
+                    horizon = reach
+
+        for i in range(start_word, num_words):
+            w = words[i]
+            base = i * 64
+
+            if horizon >= base + 63:
+                target_words[i] = 0xFFFFFFFFFFFFFFFF
+                if w:
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+                continue
+
+            if not w and horizon < base:
+                target_words[i] = 0
+                continue
+
+            new_w = 0
+            if horizon >= base:
+                covered_bits = min(horizon - base + 1, 64)
+                if covered_bits == 64:
+                    new_w = 0xFFFFFFFFFFFFFFFF
+                else:
+                    new_w = (1 << covered_bits) - 1
+
+            if w:
+                if context_after < 64:
+                    expanded_w = w
+                    for shift in range(1, context_after + 1):
+                        expanded_w |= w << shift
+                    new_w |= expanded_w & 0xFFFFFFFFFFFFFFFF
+
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+                else:
+                    lowest_bit = (w & -w).bit_length() - 1
+                    mask = (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
+                    new_w |= mask
+
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+            target_words[i] = new_w
+
+        if self._size > 0:
+            last_valid_bit = (self._size - 1) % 64
+            mask = (1 << (last_valid_bit + 1)) - 1
+            if last_valid_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            target_words[num_words - 1] &= mask
+
+        target._counts = None
+
+    def __and__(self, other: Bitset) -> Bitset:
         if not isinstance(other, Bitset):
-            raise TypeError("Unsupported operand type(s) for &: 'Bitset' and '{}'".format(type(other).__name__))
+            raise TypeError(f"Unsupported operand type(s) for &: 'Bitset' and '{type(other).__name__}'")
 
         # Ograniczamy do mniejszego rozmiaru
         min_size = min(self._size, other._size)
@@ -223,9 +382,11 @@ class Bitset(Sequence[int]):
         w1 = self._words
         w2 = other._words
 
-        # Używamy zoptymalizowanej metody C (map + operator) i oszczędzamy pamięć (RAM) 
+        # Używamy zoptymalizowanej metody C (map + operator) i oszczędzamy pamięć (RAM)
         # bez tworzenia fizycznych kopii bufora list stosując islice (zamiast tab[:num]).
-        new_words[:num_words] = array.array('Q', map(operator.and_, itertools.islice(w1, num_words), itertools.islice(w2, num_words)))
+        new_words[:num_words] = array.array(
+            "Q", map(operator.and_, itertools.islice(w1, num_words), itertools.islice(w2, num_words))
+        )
 
         if min_size > 0:
             last_valid_bit = (min_size - 1) % 64
@@ -236,33 +397,35 @@ class Bitset(Sequence[int]):
 
         return new_bs
 
-    def __invert__(self) -> "Bitset":
+    def __invert__(self) -> Bitset:
         new_bs = Bitset(self._size)
         new_words = new_bs._words
         old_words = self._words
         num_words = self._num_words
-        
+
         for i in range(num_words):
             new_words[i] = ~old_words[i] & 0xFFFFFFFFFFFFFFFF
-            
+
         if self._size > 0:
             last_valid_bit = (self._size - 1) % 64
             mask = (1 << (last_valid_bit + 1)) - 1
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF
             new_words[-1] &= mask
-            
+
         if self._counts is not None and self._total_count >= 0:
             new_bs._total_count = self._size - self._total_count
-            
+
         return new_bs
 
-def bisect_left_custom(a, x):
-    if hasattr(a, 'bisect_left'):
-        return a.bisect_left(x)
-    return bisect.bisect_left(a, x)
 
-def bisect_right_custom(a, x):
-    if hasattr(a, 'bisect_right'):
-        return a.bisect_right(x)
-    return bisect.bisect_right(a, x)
+def bisect_left_custom(a: Any, x: int) -> int:
+    if hasattr(a, "bisect_left"):
+        return int(a.bisect_left(x))
+    return int(bisect.bisect_left(a, x))
+
+
+def bisect_right_custom(a: Any, x: int) -> int:
+    if hasattr(a, "bisect_right"):
+        return int(a.bisect_right(x))
+    return int(bisect.bisect_right(a, x))

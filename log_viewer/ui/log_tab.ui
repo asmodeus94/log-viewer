@@ -35,7 +35,7 @@
         <number>4</number>
        </property>
        <item>
-        <widget class="QLabel" name="_lbl_bookmarks">
+        <widget class="QLabel" name="lbl_bookmarks">
          <property name="text">
           <string>lbl_bookmarks</string>
          </property>
@@ -67,7 +67,7 @@
         </widget>
        </item>
        <item>
-        <widget class="QLabel" name="_lbl_edits">
+        <widget class="QLabel" name="lbl_edits">
          <property name="text">
           <string>lbl_edits</string>
          </property>
@@ -120,7 +120,7 @@
          <number>4</number>
         </property>
         <item>
-         <widget class="QLabel" name="_search_results_label">
+         <widget class="QLabel" name="search_results_label">
           <property name="text">
            <string>lbl_search_results_empty</string>
           </property>

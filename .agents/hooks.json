@@ -1,0 +1,12 @@
+{
+  "quality-gate": {
+    "enabled": true,
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python scripts/verify_hook.py",
+        "timeout": 180
+      }
+    ]
+  }
+}

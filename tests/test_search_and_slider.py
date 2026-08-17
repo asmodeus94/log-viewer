@@ -1,8 +1,9 @@
 """Testy dla nowych funkcji: slider inversion, scroll update, search results panel."""
+
 import os
 import sys
-import time
 import tempfile
+import time
 
 import pytest
 
@@ -14,11 +15,11 @@ libegl = os.path.expanduser("~/.local/lib/libEGL.so.1")
 if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-from PySide6 import QtWidgets, QtCore, QtGui
-from log_viewer.main_window import LogViewerWindow
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
+from log_viewer.main_window import LogViewerWindow
 from log_viewer.widgets import SearchResultsModel
+from PySide6 import QtCore, QtGui, QtWidgets
 
 
 @pytest.fixture
@@ -63,7 +64,6 @@ def app_instance():
             pass
     window.deleteLater()
     app.processEvents()
-
 
     def test_scroll_updates_slider(self, app_instance):
         """Scroll w Text widget aktualizuje pozycję slidera."""
@@ -141,13 +141,11 @@ class TestSearchResultsModel:
         assert color is None
         # Kolor zależy od motywu — sprawdzamy tylko że jest niepusty
 
-
     def test_foreground_role_info(self):
         model = SearchResultsModel()
         model.set_results([(0, "[INFO] something happened")])
         color = model.data(model.index(0, 0), QtCore.Qt.ForegroundRole)
         assert color is None
-
 
     def test_long_text_truncated(self):
         model = SearchResultsModel()
@@ -163,7 +161,6 @@ class TestSearchResultsModel:
         model.set_results([(1234, "test line content")])
         data = model.data(model.index(0, 0), QtCore.Qt.DisplayRole)
         assert "1,235" in data
-
 
 
 class TestSearchFlow:
@@ -251,7 +248,8 @@ class TestSearchFlow:
         window, _ = app_instance
         # Patch messagebox by uniknąć blokowania
         from unittest.mock import patch
-        with patch.object(QtWidgets.QMessageBox, 'information'):
+
+        with patch.object(QtWidgets.QMessageBox, "information"):
             window.search_entry.setText("NONEXISTENT_XYZ_12345")
             window.cmd_find_next()
             for _ in range(200):

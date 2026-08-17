@@ -1,15 +1,16 @@
 """Testy akcji kontekstowych zależnych od otwartych kart."""
+
 import os
 import sys
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Konfiguracja Qt offscreen
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6 import QtWidgets
 from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtWidgets
+
 
 def test_context_actions_disabled_no_tabs(tmp_path):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)

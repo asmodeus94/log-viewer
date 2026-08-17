@@ -1,6 +1,7 @@
 """Testy exceptions.py — FileChangedError, CompressedSaveError."""
+
 import pytest
-from log_viewer.exceptions import FileChangedError, CompressedSaveError
+from log_viewer.exceptions import CompressedSaveError, FileChangedError
 
 
 class TestExceptions:

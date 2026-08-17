@@ -1,11 +1,12 @@
 """Testy integracyjne dla log-viewer (otwieranie, wyszukiwanie, edycja, zapis)."""
+
 import os
-import time
 import threading
+import time
 
 from log_viewer.edit_buffer import EditBuffer
-from log_viewer.indexer import LineIndexer
 from log_viewer.filter_engine import FilterEngine
+from log_viewer.indexer import LineIndexer
 
 
 class TestIntegrationFlow:
@@ -20,8 +21,7 @@ class TestIntegrationFlow:
         engine = FilterEngine(path, idx)
         results = []
         done = threading.Event()
-        engine.start("ERROR", False, True, False, lambda p, h: None,
-                     lambda r, e: (results.extend(r), done.set()))
+        engine.start("ERROR", False, True, False, lambda p, h: None, lambda r, e: (results.extend(r), done.set()))
         for _ in range(100):
             if done.is_set():
                 break

@@ -10,6 +10,7 @@ class FileChangedError(Exception):
     przypadku zapis jest blokowany — nadpisanie nadpisaloby NOWY plik starymi
     danymi + edycjami.
     """
+
     pass
 
 
@@ -20,4 +21,5 @@ class CompressedSaveError(Exception):
     (trzeba zrekompresować cały plik) i ryzykowny (błąd w środku = utrata
     danych). Zamiast tego sugerujemy 'Save As' do nowego pliku.
     """
+
     pass

@@ -1,8 +1,5 @@
-import os
-import pytest
-from PySide6.QtCore import Qt, QUrl, QMimeData
-from PySide6.QtGui import QDropEvent
 from log_viewer.main_window import LogViewerWindow
+
 
 def test_dnd_multiple_files(qtbot, tmp_path):
     # Utwórz kilka plików tymczasowych
@@ -63,4 +60,3 @@ def test_dnd_large_file_over_50mb(qtbot, tmp_path):
         assert window.tabs.count() == initial_tabs + 1
 
     qtbot.waitUntil(check_finished, timeout=10000)
-

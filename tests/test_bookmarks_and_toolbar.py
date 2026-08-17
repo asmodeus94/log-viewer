@@ -1,4 +1,5 @@
 import array
+
 """Testy dla poprawek: zaznaczanie wielu zakładek (Cmd+B), usuwanie
 zaznaczonych zakładek z panelu bocznego oraz kolejność przycisków
 Następny/Poprzedni na pasku narzędzi."""
@@ -16,12 +17,12 @@ libegl = os.path.expanduser("~/.local/lib/libEGL.so.1")
 if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
-from PySide6 import QtWidgets, QtCore, QtGui
-from log_viewer.main_window import LogViewerWindow
+from log_viewer.bitset import Bitset
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
-from log_viewer.bitset import Bitset
+from log_viewer.main_window import LogViewerWindow
+from PySide6 import QtCore, QtGui, QtWidgets
 
 
 @pytest.fixture
@@ -75,12 +76,13 @@ def _select_blocks(text_edit, start_block: int, count: int) -> None:
 # Cmd+B — zawsze pojedyncza linia kursora, nawet przy selekcji
 # =============================================================================
 
+
 class TestBookmarkSingleLine:
     def test_toggle_no_selection(self, app_instance):
         """Bez selekcji — przełącza pojedynczą linię (zachowanie standardowe)."""
         window, _ = app_instance
         window._load_window(at_line=0)
-        app_instance  # keep ref
+        _ = app_instance  # keep ref
         app = QtWidgets.QApplication.instance()
         app.processEvents()
 
@@ -157,6 +159,7 @@ class TestBookmarkSingleLine:
 # =============================================================================
 # Panel Zakładki — single-selekcja + przycisk usuwania
 # =============================================================================
+
 
 class TestBookmarkPanelDelete:
     def test_bm_tree_extended_selection(self, app_instance):
@@ -277,6 +280,7 @@ class TestBookmarkPanelDelete:
 # Kolejność przycisków Następny / Poprzedni na pasku narzędzi
 # =============================================================================
 
+
 class TestToolbarButtonOrder:
     def test_next_is_left_of_prev(self, app_instance):
         """Następny znajduje się po lewej stronie Poprzedni na pasku."""
@@ -307,6 +311,7 @@ class TestToolbarButtonOrder:
         QtWidgets.QApplication.processEvents()
 
         from PySide6.QtCore import QPoint
+
         x_next = window.btn_find_next.mapToGlobal(QPoint(0, 0)).x()
         x_prev = window.btn_find_prev.mapToGlobal(QPoint(0, 0)).x()
 
@@ -324,6 +329,7 @@ class TestToolbarButtonOrder:
 # =============================================================================
 # Bieżąca linia — delikatne podświetlenie + formatowanie bloków
 # =============================================================================
+
 
 class TestCurrentLineHighlightAndFormatting:
     def test_current_line_extra_selection_active(self, app_instance):
@@ -363,14 +369,11 @@ class TestCurrentLineHighlightAndFormatting:
         bookmark_color = QtGui.QColor(window.theme["bookmark"]).name()
         sels = window.text.extraSelections()
         bookmark_blocks = {
-            s.cursor.blockNumber()
-            for s in sels
-            if s.format.background().color().name() == bookmark_color
+            s.cursor.blockNumber() for s in sels if s.format.background().color().name() == bookmark_color
         }
         assert 5 in bookmark_blocks, "Line 5 should have green bookmark background"
         assert 6 not in bookmark_blocks, (
-            f"Sąsiednia linia 6 dostała zielone tło — to bug propagacji. "
-           "Zakładkowane bloki: {bookmark_blocks}"
+            "Sąsiednia linia 6 dostała zielone tło — to bug propagacji. Zakładkowane bloki: {bookmark_blocks}"
         )
 
     def test_bookmark_formatting(self, app_instance):
@@ -398,11 +401,9 @@ class TestCurrentLineHighlightAndFormatting:
         bookmark_bg_found = False
         for sel in sels:
             sel_bg = sel.format.background().color().name()
-            if sel_bg == bookmark_color:
-                # Sprawdź czy ta selekcja jest w linii 0
-                if sel.cursor.blockNumber() == 0:
-                    bookmark_bg_found = True
-                    break
+            if sel_bg == bookmark_color and sel.cursor.blockNumber() == 0:
+                bookmark_bg_found = True
+                break
         assert bookmark_bg_found, (
             f"ExtraSelections nie zawierają zielonego tła zakładki "
             f"({bookmark_color}) w linii 0. Selekcje: "
@@ -466,22 +467,16 @@ class TestCurrentLineHighlightAndFormatting:
 
         # Powinna być selekcja zakładki w linii 7 (zielone tło).
         bookmark_sel_exists = any(
-            s.cursor.blockNumber() == 7
-            and s.format.background().color().name() == bookmark_color
-            for s in sels
+            s.cursor.blockNumber() == 7 and s.format.background().color().name() == bookmark_color for s in sels
         )
         assert bookmark_sel_exists, "Missing green bookmark selection on line 7"
 
         # NIE powinna być selekcja current_line w linii 7 — bo by przykryła
         # zakładkę i użytkownik widziałby szare zamiast zielonego.
         current_sel_on_bookmark = any(
-            s.cursor.blockNumber() == 7
-            and s.format.background().color().name() == current_color
-            for s in sels
+            s.cursor.blockNumber() == 7 and s.format.background().color().name() == current_color for s in sels
         )
-        assert not current_sel_on_bookmark, (
-            "Szara selekcja current_line przykrywa zakładkę w linii 7 — to bug"
-        )
+        assert not current_sel_on_bookmark, "Szara selekcja current_line przykrywa zakładkę w linii 7 — to bug"
 
     def test_current_line_shows_on_normal_line(self, app_instance):
         """Gdy kursor jest na linii BEZ zakładki, current_line się pokazuje."""
@@ -505,9 +500,7 @@ class TestCurrentLineHighlightAndFormatting:
         current_color = QtGui.QColor(window.theme["current_line"]).name()
         sels = window.text.extraSelections()
         current_sel_exists = any(
-            s.cursor.blockNumber() == 8
-            and s.format.background().color().name() == current_color
-            for s in sels
+            s.cursor.blockNumber() == 8 and s.format.background().color().name() == current_color for s in sels
         )
         assert current_sel_exists, "Missing gray current_line selection on line 8"
 
@@ -515,6 +508,7 @@ class TestCurrentLineHighlightAndFormatting:
 # =============================================================================
 # Edycja linii — kursor poza widokiem (scroll po wyniku wyszukiwania)
 # =============================================================================
+
 
 class TestEditLineAfterScroll:
     def test_edit_uses_visible_line_when_cursor_offscreen(self):
@@ -528,6 +522,7 @@ class TestEditLineAfterScroll:
         edytować ~linię 30 (firstVisibleBlock), NIE linię 0.
         """
         import tempfile
+
         app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
         cfg = UserConfig(config_path=tempfile.mktemp(suffix=".json"))
         window = LogViewerWindow(config=cfg)
@@ -595,6 +590,7 @@ class TestEditLineAfterScroll:
 # Filtr z kontekstem — N linii po każdym trafieniu (dla stack trace)
 # =============================================================================
 
+
 class TestFilterContext:
     def test_context_spinbox_exists(self, app_instance):
         """Spinbox kontekstu istnieje w toolbarze."""
@@ -602,7 +598,7 @@ class TestFilterContext:
         # filter_context_spin jest w LogViewerWindow (toolbar), nie w LogTab.
         # __getattr__ deleguje do aktywnej zakładki, ale sam spinbox jest
         # na poziomie okna.
-        from log_viewer.main_window import LogViewerWindow
+
         main = None
         # Pobierz referencję do LogViewerWindow przez parent tab.
         tab = window.tabs.currentWidget()
@@ -617,14 +613,16 @@ class TestFilterContext:
         # nie zapisuje). Pobieramy tab bezpośrednio.
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20, 30]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [10, 20, 30]), 100)
         tab._filter_context_after = 2
         filter_all = tab.filter_results.expand_context(2)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {}, set(), None
+            {},
+            set(),
+            None,
         )
 
         # Po każdym trafieniu 2 następujące linie (z pominięciem trafień).
@@ -638,14 +636,16 @@ class TestFilterContext:
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = Bitset.from_indices(array.array('Q', [10]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [10]), 100)
         tab._filter_context_after = 0
         filter_all = tab.filter_results.expand_context(0)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {10: "x"}, {10}, None
+            {10: "x"},
+            {10},
+            None,
         )
         assert tab.filter_context_lines == set()
 
@@ -656,14 +656,16 @@ class TestFilterContext:
         tab.filter_active = True
         # Trafienia w 10 i 11. Kontekst dla 10 = {11, 12}, ale 11 jest trafieniem,
         # więc tylko {12}. Kontekst dla 11 = {12, 13}.
-        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 11]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [10, 11]), 100)
         tab._filter_context_after = 2
         filter_all = tab.filter_results.expand_context(2)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {}, set(), None
+            {},
+            set(),
+            None,
         )
         # 12, 13 — 11 i 10 są trafieniami, więc pominęliśmy je.
         assert set(tab._filter_all_lines) - set(tab.filter_results) == {12, 13}
@@ -673,14 +675,16 @@ class TestFilterContext:
         window, _ = app_instance
         tab = window.tabs.currentWidget()
         tab.filter_active = True
-        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [10, 20]), 100)
         tab._filter_context_after = 1
         filter_all = tab.filter_results.expand_context(1)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {}, set(), None
+            {},
+            set(),
+            None,
         )
         assert len(tab._filter_all_lines) > 1
 
@@ -698,14 +702,16 @@ class TestFilterContext:
 
         # Symulacja: filtr z 3 trafieniami (linie 10, 20, 30), kontekst=2.
         tab.filter_active = True
-        tab.filter_results = Bitset.from_indices(array.array('Q', [10, 20, 30]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [10, 20, 30]), 100)
         tab._filter_context_after = 2
         filter_all = tab.filter_results.expand_context(2)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {}, set(), None
+            {},
+            set(),
+            None,
         )
 
         # Załaduj okno — line_map powinno mieć prawdziwe numery z dziurami.
@@ -715,10 +721,7 @@ class TestFilterContext:
         # Trafienia: 10, 20, 30. Kontekst: 11,12, 21,22, 31,32.
         # Posortowane: 10, 11, 12, 20, 21, 22, 30, 31, 32.
         expected = [10, 11, 12, 20, 21, 22, 30, 31, 32]
-        assert tab.line_map == expected, (
-            f"line_map powinien mieć prawdziwe numery z dziurami, jest {tab.line_map}"
-        )
-
+        assert tab.line_map == expected, f"line_map powinien mieć prawdziwe numery z dziurami, jest {tab.line_map}"
 
     def test_filter_hit_highlight_yellow(self, app_instance):
         """Trafienia filtra mają żółte tło (highlight), kontekst szare (context).
@@ -729,14 +732,16 @@ class TestFilterContext:
 
         # Trafienie w linii 5, kontekst=2 → linie 6, 7 to kontekst.
         tab.filter_active = True
-        tab.filter_results = Bitset.from_indices(array.array('Q', [5]), 100)
+        tab.filter_results = Bitset.from_indices(array.array("Q", [5]), 100)
         tab._filter_context_after = 2
         filter_all = tab.filter_results.expand_context(2)
         tab._on_filter_done(
             (tab.filter_results._size, tab.filter_results._words, tab.filter_results._total_count),
             set(),
             (filter_all._size, filter_all._words, filter_all._total_count),
-            {}, set(), None
+            {},
+            set(),
+            None,
         )
         tab._load_window(at_line=0)
         app.processEvents()
@@ -747,18 +752,12 @@ class TestFilterContext:
 
         # Trafienie (blok 0) powinno mieć żółte tło.
         hit_has_yellow = any(
-            s.cursor.blockNumber() == 0
-            and s.format.background().color().name() == highlight_color
-            for s in sels
+            s.cursor.blockNumber() == 0 and s.format.background().color().name() == highlight_color for s in sels
         )
         assert hit_has_yellow, "Filter hit should have yellow background (highlight)"
 
         # Kontekst (bloki 1, 2) powinien mieć szare tło.
-        context_blocks = {
-            s.cursor.blockNumber()
-            for s in sels
-            if s.format.background().color().name() == context_color
-        }
+        context_blocks = {s.cursor.blockNumber() for s in sels if s.format.background().color().name() == context_color}
         assert 1 in context_blocks, "Line 1 should be context (gray background)"
         assert 2 in context_blocks, "Line 2 should be context (gray background)"
 
@@ -766,6 +765,7 @@ class TestFilterContext:
 # =============================================================================
 # Indeksowanie — postęp i anulowanie
 # =============================================================================
+
 
 class TestIndexingProgress:
     def test_parallel_emits_progress_during_indexing(self):
@@ -776,6 +776,7 @@ class TestIndexingProgress:
         Teraz dzielimy na chunki 256 MB i emitujemy po każdym.
         """
         import tempfile
+
         # Stwórz plik 150 MB (>100 MB threshold dla parallel).
         with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode="wb") as tmp:
             test_file = tmp.name
@@ -790,10 +791,12 @@ class TestIndexingProgress:
             assert actual_size > 100 * 1024 * 1024, "Test file size is too small"
 
             progress_values = []
+
             def progress_cb(pct: float):
                 progress_values.append(pct)
 
             from log_viewer.indexer import LineIndexer
+
             idx = LineIndexer(test_file, progress_cb=progress_cb, encoding="utf-8")
             try:
                 assert len(progress_values) > 0, "Missing progress readings"
@@ -809,6 +812,7 @@ class TestIndexingProgress:
     def test_indexer_worker_has_cancel_method(self):
         """IndexerWorker ma metodę cancel() i is_cancelled()."""
         from log_viewer.workers import IndexerWorker
+
         worker = IndexerWorker("/tmp/nonexistent", "utf-8", 1024 * 1024)
         assert hasattr(worker, "cancel")
         assert hasattr(worker, "is_cancelled")
@@ -820,7 +824,7 @@ class TestIndexingProgress:
         """LogTab._on_index_progress MUSI być metodą (nie lambdą) — closure
         nie jest picklowalne cross-thread, powoduje błędy QTimer w worker
         thread („Timers cannot be stopped from another thread")."""
-        from log_viewer.log_tab import LogTab
+
         # Metoda jest bound method klasy — sprawdzamy istnienie.
         assert hasattr(LogTab, "_on_index_progress"), (
             "LogTab musi mieć metodę _on_index_progress (nie lambdę) — "
@@ -828,27 +832,31 @@ class TestIndexingProgress:
         )
         # Sprawdź że to jest funkcja (metoda klasowa), a nie atrybut instancji.
         import inspect
-        assert inspect.isfunction(LogTab._on_index_progress), (
-            "_on_index_progress musi być metodą klasową"
-        )
+
+        assert inspect.isfunction(LogTab._on_index_progress), "_on_index_progress musi być metodą klasową"
 
     def test_logtab_has_reindex_slots(self):
         """LogTab ma sloty _on_reindex_finished, _on_follow_reindex_slot,
         _on_follow_reindex_clear_flag — bezpośrednio metody (nie lambdy)."""
-        from log_viewer.log_tab import LogTab
         import inspect
-        for name in ("_on_reindex_finished", "_on_follow_reindex_slot",
-                     "_on_follow_reindex_clear_flag", "_on_index_progress",
-                     "_on_index_done", "_on_index_error", "_close_index_progress"):
+
+        for name in (
+            "_on_reindex_finished",
+            "_on_follow_reindex_slot",
+            "_on_follow_reindex_clear_flag",
+            "_on_index_progress",
+            "_on_index_done",
+            "_on_index_error",
+            "_close_index_progress",
+        ):
             assert hasattr(LogTab, name), f"LogTab musi mieć metodę {name}"
-            assert inspect.isfunction(getattr(LogTab, name)), (
-                f"{name} musi być metodą klasową (nie lambdą)"
-            )
+            assert inspect.isfunction(getattr(LogTab, name)), f"{name} musi być metodą klasową (nie lambdą)"
 
     def test_parallel_indexing_can_be_cancelled(self):
         """Anulowanie ustawia cancel_event — _build_parallel przerywa."""
         import tempfile
         import threading
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode="wb") as tmp:
             test_file = tmp.name
         try:
@@ -865,15 +873,15 @@ class TestIndexingProgress:
             cancel_event.set()
 
             from log_viewer.indexer import LineIndexer
+
             idx = LineIndexer(
-                test_file, encoding="utf-8",
+                test_file,
+                encoding="utf-8",
                 cancel_event=cancel_event,
             )
             try:
                 # Po anulowaniu index powinien być pusty (tylko [IndexEntry(0,0)]).
-                assert len(idx.index) == 1, (
-                    f"Po anulowaniu indeks powinien być pusty, ma {len(idx.index)} wpisów"
-                )
+                assert len(idx.index) == 1, f"Po anulowaniu indeks powinien być pusty, ma {len(idx.index)} wpisów"
                 assert idx.line_count == 0
             finally:
                 idx.close()
@@ -889,6 +897,7 @@ class TestIndexingProgress:
         miała ~5-10 MB/s. Jeśli test trwa > 30s, coś jest nie tak."""
         import tempfile
         import time
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode="wb") as tmp:
             test_file = tmp.name
         try:
@@ -901,6 +910,7 @@ class TestIndexingProgress:
             actual_size = os.path.getsize(test_file)
 
             from log_viewer.indexer import LineIndexer
+
             t0 = time.time()
             idx = LineIndexer(test_file, encoding="utf-8")
             t1 = time.time()
@@ -913,7 +923,7 @@ class TestIndexingProgress:
                 # zoptymalizowanej wersji.
                 assert throughput > 20, (
                     f"Throughput {throughput:.1f} MB/s < 20 MB/s — regresja wydajności. "
-                    f"Czas: {elapsed:.2f}s dla {actual_size/(1024*1024):.0f} MB"
+                    f"Czas: {elapsed:.2f}s dla {actual_size / (1024 * 1024):.0f} MB"
                 )
             finally:
                 idx.close()
@@ -928,22 +938,43 @@ class TestIndexingProgress:
 # i18n — nowe klucze
 # =============================================================================
 
+
 class TestI18nKeys:
     def test_new_keys_present_in_pl(self):
         from log_viewer.i18n import I18N
-        for key in ("btn_delete_sel", "msg_bookmarks_added", "msg_bookmarks_removed",
-                    "msg_edits_removed", "msg_no_selection",
-                    "lbl_filter_context", "tt_filter_context",
-                    "btn_cancel", "dlg_index_title", "st_cancelling", "st_cancelled"):
+
+        for key in (
+            "btn_delete_sel",
+            "msg_bookmarks_added",
+            "msg_bookmarks_removed",
+            "msg_edits_removed",
+            "msg_no_selection",
+            "lbl_filter_context",
+            "tt_filter_context",
+            "btn_cancel",
+            "dlg_index_title",
+            "st_cancelling",
+            "st_cancelled",
+        ):
             assert key in I18N["pl"], f"Brak klucza {key} w PL"
             assert I18N["pl"][key], f"Pusta wartość dla {key} w PL"
 
     def test_new_keys_present_in_en(self):
         from log_viewer.i18n import I18N
-        for key in ("btn_delete_sel", "msg_bookmarks_added", "msg_bookmarks_removed",
-                    "msg_edits_removed", "msg_no_selection",
-                    "lbl_filter_context", "tt_filter_context",
-                    "btn_cancel", "dlg_index_title", "st_cancelling", "st_cancelled"):
+
+        for key in (
+            "btn_delete_sel",
+            "msg_bookmarks_added",
+            "msg_bookmarks_removed",
+            "msg_edits_removed",
+            "msg_no_selection",
+            "lbl_filter_context",
+            "tt_filter_context",
+            "btn_cancel",
+            "dlg_index_title",
+            "st_cancelling",
+            "st_cancelled",
+        ):
             assert key in I18N["en"], f"Brak klucza {key} w EN"
             assert I18N["en"][key], f"Pusta wartość dla {key} w EN"
 
@@ -974,9 +1005,5 @@ class TestSearchHighlightColor:
         window._highlight_and_scroll(0)
         sels = window.text.extraSelections()
 
-        has_orange_sel = any(
-            s.format.background().color().name() == orange_color for s in sels
-        )
+        has_orange_sel = any(s.format.background().color().name() == orange_color for s in sels)
         assert has_orange_sel, "Search result should have orange background (search_active)"
-
-

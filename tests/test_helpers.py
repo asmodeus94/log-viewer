@@ -1,13 +1,19 @@
 """Testy helpers.py — fmt_size, truncate_for_display, parse_dnd_files, is_compressed, open_maybe_compressed."""
-import os
+
 import gzip
-import tempfile
+import os
+
 import pytest
 from log_viewer.helpers import (
-    THEME_DARK, THEME_LIGHT,
-    fmt_size, truncate_for_display, parse_dnd_files, dnd_files_to_open,
-    is_compressed, open_maybe_compressed,
     MAX_DISPLAY_LINE_LENGTH,
+    THEME_DARK,
+    THEME_LIGHT,
+    dnd_files_to_open,
+    fmt_size,
+    is_compressed,
+    open_maybe_compressed,
+    parse_dnd_files,
+    truncate_for_display,
 )
 
 
@@ -67,11 +73,14 @@ class TestTruncateForDisplay:
         assert was_truncated is True
         assert result == " ... [truncated 40 chars]"
 
-    @pytest.mark.parametrize("length, max_length, should_truncate", [
-        (99, 100, False),   # Krótszy niż limit
-        (100, 100, False),  # Dokładnie równy limitowi
-        (101, 100, True),   # O jeden znak dłuższy niż limit
-    ])
+    @pytest.mark.parametrize(
+        "length, max_length, should_truncate",
+        [
+            (99, 100, False),  # Krótszy niż limit
+            (100, 100, False),  # Dokładnie równy limitowi
+            (101, 100, True),  # O jeden znak dłuższy niż limit
+        ],
+    )
     def test_boundary_lengths(self, length, max_length, should_truncate):
         text = "x" * length
         result, was_truncated = truncate_for_display(text, max_length=max_length)
@@ -101,11 +110,19 @@ class TestParseDndFiles:
 
     def test_multiple_paths(self):
         result = parse_dnd_files("/tmp/a.log /tmp/b.log /tmp/c.log")
-        assert result == [os.path.normpath("/tmp/a.log"), os.path.normpath("/tmp/b.log"), os.path.normpath("/tmp/c.log")]
+        assert result == [
+            os.path.normpath("/tmp/a.log"),
+            os.path.normpath("/tmp/b.log"),
+            os.path.normpath("/tmp/c.log"),
+        ]
 
     def test_multiple_paths_with_braces(self):
         result = parse_dnd_files("{/tmp/with space.log} /tmp/no-space.log {/tmp/another space.log}")
-        assert result == [os.path.normpath("/tmp/with space.log"), os.path.normpath("/tmp/no-space.log"), os.path.normpath("/tmp/another space.log")]
+        assert result == [
+            os.path.normpath("/tmp/with space.log"),
+            os.path.normpath("/tmp/no-space.log"),
+            os.path.normpath("/tmp/another space.log"),
+        ]
 
     def test_empty_input(self):
         assert parse_dnd_files("") == []
@@ -175,19 +192,42 @@ class TestOpenMaybeCompressed:
             content = f.read()
         assert b"line" in content
 
+
 class TestThemeDetection:
     """Testy wykrywania motywu systemowego."""
 
     def test_theme_dark_has_required_keys(self):
         """THEME_DARK ma wszystkie wymagane klucze."""
         required = [
-            "bg_main", "bg_panel", "bg_statusbar", "bg_input", "bg_selected",
-            "fg_main", "fg_dim", "fg_bright", "border", "border_light",
-            "error", "warn", "info", "debug", "accent", "accent_hover",
-            "highlight", "bookmark", "edited", "truncated", "current_line",
-            "context", "search_active",
-            "minimap_bg", "minimap_error", "minimap_warn", "minimap_info",
-            "minimap_debug", "minimap_viewport",
+            "bg_main",
+            "bg_panel",
+            "bg_statusbar",
+            "bg_input",
+            "bg_selected",
+            "fg_main",
+            "fg_dim",
+            "fg_bright",
+            "border",
+            "border_light",
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "accent",
+            "accent_hover",
+            "highlight",
+            "bookmark",
+            "edited",
+            "truncated",
+            "current_line",
+            "context",
+            "search_active",
+            "minimap_bg",
+            "minimap_error",
+            "minimap_warn",
+            "minimap_info",
+            "minimap_debug",
+            "minimap_viewport",
         ]
         for key in required:
             assert key in THEME_DARK, f"Missing key in THEME_DARK: {key}"
@@ -195,13 +235,35 @@ class TestThemeDetection:
     def test_theme_light_has_required_keys(self):
         """THEME_LIGHT ma wszystkie wymagane klucze."""
         required = [
-            "bg_main", "bg_panel", "bg_statusbar", "bg_input", "bg_selected",
-            "fg_main", "fg_dim", "fg_bright", "border", "border_light",
-            "error", "warn", "info", "debug", "accent", "accent_hover",
-            "highlight", "bookmark", "edited", "truncated", "current_line",
-            "context", "search_active",
-            "minimap_bg", "minimap_error", "minimap_warn", "minimap_info",
-            "minimap_debug", "minimap_viewport",
+            "bg_main",
+            "bg_panel",
+            "bg_statusbar",
+            "bg_input",
+            "bg_selected",
+            "fg_main",
+            "fg_dim",
+            "fg_bright",
+            "border",
+            "border_light",
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "accent",
+            "accent_hover",
+            "highlight",
+            "bookmark",
+            "edited",
+            "truncated",
+            "current_line",
+            "context",
+            "search_active",
+            "minimap_bg",
+            "minimap_error",
+            "minimap_warn",
+            "minimap_info",
+            "minimap_debug",
+            "minimap_viewport",
         ]
         for key in required:
             assert key in THEME_LIGHT, f"Missing key in THEME_LIGHT: {key}"
@@ -229,6 +291,7 @@ class TestThemeDetection:
     def test_theme_colors_are_valid_hex(self):
         """Wszystkie kolory w obu motywach są poprawnymi hex."""
         import re
+
         hex_pattern = re.compile(r"^#[0-9a-fA-F]{6,8}$")
         for theme_name, theme in [("DARK", THEME_DARK), ("LIGHT", THEME_LIGHT)]:
             for key, color in theme.items():

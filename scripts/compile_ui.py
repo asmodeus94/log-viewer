@@ -3,7 +3,8 @@ import os
 import subprocess
 import sys
 
-def main():
+
+def main() -> None:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     ui_dir = os.path.join(repo_root, "log_viewer", "ui")
 
@@ -39,10 +40,7 @@ def main():
                 if not os.path.isfile(uic_cmd):
                     uic_cmd = "pyside6-uic"
 
-                subprocess.run(
-                    [uic_cmd, input_path, "-o", output_path],
-                    check=True
-                )
+                subprocess.run([uic_cmd, input_path, "-o", output_path], check=True)
                 compiled_any = True
             except subprocess.CalledProcessError as e:
                 print(f"Error compiling {ui_file}: {e}")
@@ -55,6 +53,7 @@ def main():
         print("UI compilation complete.")
     else:
         print("All UI files are up to date.")
+
 
 if __name__ == "__main__":
     main()

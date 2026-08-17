@@ -1,10 +1,8 @@
 """Internacjonalizacja — słownik PL/EN."""
 
 from __future__ import annotations
-from typing import Dict
 
-
-I18N: Dict[str, Dict[str, str]] = {
+I18N: dict[str, dict[str, str]] = {
     "pl": {
         "app_title": "log-viewer",
         "menu_file": "Plik",
@@ -14,7 +12,6 @@ I18N: Dict[str, Dict[str, str]] = {
         "menu_goto": "Idź do",
         "menu_help": "Pomoc",
         "mi_open": "Otwórz…",
-        "mi_reload": "Przeładuj",
         "mi_save": "Zapisz zmiany…",
         "mi_save_as": "Zapisz jako…",
         "mi_export": "Eksportuj widok…",
@@ -126,14 +123,12 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_dnd_no_files": "Przeciągnięto plik(i), ale żaden nie istnieje lub nie jest odczytywalny.",
         "msg_dnd_opened": "Otwarto plik przez drag&drop: {path}",
         "msg_dnd_loading": "Ładowanie plików {n}...",
-
         "msg_dnd_multiple": "Przeciągnięto {n:,} plików. Który otworzyć? (1-{n:,})",
         "col_line": "Linia",
         "lbl_bookmarks": "Zakładki",
         "lbl_edits": "Edycje w buforze",
         "btn_close": "Zamknij",
         "btn_ok": "OK",
-        "btn_cancel": "Anuluj",
         "btn_apply": "Zastosuj",
         "btn_save": "Zapisz",
         "btn_reformat": "Przeformatuj",
@@ -155,7 +150,6 @@ I18N: Dict[str, Dict[str, str]] = {
         "menu_goto": "Go to",
         "menu_help": "Help",
         "mi_open": "Open…",
-        "mi_reload": "Reload",
         "mi_save": "Save changes…",
         "mi_save_as": "Save As…",
         "mi_export": "Export view…",
@@ -267,14 +261,12 @@ I18N: Dict[str, Dict[str, str]] = {
         "msg_dnd_no_files": "Dropped file(s), but none exist or are readable.",
         "msg_dnd_opened": "Opened file via drag&drop: {path}",
         "msg_dnd_loading": "Loading files {n}...",
-
         "msg_dnd_multiple": "Dropped {n:,} files. Which one to open? (1-{n:,})",
         "col_line": "Line",
         "lbl_bookmarks": "Bookmarks",
         "lbl_edits": "Edits in buffer",
         "btn_close": "Close",
         "btn_ok": "OK",
-        "btn_cancel": "Cancel",
         "btn_apply": "Apply",
         "btn_save": "Save",
         "btn_reformat": "Reformat",

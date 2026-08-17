@@ -1,10 +1,12 @@
 """Testy indexer.py — LineIndexer, parallel/single indexing, read_lines."""
+
+import gzip
 import os
 import time
-import gzip
-import pytest
 from unittest.mock import patch
-from log_viewer.indexer import LineIndexer, IndexEntry, _indexer_worker_chunk, open_maybe_compressed
+
+import pytest
+from log_viewer.indexer import IndexEntry, LineIndexer, _indexer_worker_chunk, open_maybe_compressed
 
 
 class TestLineIndexerBasic:
@@ -49,6 +51,7 @@ class TestLineIndexerBasic:
 
     def test_empty_file(self):
         import tempfile
+
         path = tempfile.mktemp(suffix=".log")
         with open(path, "wb"):
             pass
@@ -67,14 +70,15 @@ class TestLineIndexerBasic:
 class TestLineIndexerCompression:
     def test_gz(self):
         import tempfile
+
         path = tempfile.mktemp(suffix=".log.gz")
         try:
-            N = 1000
+            n_lines = 1000
             with gzip.open(path, "wb") as f:
-                for i in range(N):
+                for i in range(n_lines):
                     f.write(f"line {i} [INFO] hello\n".encode())
             idx = LineIndexer(path)
-            assert idx.line_count == N
+            assert idx.line_count == n_lines
             assert idx.is_compressed is True
             lines = idx.read_lines(100, 2)
             assert len(lines) == 2
@@ -93,7 +97,7 @@ class TestLineIndexerEncoding:
         # Nadpisz z polskimi znakami
         with open(path, "wb") as f:
             for i in range(100):
-                f.write(f"line {i} zażółć hello\n".encode("utf-8"))
+                f.write(f"line {i} zażółć hello\n".encode())
         idx = LineIndexer(path, encoding="utf-8")
         lines = idx.read_lines(0, 2)
         assert "zażółć" in lines[0][1]
@@ -103,7 +107,7 @@ class TestLineIndexerEncoding:
         path = temp_log_file(num_lines=100, content=None)
         with open(path, "wb") as f:
             for i in range(100):
-                f.write(f"line {i} zażółć hello\n".encode("utf-8"))
+                f.write(f"line {i} zażółć hello\n".encode())
         idx = LineIndexer(path, encoding="latin-1")
         lines = idx.read_lines(0, 2)
         assert "hello" in lines[0][1]
@@ -114,24 +118,24 @@ class TestLineIndexerEncoding:
 class TestLineIndexerParallel:
     def test_parallel_correctness(self, temp_log_file):
         """Parallel indexing daje poprawny line_count i read_lines."""
-        N = 1_000_000  # ~100 MB
-        path = temp_log_file(num_lines=N)
+        n_lines = 1_000_000  # ~100 MB
+        path = temp_log_file(num_lines=n_lines)
         size = os.path.getsize(path)
         if size <= 100 * 1024 * 1024:
             pytest.skip("File too small for parallel threshold")
 
         idx = LineIndexer(path)  # użyje parallel
-        assert idx.line_count == N
+        assert idx.line_count == n_lines
 
         # Single-thread (wymuś)
         idx2 = LineIndexer(path)
         idx2.index = [IndexEntry(0, 0)]
         idx2._last_indexed_offset = 0
         idx2._build_single()
-        assert idx2.line_count == N
+        assert idx2.line_count == n_lines
 
         # Porównaj read_lines
-        for target in [0, 1000, N // 2, N - 1]:
+        for target in [0, 1000, n_lines // 2, n_lines - 1]:
             lines_p = idx.read_lines(target, 3)
             lines_s = idx2.read_lines(target, 3)
             assert lines_p == lines_s, f"Mismatch at line {target}"
@@ -149,6 +153,7 @@ class TestLineIndexerParallel:
     def test_compressed_uses_single(self):
         """Skompresowane pliki używają single-thread."""
         import tempfile
+
         path = tempfile.mktemp(suffix=".log.gz")
         try:
             with gzip.open(path, "wb") as f:
@@ -218,6 +223,7 @@ class TestLineIndexerFileDescriptorCache:
         # Po close, _file_cache powinno być None
         assert idx._file_cache is None
 
+
 class TestChunkedWorker:
     """Testy _indexer_worker_chunk z chunkowanym odczytem."""
 
@@ -239,7 +245,9 @@ class TestChunkedWorker:
         size = os.path.getsize(path)
         # Podziel na 4 chunki
         chunk_size = size // 4
-        ranges = [(i * chunk_size, (i + 1) * chunk_size if i < 3 else size, str(path), 1024 * 1024, i) for i in range(4)]
+        ranges = [
+            (i * chunk_size, (i + 1) * chunk_size if i < 3 else size, str(path), 1024 * 1024, i) for i in range(4)
+        ]
         results = [_indexer_worker_chunk(r) for r in ranges]
         total = sum(r[0] for r in results)
         assert total == 50000
@@ -247,6 +255,7 @@ class TestChunkedWorker:
     def test_worker_handles_large_lines(self):
         """Worker radzi sobie z bardzo długimi liniami (>4MB chunk)."""
         import tempfile
+
         path = tempfile.mktemp(suffix=".log")
         try:
             with open(path, "wb") as f:
@@ -287,6 +296,7 @@ class TestFreezeSupport:
     def test_freeze_support_importable(self):
         """multiprocessing.freeze_support jest dostępne i można je wywołać."""
         import multiprocessing
+
         # freeze_support() powinno być no-op gdy nie jest frozen exe
         multiprocessing.freeze_support()
         # Nie powinno crashować
@@ -298,6 +308,7 @@ class TestFreezeSupport:
         # Jeśli plik > 100MB, użyje parallel. Sprawdź że nie crashuje.
         assert idx.line_count == 50000
         idx.close()
+
 
 class TestReadSpecificLines:
     def test_read_specific_lines_sparse(self, temp_log_file):
@@ -329,7 +340,7 @@ class TestReadSpecificLines:
         assert len(lines) == 5
         for i, (ln, text) in enumerate(lines):
             assert ln == 100 + i
-            assert f"line     {100+i}" in text
+            assert f"line     {100 + i}" in text
 
         idx.close()
 
@@ -371,10 +382,9 @@ class TestReadSpecificLines:
 
         idx.close()
 
-
     def test_read_specific_lines_performance(self, temp_log_file):
         """Test wydajnościowy dla read_specific_lines sprawdzający limit czasu wykonywania dla bardzo rozproszonych danych."""
-        import time
+
         path = temp_log_file(num_lines=100000)
         idx = LineIndexer(path)
 

@@ -1,5 +1,7 @@
 """Testy formatters.py — format_json, format_xml, format_log."""
-from log_viewer.formatters import format_json, format_xml, format_log
+
+from log_viewer.formatters import format_json, format_log, format_xml
+
 
 class TestFormatJson:
     def test_valid_json(self):
@@ -31,19 +33,19 @@ class TestFormatJson:
 
 class TestFormatXml:
     def test_valid_xml(self):
-        input_text = '<root><key>value</key></root>'
+        input_text = "<root><key>value</key></root>"
         expected_output = '<?xml version="1.0" ?>\n<root>\n    <key>value</key>\n</root>'
         assert format_xml(input_text) == expected_output
 
     def test_valid_xml_with_prefix_and_suffix(self):
-        input_text = '2023-10-10 INFO: <root><key>value</key></root> [END]'
+        input_text = "2023-10-10 INFO: <root><key>value</key></root> [END]"
         expected_output = '2023-10-10 INFO:\n<?xml version="1.0" ?>\n<root>\n    <key>value</key>\n</root>\n[END]'
         assert format_xml(input_text) == expected_output
 
     def test_invalid_xml(self):
         # Tutaj nie możemy użyć tagu, który sam w sobie jest prawidłowy np. <key>value</key>
         # wewnątrz nieprawidłowego, bo nasz parser wyłapie poprawny wewnętrzny tag i go sformatuje.
-        input_text = '<root><key>value</root>'
+        input_text = "<root><key>value</root>"
         assert format_xml(input_text) == input_text
 
     def test_empty_string(self):
@@ -61,7 +63,7 @@ class TestFormatLog:
         assert format_log(input_text, "JSON") == expected_output
 
     def test_existing_formatter_xml(self):
-        input_text = '<test/>'
+        input_text = "<test/>"
         expected_output = '<?xml version="1.0" ?>\n<test/>'
         assert format_log(input_text, "XML") == expected_output
 

@@ -2,44 +2,52 @@
 
 from __future__ import annotations
 
-import sys
 import bisect
+import multiprocessing
+import multiprocessing.sharedctypes
+import sys
 import threading
 import time
-import multiprocessing
 import typing
-from pathlib import Path
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Tuple, Union
+from pathlib import Path
+from typing import Any, overload
 
 from .helpers import (
-    INDEX_CHUNK_BYTES, INDEX_INTERVAL_BYTES, DEFAULT_ENCODING,
-    is_compressed, open_maybe_compressed,
+    DEFAULT_ENCODING,
+    INDEX_CHUNK_BYTES,
+    INDEX_INTERVAL_BYTES,
+    is_compressed,
+    open_maybe_compressed,
 )
 
 
 @dataclass
 class IndexEntry:
     __slots__ = ("offset", "line")
-    offset: int   # byte offset początku tej linii (0-indexed)
-    line: int     # numer linii (0-indexed)
+    offset: int  # byte offset początku tej linii (0-indexed)
+    line: int  # numer linii (0-indexed)
 
 
-_shared_progress_bytes = None
+_shared_progress_bytes: multiprocessing.sharedctypes.Synchronized[int] | Any = None
 
 
-def _init_worker(progress_val):
+def _init_worker(progress_val: multiprocessing.sharedctypes.Synchronized[int] | Any) -> None:
     global _shared_progress_bytes
     _shared_progress_bytes = progress_val
 
 
-def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, List[Tuple[int, int]], int]:
+_INDEXER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
+
+
+def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, list[tuple[int, int]], int]:
     """
     Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
 
     Optymalizacje wydajności:
       1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
-      2. Wykorzystanie większych fragmentów odczytu (`READ_CHUNK` = 32 MB) dla lepszej lokalności pamięci podręcznej.
+      2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
       3. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
       4. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
@@ -48,19 +56,17 @@ def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, Li
     """
     start, end, path_str, interval, chunk_id = args
     try:
-        global _shared_progress_bytes
         line_count = 0
-        index_entries: List[Tuple[int, int]] = []
+        index_entries: list[tuple[int, int]] = []
         last_idx = start  # ostatni offset gdzie zapisaliśmy index entry
         local_line = 0
-        READ_CHUNK = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
         carry = b""
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
         with open(path_str, "rb", buffering=1024 * 1024) as f:
             f.seek(start)
             while bytes_processed < (end - start):
-                to_read = min(READ_CHUNK, (end - start) - bytes_processed)
+                to_read = min(_INDEXER_READ_CHUNK_SIZE, (end - start) - bytes_processed)
                 chunk = f.read(to_read)
                 if not chunk:
                     break
@@ -73,10 +79,6 @@ def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, Li
                         _shared_progress_bytes.value += chunk_len
 
                 # Połącz carry z poprzedniego chunka z nowym chunkiem.
-                # carry to niepełna ostatnia linia z poprzedniego chunku TEGO
-                # workera. Operujemy na `data` = carry + chunk, ale pamiętaj
-                # że bajty z carry były już policzone w poprzednim chunku —
-                # więc liczymy newline'e TYLKO w nowych bajtach (chunk).
                 if carry:
                     data = carry + chunk
                 else:
@@ -84,17 +86,13 @@ def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, Li
                 data_len = len(data)
                 carry_len = data_len - chunk_len  # ile bajtów to carry
 
-                # === OPTYMALIZACJA 1: count() zamiast pętli find() ===
-                # Policz newline'e TYLKO w nowych bajtach (chunk, nie carry).
-                # carry był już policzony w poprzednim chunku.
-                # Ale uwaga: newline na granicy carry|chunk należy do chunk
-                # (bo liczymy go gdy wpada do nowego zakresu).
+                # Policz newline'e w nowo wczytanych bajtach (chunk)
                 nl_count = chunk.count(b"\n")
 
                 line_count += nl_count
                 local_line += nl_count
 
-                # === OPTYMALIZACJA 2: find() tylko dla index_entries ===
+                # Znajdowanie pozycji dla wpisów indeksu w wyznaczonych interwałach
                 current_end_offset = start + bytes_processed
                 while current_end_offset - last_idx >= interval:
                     target_offset = last_idx + interval
@@ -114,41 +112,59 @@ def _indexer_worker_chunk(args: Tuple[int, int, str, int, int]) -> Tuple[int, Li
                     index_entries.append((offset, entry_local_line))
                     last_idx = offset
 
-                # Zachowaj niepełną ostatnią linię jako carry dla następnego chunku.
+                # Zachowaj niepełną ostatnią linię jako carry dla następnego chunku
                 last_nl = data.rfind(b"\n")
                 if last_nl != -1:
-                    carry = data[last_nl + 1:]
+                    carry = data[last_nl + 1 :]
                 else:
                     carry = data
 
-        return (line_count, index_entries, chunk_id)
-    except Exception as e:
+        return line_count, index_entries, chunk_id
+    except (OSError, ValueError, RuntimeError) as e:
         print(f"Warning: indexer worker {chunk_id} failed: {e}", file=sys.stderr)
-        return (0, [], chunk_id)
+        return 0, [], chunk_id
 
 
-class _IndexLineProxy:
-    """Klasa pomocnicza dla modułu bisect symulująca listę samych linii (Python 3.8+ kompatybilność)."""
+class _IndexLineProxy(Sequence[int]):
+    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych linii bez alokacji domknięć (closures)."""
+
     __slots__ = ("_data",)
 
-    def __init__(self, data: List[IndexEntry]):
+    def __init__(self, data: list[IndexEntry]) -> None:
         self._data = data
 
-    def __getitem__(self, idx: int) -> int:
+    @overload
+    def __getitem__(self, idx: int) -> int: ...
+
+    @overload
+    def __getitem__(self, idx: slice) -> Sequence[int]: ...
+
+    def __getitem__(self, idx: int | slice) -> int | Sequence[int]:
+        if isinstance(idx, slice):
+            return [e.line for e in self._data[idx]]
         return self._data[idx].line
 
     def __len__(self) -> int:
         return len(self._data)
 
 
-class _IndexOffsetProxy:
-    """Klasa pomocnicza dla modułu bisect symulująca listę samych przesunięć (Python 3.8+ kompatybilność)."""
+class _IndexOffsetProxy(Sequence[int]):
+    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych przesunięć bez alokacji domknięć (closures)."""
+
     __slots__ = ("_data",)
 
-    def __init__(self, data: List[IndexEntry]):
+    def __init__(self, data: list[IndexEntry]) -> None:
         self._data = data
 
-    def __getitem__(self, idx: int) -> int:
+    @overload
+    def __getitem__(self, idx: int) -> int: ...
+
+    @overload
+    def __getitem__(self, idx: slice) -> Sequence[int]: ...
+
+    def __getitem__(self, idx: int | slice) -> int | Sequence[int]:
+        if isinstance(idx, slice):
+            return [e.offset for e in self._data[idx]]
         return self._data[idx].offset
 
     def __len__(self) -> int:
@@ -165,20 +181,24 @@ class LineIndexer:
     Wspiera konfigurowalne kodowanie.
     """
 
-    def __init__(self, path: Union[str, Path], progress_cb: Optional[Callable[[float], None]] = None,
-                 encoding: str = DEFAULT_ENCODING,
-                 index_interval_bytes: Optional[int] = None,
-                 cancel_event: Optional["threading.Event"] = None) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        progress_cb: Callable[[float], None] | None = None,
+        encoding: str = DEFAULT_ENCODING,
+        index_interval_bytes: int | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         self.path: Path = Path(path)
         self.encoding: str = encoding
         self.is_compressed: bool = is_compressed(str(self.path))
         self.index_interval_bytes = index_interval_bytes if index_interval_bytes is not None else INDEX_INTERVAL_BYTES
         self.size: int = 0
         self.line_count: int = 0
-        self.index: List[IndexEntry] = [IndexEntry(0, 0)]
+        self.index: list[IndexEntry] = [IndexEntry(0, 0)]
         self._progress_cb = progress_cb
         self._cancel_event = cancel_event  # None = nie można anulować
-        self._file_cache: Optional[object] = None
+        self._file_cache: typing.IO[bytes] | None = None
         self._file_lock = threading.Lock()
         self._last_indexed_offset = 0
         self._build()
@@ -186,7 +206,7 @@ class LineIndexer:
     def __del__(self) -> None:
         try:
             self.close()
-        except Exception:
+        except (OSError, RuntimeError, AttributeError):
             pass
 
     def close(self) -> None:
@@ -194,14 +214,16 @@ class LineIndexer:
             if self._file_cache is not None:
                 try:
                     self._file_cache.close()
-                except Exception:
+                except OSError:
                     pass
                 self._file_cache = None
 
-    def _get_file(self) -> "typing.IO[bytes]":
+    def _get_file(self) -> typing.IO[bytes]:
         if self._file_cache is None:
             self._file_cache = open_maybe_compressed(str(self.path), "rb")
-        return self._file_cache
+        file_obj = self._file_cache
+        assert file_obj is not None
+        return file_obj
 
     def _build(self) -> None:
         try:
@@ -213,7 +235,7 @@ class LineIndexer:
             try:
                 self._build_parallel()
                 return
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 print(f"Warning: parallel indexing failed ({e}), falling back to single-thread", file=sys.stderr)
                 self.index = [IndexEntry(0, 0)]
                 self._last_indexed_offset = 0
@@ -226,9 +248,6 @@ class LineIndexer:
         Dzieli plik na chunki dla workerów proporcjonalnie do ich ilości.
         """
         n_workers = max(2, multiprocessing.cpu_count())
-        # Mniej chunków przyspiesza wykonanie bez narzutu na inicjalizację workerów,
-        # bo płynny postęp jest teraz raportowany z wnętrza chunka na bieżąco.
-        # Minimalna liczba chunków = n_workers * 2 aby równo rozłożyć pracę.
         n_chunks = n_workers * 2
         chunk_size = self.size // n_chunks
         ranges = []
@@ -242,15 +261,13 @@ class LineIndexer:
             self._build_single()
             return
 
-        shared_progress = multiprocessing.Value('Q', 0)
-        results = []
+        shared_progress = multiprocessing.Value("Q", 0)
+        results: list[tuple[int, list[tuple[int, int]], int]] = []
         cancelled = False
 
         with multiprocessing.Pool(n_workers, initializer=_init_worker, initargs=(shared_progress,)) as pool:
-            # Użyj map_async zamiast imap_unordered, by móc aktywnie monitorować postęp
             result_async = pool.map_async(_indexer_worker_chunk, ranges)
 
-            # Pętla nasłuchująca w czasie rzeczywistym
             while not result_async.ready():
                 if self._cancel_event is not None and self._cancel_event.is_set():
                     cancelled = True
@@ -259,7 +276,7 @@ class LineIndexer:
 
                 if self._progress_cb:
                     bytes_done = shared_progress.value
-                    pct = (bytes_done / self.size) * 100.0
+                    pct = (bytes_done / self.size) * 100.0 if self.size else 0.0
                     if pct > 99.9:
                         pct = 99.9
                     self._progress_cb(pct)
@@ -270,8 +287,7 @@ class LineIndexer:
                 results = result_async.get()
 
         if cancelled:
-            # Nie buduj indeksu — wróć z pustym. Worker sprawdzi cancel_event
-            # i wyemituje error("cancelled").
+            # Nie buduj indeksu — wróć z pustym. Worker sprawdzi cancel_event i wyemituje error("cancelled").
             self.index = [IndexEntry(0, 0)]
             self.line_count = 0
             self._last_indexed_offset = 0
@@ -279,7 +295,7 @@ class LineIndexer:
 
         results.sort(key=lambda x: x[2])
         total_lines = 0
-        full_index = [IndexEntry(0, 0)]
+        full_index: list[IndexEntry] = [IndexEntry(0, 0)]
         last_indexed_offset = 0
         for line_count, index_entries, _chunk_id in results:
             line_offset = total_lines
@@ -335,8 +351,7 @@ class LineIndexer:
         self.line_count = line_num
         self._last_indexed_offset = last_indexed_offset
 
-    def update_from(self, new_size: int,
-                    progress_cb: Optional[Callable[[float], None]] = None) -> int:
+    def update_from(self, new_size: int, progress_cb: Callable[[float], None] | None = None) -> int:
         """Inkrementalna aktualizacja indeksu. Dla skompresowanych zwraca 0."""
         if new_size <= self.size:
             return 0
@@ -383,7 +398,7 @@ class LineIndexer:
             if self._file_cache is not None:
                 try:
                     self._file_cache.close()
-                except Exception:
+                except OSError:
                     pass
                 self._file_cache = None
         new_lines = line_num - self.line_count
@@ -392,27 +407,27 @@ class LineIndexer:
         self.size = new_size
         return new_lines
 
-    def offset_of_line(self, target_line: int) -> Optional[int]:
+    def offset_of_line(self, target_line: int) -> int | None:
         if target_line < 0:
             target_line = 0
         if target_line >= self.line_count:
             return None
         proxy = _IndexLineProxy(self.index)
         idx = bisect.bisect_right(proxy, target_line) - 1
-        start = self.index[max(0, idx)]
+        start: IndexEntry = self.index[max(0, idx)]
 
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
-            current = start.line
+            current: int = start.line
             while current < target_line:
-                line = f.readline()
-                if not line:
+                skip_bytes = f.readline()
+                if not skip_bytes:
                     return None
                 current += 1
             return f.tell()
 
-    def read_specific_lines(self, target_lines: List[int]) -> List[Tuple[int, str]]:
+    def read_specific_lines(self, target_lines: list[int]) -> list[tuple[int, str]]:
         """
         Zoptymalizowana metoda do wczytywania wielu konkretnych (potencjalnie rzadkich) linii naraz.
         Zamiast szukać offsetu i przewijać plik dla każdej małej grupy linii z osobna (co psuje wydajność),
@@ -422,13 +437,13 @@ class LineIndexer:
             return []
 
         # Usunięcie duplikatów i posortowanie ułatwia sekwencyjny odczyt
-        targets = sorted(list(set(target_lines)))
-        out: List[Tuple[int, str]] = []
+        targets = sorted(set(target_lines))
+        out: list[tuple[int, str]] = []
         proxy = _IndexLineProxy(self.index)
 
         with self._file_lock:
             f = self._get_file()
-            current_line = -1
+            current_line: int = -1
 
             for target_line in targets:
                 if target_line < 0 or target_line >= self.line_count:
@@ -436,7 +451,7 @@ class LineIndexer:
 
                 # Znajdź najbliższy wpis w indeksie przed pożądaną linią
                 idx = bisect.bisect_right(proxy, target_line) - 1
-                start = self.index[max(0, idx)]
+                start: IndexEntry = self.index[max(0, idx)]
 
                 # Jeśli nasza aktualna pozycja (current_line) jest już bliżej celu niż znacznik z indeksu,
                 # to nie cofamy się (nie robimy f.seek), tylko kontynuujemy czytanie do przodu.
@@ -449,8 +464,8 @@ class LineIndexer:
 
                 # Przewijaj linie do przodu dopóki nie trafisz w target_line
                 while current_line < target_line:
-                    line = f.readline()
-                    if not line:
+                    skip_bytes = f.readline()
+                    if not skip_bytes:
                         break
                     current_line += 1
 
@@ -460,7 +475,7 @@ class LineIndexer:
                         break
                     try:
                         text = raw.decode(self.encoding, errors="replace")
-                    except Exception:
+                    except (UnicodeError, LookupError, ValueError, TypeError):
                         text = repr(raw)
                     if text.endswith("\r\n"):
                         text = text[:-2]
@@ -471,7 +486,7 @@ class LineIndexer:
 
         return out
 
-    def read_lines(self, start_line: int, count: int) -> List[Tuple[int, str]]:
+    def read_lines(self, start_line: int, count: int) -> list[tuple[int, str]]:
         if start_line < 0:
             start_line = 0
         if start_line >= self.line_count:
@@ -479,7 +494,7 @@ class LineIndexer:
         offset = self.offset_of_line(start_line)
         if offset is None:
             return []
-        out: List[Tuple[int, str]] = []
+        out: list[tuple[int, str]] = []
         with self._file_lock:
             f = self._get_file()
             f.seek(offset)
@@ -489,7 +504,7 @@ class LineIndexer:
                     break
                 try:
                     text = raw.decode(self.encoding, errors="replace")
-                except Exception:
+                except (UnicodeError, LookupError, ValueError, TypeError):
                     text = repr(raw)
                 if text.endswith("\r\n"):
                     text = text[:-2]
@@ -498,7 +513,7 @@ class LineIndexer:
                 out.append((start_line + i, text))
         return out
 
-    def line_at_byte_offset(self, byte_offset: int) -> Tuple[int, int]:
+    def line_at_byte_offset(self, byte_offset: int) -> tuple[int, int]:
         if byte_offset < 0:
             byte_offset = 0
         if byte_offset > self.size:
@@ -517,12 +532,12 @@ class LineIndexer:
                 if not line:
                     break
                 if current_offset <= byte_offset < current_offset + len(line):
-                    return (current_line, current_offset)
+                    return current_line, current_offset
                 current_offset += len(line)
                 current_line += 1
-            return (current_line, current_offset)
+            return current_line, current_offset
 
-    def read_tail(self, max_lines: int) -> List[Tuple[int, str]]:
+    def read_tail(self, max_lines: int) -> list[tuple[int, str]]:
         if self.line_count == 0:
             return []
         start_line = max(0, self.line_count - max_lines)
