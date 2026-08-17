@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import array
+import os
 import re
 from typing import Any
 
@@ -38,6 +39,16 @@ class FilterController(QObject):
         if hasattr(self.tab.main_window, "filter_context_spin"):
             self.tab.filter_context_after = int(self.tab.main_window.filter_context_spin.value())
 
+        self.tab.filter_pattern = pattern
+        self.tab.filter_use_regex = use_regex
+        self.tab.filter_case_sensitive = case
+        self.tab.filter_negate = negate
+        self.tab.tb_filter_text = pattern
+        self.tab.tb_filter_regex = use_regex
+        self.tab.tb_filter_case = case
+        self.tab.tb_filter_negate = negate
+        self.tab.tb_filter_context = self.tab.filter_context_after
+
         if use_regex:
             try:
                 flags = re.MULTILINE if case else (re.IGNORECASE | re.MULTILINE)
@@ -60,8 +71,21 @@ class FilterController(QObject):
                 pass
             self.tab.filter_thread = None
 
-        if self.tab.filter_engine is None or self.tab.filter_engine.path != self.tab.file_path:
-            self.tab.filter_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
+        file_path = self.tab.file_path
+        indexer = self.tab.indexer
+        if not file_path or not indexer:
+            QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+            return
+
+        try:
+            current_size = os.stat(file_path).st_size
+            if current_size > indexer.size:
+                indexer.update_from(current_size)
+                self.tab.last_file_size = current_size
+        except OSError:
+            pass
+
+        self.tab.filter_engine = FilterEngine(file_path, indexer)
         self.tab.filter_active = True
         self.tab.filter_results = array.array("Q")
 
@@ -163,7 +187,16 @@ class FilterController(QObject):
             self.tab.filter_hit_lines = set()
         self.tab.filter_all_lines = array.array("Q")
         self.tab.filter_context_after = 0
-        if not silent:
+        self.tab.filter_pattern = ""
+        self.tab.filter_use_regex = False
+        self.tab.filter_case_sensitive = False
+        self.tab.filter_negate = False
+        self.tab.tb_filter_text = ""
+        self.tab.tb_filter_regex = False
+        self.tab.tb_filter_case = False
+        self.tab.tb_filter_negate = False
+        self.tab.tb_filter_context = 0
+        if not silent and self.tab.main_window.tabs.currentWidget() == self.tab:
             self.tab.main_window.filter_entry.clear()
         if was_active and self.tab.indexer:
             self.tab.load_window(at_line=0, force_reload=True)

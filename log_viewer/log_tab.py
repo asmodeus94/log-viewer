@@ -113,6 +113,10 @@ class LogTab(QWidget):
 
         # Filtr
         self.filter_active: bool = False
+        self.filter_pattern: str = ""
+        self.filter_use_regex: bool = False
+        self.filter_case_sensitive: bool = False
+        self.filter_negate: bool = False
         self.filter_results: Bitset | None = None
         self._filter_hit_text_map: dict[int, str] | None = {}
         self._filter_hit_lines: set[int] | None = set()
@@ -122,6 +126,7 @@ class LogTab(QWidget):
         # Ile linii kontekstu po każdym trafieniu (0 = wyłączone).
         self._filter_context_after: int = 0
         self._pending_reload_filter: bool = False
+        self.needs_follow_refresh: bool = False
 
         # Wyszukiwanie
         self.search_pattern: str = ""

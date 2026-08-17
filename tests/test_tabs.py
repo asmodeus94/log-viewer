@@ -190,3 +190,82 @@ def test_tab_middle_click_closes_tab(temp_log_file):
 
     # Karta powinna zostać zamknięta
     assert window.tabs.count() == 0
+
+
+def test_per_tab_filter_isolation(tmp_path, qtbot):
+    """Weryfikuje, że każda karta utrzymuje w pełni niezależny stan filtra i parametrów."""
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=str(tmp_path / "config.json"))
+    window = LogViewerWindow(config=cfg)
+
+    file1 = tmp_path / "app1.log"
+    file2 = tmp_path / "app2.log"
+
+    lines1 = [f"F1 Line {i} ERR-error" if i % 10 == 0 else f"F1 Line {i} info" for i in range(50)]
+    lines2 = [f"F2 Line {i} WARN-warning" if i % 5 == 0 else f"F2 Line {i} info" for i in range(50)]
+
+    file1.write_text("\n".join(lines1) + "\n", encoding="utf-8")
+    file2.write_text("\n".join(lines2) + "\n", encoding="utf-8")
+
+    tab1 = window.open_file_in_tab(str(file1))
+    tab2 = window.open_file_in_tab(str(file2))
+
+    assert tab1 is not None and tab2 is not None
+
+    # Poczekaj na załadowanie obu plików
+    qtbot.waitUntil(lambda: tab1.indexer is not None and tab2.indexer is not None, timeout=3000)
+
+    # 1. Zastosuj filtr ERR- na tab1 z kontekstem 2
+    window.tabs.setCurrentWidget(tab1)
+    window.filter_entry.setText("ERR-")
+    window.filter_context_spin.setValue(2)
+    tab1.filter_controller.cmd_apply_filter()
+
+    qtbot.waitUntil(
+        lambda: tab1.filter_active and tab1.filter_results is not None and len(tab1.filter_results) > 0, timeout=3000
+    )
+
+    assert tab1.filter_pattern == "ERR-"
+    assert tab1.filter_context_after == 2
+    assert len(tab1.filter_results) == 5  # linie: 0, 10, 20, 30, 40
+
+    # 2. Zastosuj filtr WARN- na tab2 z kontekstem 0
+    window.tabs.setCurrentWidget(tab2)
+    window.filter_entry.setText("WARN-")
+    window.filter_context_spin.setValue(0)
+    tab2.filter_controller.cmd_apply_filter()
+
+    qtbot.waitUntil(
+        lambda: tab2.filter_active and tab2.filter_results is not None and len(tab2.filter_results) > 0, timeout=3000
+    )
+
+    assert tab2.filter_pattern == "WARN-"
+    assert tab2.filter_context_after == 0
+    assert len(tab2.filter_results) == 10  # linie: 0, 5, 10, 15, 20, 25, 30, 35, 40, 45
+
+    # 3. Przełącz na tab1 — sprawdź toolbar i stan tab1
+    window.tabs.setCurrentWidget(tab1)
+    assert window.filter_entry.text() == "ERR-"
+    assert window.filter_context_spin.value() == 2
+    assert tab1.filter_active is True
+    assert tab1.filter_pattern == "ERR-"
+    assert len(tab1.filter_results) == 5
+
+    # 4. Przełącz na tab2 — sprawdź toolbar i stan tab2
+    window.tabs.setCurrentWidget(tab2)
+    assert window.filter_entry.text() == "WARN-"
+    assert window.filter_context_spin.value() == 0
+    assert tab2.filter_active is True
+    assert tab2.filter_pattern == "WARN-"
+    assert len(tab2.filter_results) == 10
+
+    # 5. Wyczyść filtr na tab2 — tab1 powinien pozostać przefiltrowany
+    tab2.filter_controller.cmd_clear_filter()
+    assert tab2.filter_active is False
+    assert window.filter_entry.text() == ""
+
+    window.tabs.setCurrentWidget(tab1)
+    assert tab1.filter_active is True
+    assert tab1.filter_pattern == "ERR-"
+    assert len(tab1.filter_results) == 5
+    assert window.filter_entry.text() == "ERR-"

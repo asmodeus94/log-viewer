@@ -384,14 +384,23 @@ class IncrementalFilterWorker(QObject):
             else:
                 strategy = PlainTextStrategy(self._pattern, self._case_sensitive, self._negate, self._encoding)
 
-            lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
-            cancel_set = self._cancel_event.is_set
-            for line_no, text in lines:
-                if cancel_set():
-                    return
-                text_bytes = text.encode(self._encoding, errors="replace")
-                if strategy.match(text_bytes):
-                    results_array.append(line_no)
+            start_offset = self._indexer.offset_of_line(self._start_line)
+            if start_offset is not None and not self._indexer.is_compressed:
+                with open(str(self._indexer.path), "rb") as f:
+                    f.seek(start_offset)
+                    chunk = f.read()
+                if not self._cancel_event.is_set():
+                    hits = strategy.match_chunk(chunk, self._start_line)
+                    results_array.extend(hits)
+            else:
+                lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
+                cancel_set = self._cancel_event.is_set
+                for line_no, text in lines:
+                    if cancel_set():
+                        return
+                    text_bytes = text.encode(self._encoding, errors="replace")
+                    if strategy.match(text_bytes):
+                        results_array.append(line_no)
         except BaseException:
             pass
 

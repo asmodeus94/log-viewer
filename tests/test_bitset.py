@@ -126,3 +126,42 @@ def test_bitset_merge_chunk_words():
     # chunk 2: słowo 1 (indeksy 64..) z bitem 1 -> linia 64+1=65 -> słowo 1 ma wartość 2
     bs.merge_chunk_words(1, [2])
     assert list(bs) == [0, 2, 65]
+
+
+def test_bitset_expand_context_incremental_equivalence():
+    # Test porównujący wynik expand_context_incremental z pełnym expand_context
+    bs_base = Bitset(100)
+    bs_base.update_indices([10, 60, 98])
+
+    target = bs_base.expand_context(5)
+
+    # Symulacja dodania 150 nowych linii do pliku (nowy rozmiar = 250)
+    bs_base.resize(250)
+    # Dodajemy nowe trafienia w liniach 105 i 200
+    bs_base.update_indices([105, 200])
+
+    # 1. Obliczenie pełne od zera
+    expected = bs_base.expand_context(5)
+
+    # 2. Obliczenie inkrementalne od linii 100
+    bs_base.expand_context_incremental(target, from_line=100, context_after=5)
+
+    assert list(target) == list(expected)
+    assert len(target) == len(expected)
+
+
+def test_bitset_expand_context_incremental_cross_boundary():
+    # Trafienie na pozycji 98 z context=5 w pliku o rozmiarze 100
+    # początkowo pokrywa linie 98, 99
+    bs = Bitset(100)
+    bs.update_indices([98])
+    target = bs.expand_context(5)
+    assert list(target) == [98, 99]
+
+    # Plik urósł do 120 linii (brak nowych trafień)
+    bs.resize(120)
+    bs.expand_context_incremental(target, from_line=100, context_after=5)
+
+    # Teraz kontekst z linii 98 powinien sięgać do 98 + 5 = 103 (98, 99, 100, 101, 102, 103)
+    assert list(target) == [98, 99, 100, 101, 102, 103]
+    assert len(target) == 6

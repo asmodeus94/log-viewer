@@ -281,6 +281,8 @@ class RegexStrategy(FilterStrategy):
         return not matched if self.negate else matched
 
     def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
+        if self.negate:
+            return super().match_chunk(chunk, start_line)
         if self.matcher_bytes is not None:
             return self._match_chunk_bytes(chunk, start_line)
         return self._match_chunk_str(chunk, start_line)

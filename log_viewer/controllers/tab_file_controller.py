@@ -353,7 +353,14 @@ class FileController(QObject):
         file_path = self.tab.file_path
         if not file_path:
             return
-        has_filter = bool(self.tab.main_window.filter_entry.text().strip())
+        is_current = self.tab.main_window.tabs.currentWidget() == self.tab
+        entry_text = self.tab.main_window.filter_entry.text().strip() if is_current else ""
+        has_filter = (
+            self.tab.filter_active
+            or bool(getattr(self.tab, "filter_pattern", ""))
+            or bool(getattr(self.tab, "tb_filter_text", ""))
+            or bool(entry_text)
+        )
         self.tab.pending_reload_filter = has_filter
         self.open_file(file_path, self.tab.assigned_title, preserve_state=True)
 
@@ -543,10 +550,11 @@ class FileController(QObject):
         self.tab.inc_mtime_str = mtime_str
         self.tab.inc_ctime_str = ctime_str
 
-        pattern = self.tab.main_window.filter_entry.text().strip()
-        use_regex = self.tab.main_window.filter_regex_cb.isChecked()
-        case_sens = self.tab.main_window.filter_case_cb.isChecked()
-        negate = self.tab.main_window.filter_negate_cb.isChecked()
+        # Pobieraj stan filtra przypisany wyłącznie do tej zakładki
+        pattern = getattr(self.tab, "filter_pattern", "")
+        use_regex = getattr(self.tab, "filter_use_regex", False)
+        case_sens = getattr(self.tab, "filter_case_sensitive", False)
+        negate = getattr(self.tab, "filter_negate", False)
 
         inc_filter_thread = QThread()
         inc_filter_worker = IncrementalFilterWorker(
@@ -581,6 +589,8 @@ class FileController(QObject):
         if new_total_lines > 0:
             filter_results = self.tab.filter_results
             filter_all_lines = self.tab.filter_all_lines
+            old_total = filter_results.size if isinstance(filter_results, Bitset) else 0
+
             if not isinstance(filter_results, Bitset):
                 filter_results = Bitset(new_total_lines)
                 self.tab.filter_results = filter_results
@@ -590,34 +600,44 @@ class FileController(QObject):
 
             filter_results.resize(new_total_lines)
 
-            has_new = False
+            has_new_hits = False
+            inc_res_words = None
             if isinstance(results_data, (tuple, list)) and len(results_data) > 1 and results_data[1] is not None:
                 inc_res_words = results_data[1]
-                filter_results.or_words(inc_res_words)
-                has_new = True
+                if inc_res_words and any(inc_res_words):
+                    filter_results.or_words(inc_res_words)
+                    has_new_hits = True
 
             context_after = self.tab.filter_context_after
-            should_expand = False
-            if context_after > 0 and len(filter_results) > 0:
-                if has_new:
-                    should_expand = True
-                else:
-                    last_hit = int(filter_results[-1])
-                    old_total = filter_all_lines.size
-                    if last_hit + context_after >= old_total:
-                        should_expand = True
+            has_new_filtered_lines = False
 
-            if should_expand:
-                self.tab.filter_all_lines = filter_results.expand_context(context_after)
-                has_new = True
+            if context_after > 0:
+                old_all_len = len(filter_all_lines)
+                filter_results.expand_context_incremental(filter_all_lines, old_total, context_after)
+                if len(filter_all_lines) > old_all_len or has_new_hits:
+                    has_new_filtered_lines = True
             else:
                 filter_all_lines.resize(new_total_lines)
-                if has_new:
-                    filter_all_lines.copy_from(filter_results)
+                if has_new_hits and inc_res_words is not None:
+                    filter_all_lines.or_words(inc_res_words)
+                    has_new_filtered_lines = True
 
-            self._apply_follow_new_lines(mtime_str, ctime_str, force_reload=has_new)
+            self._apply_follow_new_lines(mtime_str, ctime_str, force_reload=has_new_filtered_lines)
+
+            # Jeśli w międzyczasie przybyły kolejne linie, uruchom kolejny worker dla oczekujących linii
+            if self.tab.inc_pending_lines > 0 and self.tab.follow_active:
+                pending = self.tab.inc_pending_lines
+                self.tab.inc_pending_lines = 0
+                self._start_incremental_filter(pending, mtime_str, ctime_str)
 
     def _apply_follow_new_lines(self, mtime_str: str, ctime_str: str, force_reload: bool = False) -> None:
+        # Sprawdź czy ta zakładka jest aktywna w UI (dla kart w tle odraczamy ciężkie renderowanie)
+        is_active = self.tab.main_window.tabs.currentWidget() == self.tab
+        if not is_active:
+            if force_reload:
+                self.tab.needs_follow_refresh = True
+            return
+
         if self.tab.filter_active and self.tab.filter_results is not None:
             filter_all = self.tab.filter_all_lines
             total_lines = len(filter_all) if filter_all is not None else 0
@@ -691,5 +711,6 @@ class FileController(QObject):
     on_follow_reindex_slot = _on_follow_reindex_slot
     on_follow_reindex_clear_flag = _on_follow_reindex_clear_flag
     on_follow_new_lines = _on_follow_new_lines
+    apply_follow_new_lines = _apply_follow_new_lines
     on_follow_reindex = _on_follow_reindex
     on_follow_reindex_failed = _on_follow_reindex_failed

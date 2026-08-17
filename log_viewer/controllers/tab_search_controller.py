@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from collections.abc import Sequence
@@ -73,11 +74,22 @@ class SearchController(QObject):
 
     def _start_background_search(self, start_from_end: bool = False) -> None:
         self._search_start_from_end = start_from_end
-        if not self.tab.indexer or not self.tab.file_path:
+        file_path = self.tab.file_path
+        indexer = self.tab.indexer
+        if not indexer or not file_path:
             return
         pattern = self._compile_search()
         if pattern is None:
             return
+
+        try:
+            current_size = os.stat(file_path).st_size
+            if current_size > indexer.size:
+                indexer.update_from(current_size)
+                self.tab.last_file_size = current_size
+        except OSError:
+            pass
+
         self.tab.search_pattern = pattern
         self.tab.last_search_regex = self.tab.main_window.search_regex_cb.isChecked()
         self.tab.last_search_case = self.tab.main_window.search_case_cb.isChecked()
@@ -101,8 +113,7 @@ class SearchController(QObject):
         self.tab.search_thread = None
         self.tab.search_worker = None
 
-        if self.tab.search_engine is None or self.tab.search_engine.path != self.tab.file_path:
-            self.tab.search_engine = FilterEngine(self.tab.file_path, self.tab.indexer)
+        self.tab.search_engine = FilterEngine(file_path, indexer)
 
         self.tab.search_results = []
         total = self.tab.indexer.line_count if self.tab.indexer else 0

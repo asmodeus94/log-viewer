@@ -239,6 +239,9 @@ class Bitset(Sequence[int]):
                         horizon = reach
                 continue
 
+            if not w and horizon < base:
+                continue
+
             new_w = 0
             if horizon >= base:
                 covered_bits = min(horizon - base + 1, 64)
@@ -278,6 +281,93 @@ class Bitset(Sequence[int]):
             new_words[num_words - 1] &= mask
 
         return new_bs
+
+    def expand_context_incremental(self, target: Bitset, from_line: int, context_after: int) -> None:
+        """
+        Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+        Optymalizacja O(nowe_linie) zamiast O(cały_plik) dla trybu Follow przy dopisywaniu logów.
+        """
+        target.resize(self._size)
+        if context_after <= 0:
+            start_word = max(0, from_line // 64)
+            for i in range(start_word, self._num_words):
+                target._words[i] = self._words[i]
+            target._counts = None
+            return
+
+        num_words = self._num_words
+        words = self._words
+        target_words = target._words
+
+        # Wyznacz słowo początkowe, biorąc pod uwagę zasięg poprzednich trafień
+        lookback_words = (context_after + 63) // 64
+        start_word = max(0, (from_line // 64) - lookback_words)
+
+        # Znajdź początkowy horizon z poprzednich słów
+        horizon = -1
+        for j in range(max(0, start_word - lookback_words), start_word):
+            w = words[j]
+            if w:
+                highest_bit = w.bit_length() - 1
+                reach = j * 64 + highest_bit + context_after
+                if reach > horizon:
+                    horizon = reach
+
+        for i in range(start_word, num_words):
+            w = words[i]
+            base = i * 64
+
+            if horizon >= base + 63:
+                target_words[i] = 0xFFFFFFFFFFFFFFFF
+                if w:
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+                continue
+
+            if not w and horizon < base:
+                target_words[i] = 0
+                continue
+
+            new_w = 0
+            if horizon >= base:
+                covered_bits = min(horizon - base + 1, 64)
+                if covered_bits == 64:
+                    new_w = 0xFFFFFFFFFFFFFFFF
+                else:
+                    new_w = (1 << covered_bits) - 1
+
+            if w:
+                if context_after < 64:
+                    expanded_w = w
+                    for shift in range(1, context_after + 1):
+                        expanded_w |= w << shift
+                    new_w |= expanded_w & 0xFFFFFFFFFFFFFFFF
+
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+                else:
+                    lowest_bit = (w & -w).bit_length() - 1
+                    mask = (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
+                    new_w |= mask
+
+                    highest_bit = w.bit_length() - 1
+                    reach = base + highest_bit + context_after
+                    if reach > horizon:
+                        horizon = reach
+            target_words[i] = new_w
+
+        if self._size > 0:
+            last_valid_bit = (self._size - 1) % 64
+            mask = (1 << (last_valid_bit + 1)) - 1
+            if last_valid_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            target_words[num_words - 1] &= mask
+
+        target._counts = None
 
     def __and__(self, other: Bitset) -> Bitset:
         if not isinstance(other, Bitset):

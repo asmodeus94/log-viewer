@@ -985,6 +985,9 @@ class LogViewerWindow(QMainWindow):
         if isinstance(tab, LogTab):
             self.setWindowTitle(f"{self.tabs.tabText(index)} - {self.t('app_title')}")
             self._load_toolbar_from_tab(tab)
+            if getattr(tab, "needs_follow_refresh", False):
+                tab.needs_follow_refresh = False
+                tab.file_controller.apply_follow_new_lines("", "", force_reload=True)
             tab.refresh_status()
             tab.update_position_slider()
             tab.update_minimap_viewport()
