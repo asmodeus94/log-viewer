@@ -10,20 +10,13 @@ from pathlib import Path
 repo_root = Path(SPECPATH).resolve()
 
 excluded_modules = [
-    # Nieużywane moduły biblioteki standardowej Pythona
+    # Nieużywane duże moduły spoza rdzenia Pythona
     "tkinter",
     "unittest",
     "pydoc",
-    "email",
-    "http",
-    "html",
-    "urllib",
-    "xmlrpc",
-    "curses",
     "test",
-    "sqlite3",
-    "pdb",
-    "difflib",
+    "curses",
+    "xmlrpc",
     # Nieużywane moduły Qt6 / PySide6
     "PySide6.QtNetwork",
     "PySide6.QtQml",
