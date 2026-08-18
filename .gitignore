@@ -5,6 +5,7 @@ log_viewer/ui/ui_*.py
 dist/
 build/
 *.spec
+!log-viewer.spec
 assets/*.icns
 assets/*.ico
 
