@@ -43,18 +43,18 @@ def test_open_file_cleans_up_threads(temp_log_file):
     window = LogViewerWindow(config=cfg)
 
     path = temp_log_file(num_lines=10)
-    tab = window.open_file_in_tab(path)
-
-    # Symulacja istniejacych pracujących watkow i workerów (podmieniamy żeby sprawdzić jak reaguje)
-    mock_thread = MagicMock()
-    mock_thread.isRunning.return_value = True
-    tab._indexer_thread = mock_thread
-
-    mock_worker = MagicMock()
-    tab._indexer_worker = mock_worker
-
-    # Ponownie otwieramy ten sam plik
     with patch("PySide6.QtCore.QThread.start"):
+        tab = window.open_file_in_tab(path)
+
+        # Symulacja istniejacych pracujących watkow i workerów (podmieniamy żeby sprawdzić jak reaguje)
+        mock_thread = MagicMock()
+        mock_thread.isRunning.return_value = True
+        tab._indexer_thread = mock_thread
+
+        mock_worker = MagicMock()
+        tab._indexer_worker = mock_worker
+
+        # Ponownie otwieramy ten sam plik
         tab.file_controller.open_file(path, preserve_state=True)
 
     # Zabezpieczenie antywyciekowe (Memory/Thread Leak safeguard z AGENTS.md) powinno przerwać stare wątki

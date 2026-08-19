@@ -243,7 +243,10 @@ class FileController(QObject):
             except OSError:
                 pass
         self.tab.set_status(self.tab.fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
-        self.tab.load_window(at_line=0)
+        try:
+            self.tab.load_window(at_line=0)
+        except OSError:
+            pass
         self.tab.refresh_bookmarks_tree()
         self.tab.refresh_edits_tree()
         # Zaktualizuj tytuł zakładki — przywróć właściwy tytuł
