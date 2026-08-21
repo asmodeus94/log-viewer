@@ -165,3 +165,139 @@ def test_bitset_expand_context_incremental_cross_boundary():
     # Teraz kontekst z linii 98 powinien sięgać do 98 + 5 = 103 (98, 99, 100, 101, 102, 103)
     assert list(target) == [98, 99, 100, 101, 102, 103]
     assert len(target) == 6
+
+
+def test_bitset_merge_chunk_words_no_overwrite():
+    # Test weryfikujący, że scalanie chunków o długości > 2 słów nie nadpisuje istniejących danych (|=)
+    bs = Bitset(300)
+    # Wypełniamy słowa 1, 2, 3 wartościami testowymi
+    # Słowo 1 (indeks 64): bit 0 -> linia 64
+    # Słowo 2 (indeks 128): bit 0 -> linia 128
+    # Słowo 3 (indeks 192): bit 0 -> linia 192
+    bs.update_indices([64, 128, 192])
+    assert list(bs) == [64, 128, 192]
+
+    # Scalamy 4 słowa (base_word = 0, words = [słowo 0, słowo 1, słowo 2, słowo 3])
+    # Nowy chunk zawiera:
+    # Słowo 0: bit 1 (linia 1)
+    # Słowo 1: bit 2 (linia 66)
+    # Słowo 2: bit 3 (linia 131)
+    # Słowo 3: bit 4 (linia 196)
+    chunk_words = [1 << 1, 1 << 2, 1 << 3, 1 << 4]
+    bs.merge_chunk_words(0, chunk_words)
+
+    # Poprawny wynik musi zawierać zarówno stare jak i nowe bity:
+    # Słowo 0: 1
+    # Słowo 1: 64, 66
+    # Słowo 2: 128, 131
+    # Słowo 3: 192, 196
+    assert list(bs) == [1, 64, 66, 128, 131, 192, 196]
+
+
+def test_bitset_bool_early_exit():
+    # Pusty bitset
+    bs_empty = Bitset(500)
+    assert not bs_empty
+    assert bs_empty._counts is None
+
+    # Bitset z bitem na pozycji 0
+    bs_first = Bitset(500)
+    bs_first.update_indices([0])
+    assert bs_first
+    assert bs_first._counts is None  # __bool__ nie powinno budować _counts
+
+    # Bitset z bitem na dalekiej pozycji (np. słowo 7)
+    bs_far = Bitset(1000)
+    bs_far.update_indices([500])
+    assert bs_far
+    assert bs_far._counts is None
+
+    # Po wyliczeniu total_count
+    assert len(bs_far) == 1
+    assert bs_far._total_count == 1
+    assert bool(bs_far) is True
+
+
+def test_bitset_total_count_caching_and_invalidation():
+    # Test from_raw z przekazanym total_count
+    words = array.array("Q", [1 << 5, 1 << 10])
+    bs = Bitset.from_raw(100, words, total_count=2)
+    assert bs._total_count == 2
+    assert bs._counts is None
+
+    # len() musi zwrócić 2 w O(1) bez budowania _counts
+    assert len(bs) == 2
+    assert bs._counts is None
+
+    # Dopiero indeksowanie buduje _counts
+    assert bs[0] == 5
+    assert bs._counts is not None
+
+    # Inwalidacja przez update_indices
+    bs.update_indices([50])
+    assert bs._total_count == -1
+    assert bs._counts is None
+    assert len(bs) == 3
+
+    # Inwalidacja przez resize
+    bs.resize(200)
+    assert bs._total_count == -1
+    assert bs._counts is None
+
+    # Inwalidacja przez merge_chunk_words
+    bs.merge_chunk_words(0, [1 << 1])
+    assert bs._total_count == -1
+    assert bs._counts is None
+
+    # Inwalidacja przez or_words
+    bs.or_words([1 << 2])
+    assert bs._total_count == -1
+    assert bs._counts is None
+
+
+def test_bitset_copy_from():
+    bs1 = Bitset(200)
+    bs1.update_indices([10, 70, 150])
+    # Zbuduj cache w bs1
+    assert len(bs1) == 3
+    assert bs1._counts is not None
+
+    bs2 = Bitset(50)
+    bs2.copy_from(bs1)
+
+    assert bs2.size == 200
+    assert bs2._num_words == bs1._num_words
+    assert list(bs2) == [10, 70, 150]
+    assert bs2._total_count == 3
+    assert bs2._counts is not None
+
+
+def test_bitset_and_operator():
+    bs1 = Bitset(100)
+    bs1.update_indices([5, 10, 65, 80])
+
+    bs2 = Bitset(100)
+    bs2.update_indices([10, 65, 90])
+
+    bs_and = bs1 & bs2
+    assert bs_and.size == 100
+    assert list(bs_and) == [10, 65]
+
+    # Różne rozmiary
+    bs3 = Bitset(50)
+    bs3.update_indices([5, 10, 40])
+    bs_and2 = bs1 & bs3
+    assert bs_and2.size == 50
+    assert list(bs_and2) == [5, 10]
+
+
+def test_bitset_invert_operator():
+    bs = Bitset(5)
+    bs.update_indices([1, 3])
+    assert len(bs) == 2
+
+    inverted = ~bs
+    assert inverted.size == 5
+    # total_count powinno być natychmiast wyliczone (5 - 2 = 3)
+    assert inverted._total_count == 3
+    assert list(inverted) == [0, 2, 4]
