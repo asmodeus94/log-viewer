@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import array
 import re
 import time
 from collections.abc import Sequence
@@ -156,10 +157,7 @@ class SearchController(QObject):
         if state == "context":
             self.tab.set_status(self.tab.t("st_context_building"))
             return
-        self.tab.set_status(self.tab.fmt("st_searching_progress", pct=f"{pct:.1f}", hits=hits))
-        self.tab.search_results_label.setText(f"{self.tab.t('lbl_search_results_searching')} ({hits:,})")
-        # Jeśli otrzymaliśmy częściowe wyniki z nowo ukończonego chunku,
-        # dodajemy je na bieżąco do modelu listy (bez resetowania całości)
+
         has_results = (
             partial_results is not None and isinstance(partial_results, (Sequence, Bitset)) and len(partial_results) > 0
         )
@@ -170,17 +168,43 @@ class SearchController(QObject):
 
             if isinstance(partial_results, tuple) and len(partial_results) == 2:
                 base_word, words = partial_results
-                self.tab.search_results_all.merge_chunk_words(base_word, words)
+                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
+                    filtered_words = self.tab.filter_all_lines.words
+                    masked_words = array.array("Q", words)
+                    for i in range(len(masked_words)):
+                        w_idx = base_word + i
+                        if w_idx < len(filtered_words):
+                            masked_words[i] &= filtered_words[w_idx]
+                        else:
+                            masked_words[i] = 0
+                    self.tab.search_results_all.merge_chunk_words(base_word, masked_words)
+                else:
+                    self.tab.search_results_all.merge_chunk_words(base_word, words)
             elif isinstance(partial_results, Bitset):
-                self.tab.search_results_all.or_words(partial_results.words)
+                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
+                    self.tab.search_results_all.or_words((partial_results & self.tab.filter_all_lines).words)
+                else:
+                    self.tab.search_results_all.or_words(partial_results.words)
             elif isinstance(partial_results, list):
-                self.tab.search_results_all.update_indices(partial_results)
+                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
+                    filtered_set = self.tab.filter_all_lines
+                    self.tab.search_results_all.update_indices(x for x in partial_results if x in filtered_set)
+                else:
+                    self.tab.search_results_all.update_indices(partial_results)
 
             now = time.time()
             # Throttle model updates to max 2 times per second to prevent GUI freeze on huge results
             if now - self._last_search_model_update > 0.5:
                 self.tab.search_model.set_results(self.tab.search_results_all, indexer=self.tab.indexer)
                 self._last_search_model_update = now
+
+        current_hits = (
+            len(self.tab.search_results_all)
+            if (self.tab.last_search_in_filter and self.tab.filter_active and self.tab.search_results_all is not None)
+            else hits
+        )
+        self.tab.set_status(self.tab.fmt("st_searching_progress", pct=f"{pct:.1f}", hits=current_hits))
+        self.tab.search_results_label.setText(f"{self.tab.t('lbl_search_results_searching')} ({current_hits:,})")
 
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .bitset import Bitset
 from .formatters import FORMATTERS, format_log
 from .helpers import THEME, THEME_DARK
 from .ui.ui_format_dialog import Ui_FormatDialog
@@ -399,7 +400,7 @@ class SearchResultsModel(QAbstractListModel):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._all_results: list[int | tuple[int, str]] = []
+        self._all_results: Sequence[int | tuple[int, str]] | Bitset = []
         self._visible_count = 0
         self._batch_size = 1000
         self._indexer: Any = None
@@ -412,21 +413,22 @@ class SearchResultsModel(QAbstractListModel):
     def set_results(self, results: Sequence[int | tuple[int, str]] | Any, indexer: Any = None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
-        self._all_results = list(results)
+        if results is None:
+            self._all_results = []
+        elif isinstance(results, (Bitset, list)):
+            self._all_results = results
+        else:
+            self._all_results = list(results)
         self._indexer = indexer
-        self._visible_count = min(len(results), self._batch_size)
+        self._visible_count = min(len(self._all_results), self._batch_size)
         self.endResetModel()
 
     def append_results(self, results: list[tuple[int, str]]) -> None:
         """Dodaje wyniki na końcu. Wywołuje beginInsertRows/endInsertRows."""
         if not results:
             return
-        # Dołączone wyniki powinny być widoczne od razu, jeśli jesteśmy na końcu
-        # lub jeśli po prostu chcemy się upewnić, że są dodane czysto.
-        # append_results jest obecnie używane tylko w testach (silnik wyszukiwania
-        # całkowicie zastępuje wyniki przez set_results).
-        # Przywracamy podstawową funkcjonalność: dodanie do all_results i
-        # visible_count oraz emisję insertRows, żeby widok się zaktualizował.
+        if not isinstance(self._all_results, list):
+            self._all_results = list(self._all_results)
         start = self._visible_count
         self.beginInsertRows(QModelIndex(), start, start + len(results) - 1)
         self._all_results.extend(results)
@@ -518,10 +520,11 @@ class SearchResultsModel(QAbstractListModel):
         Używa bisect — wyniki są posortowane rosnąco po line_no.
         Zwraca -1 jeśli nie znaleziono dokładnego dopasowania.
         """
+        total = len(self._all_results)
         if hasattr(self._all_results, "bisect_left"):
             idx_obj = self._all_results.bisect_left(line_no)
             idx = int(idx_obj)
-            if idx < len(self._all_results) and self._all_results[idx] == line_no:
+            if idx < total and self._all_results[idx] == line_no:
                 # Doładowanie widocznych wierszy
                 if idx >= self._visible_count:
                     items_to_fetch = idx - self._visible_count + 1
@@ -533,7 +536,7 @@ class SearchResultsModel(QAbstractListModel):
 
         keys = [r[0] if isinstance(r, tuple) else r for r in self._all_results]
         idx = bisect.bisect_left(keys, line_no)
-        if idx < len(self._all_results) and keys[idx] == line_no:
+        if idx < total and keys[idx] == line_no:
             # Upewnij się, że element jest widoczny (doładowany) w jednym kroku
             if idx >= self._visible_count:
                 items_to_fetch = idx - self._visible_count + 1

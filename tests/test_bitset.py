@@ -301,3 +301,17 @@ def test_bitset_invert_operator():
     # total_count powinno być natychmiast wyliczone (5 - 2 = 3)
     assert inverted._total_count == 3
     assert list(inverted) == [0, 2, 4]
+
+
+def test_bitset_iter():
+    bs = Bitset(500)
+    indices = [0, 1, 63, 64, 65, 127, 128, 255, 256, 499]
+    bs.update_indices(indices)
+
+    # Iterator powinien zwrócić dokładnie te same elementy
+    iter_result = list(iter(bs))
+    assert iter_result == indices
+
+    # Pusty bitset
+    bs_empty = Bitset(100)
+    assert list(iter(bs_empty)) == []
