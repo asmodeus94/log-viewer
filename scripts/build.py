@@ -99,9 +99,8 @@ def create_macos_archive(dist_dir: Path) -> Path | None:
 
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _, files in os.walk(app_path):
-                for file in files:
-                    file_p = Path(root) / file
+            for file_p in app_path.rglob("*"):
+                if file_p.is_file():
                     arcname = file_p.relative_to(dist_dir)
                     zf.write(file_p, arcname)
         return zip_path

@@ -7,17 +7,20 @@ Sprawdza kod pod kątem:
 2. Formatowania i analizy statycznej linterem (ruff format & ruff check)
 3. Zgodności typów (mypy)
 4. Poprawności działania testów jednostkowych (pytest)
+5. Opcjonalnej walidacji raportów SARIF (--sarif)
 
 Użycie:
     python scripts/verify.py            # Pełna weryfikacja
     python scripts/verify.py --fix      # Automatyczna naprawa formatowania i importów + weryfikacja
     python scripts/verify.py --quick    # Szybka weryfikacja (UI + Lint + MyPy, bez pytest)
-    python scripts/verify.py --step ui  # Tylko wybrany krok: ui, lint, mypy, test
+    python scripts/verify.py --step ui  # Tylko wybrany krok: ui, lint, mypy, sarif, test
+    python scripts/verify.py --sarif    # Walidacja raportów SARIF w repozytorium
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -117,6 +120,74 @@ def step_typecheck(repo_root: Path, py_exe: str) -> bool:
     return code == 0
 
 
+def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
+    """Krok weryfikacji raportów SARIF (np. z inspekcji IDE / Qodana)."""
+    print(f"{CYAN}{BOLD}--> Step: SARIF Reports Validation{RESET}")
+
+    sarif_files: list[Path] = []
+    if target_path and target_path != "auto":
+        p = Path(target_path)
+        if not p.is_absolute():
+            p = repo_root / p
+        if not p.exists():
+            print(f"    {RED}Error: SARIF file not found: {p}{RESET}")
+            return False
+        sarif_files.append(p)
+    else:
+        for sarif_candidate in sorted(repo_root.glob("*.sarif*")):
+            if sarif_candidate.is_file() and (
+                sarif_candidate.name.endswith(".sarif") or sarif_candidate.name.endswith(".sarif.json")
+            ):
+                sarif_files.append(sarif_candidate)
+
+    if not sarif_files:
+        print(f"    {GREEN}No SARIF report files found to validate.{RESET}")
+        return True
+
+    total_issues = 0
+    for sarif_file in sarif_files:
+        rel_name = sarif_file.relative_to(repo_root) if sarif_file.is_relative_to(repo_root) else sarif_file.name
+        print(f"    Scanning {YELLOW}{rel_name}{RESET}...")
+        try:
+            with open(sarif_file, encoding="utf-8") as sarif_fh:
+                data = json.load(sarif_fh)
+        except Exception as e:
+            print(f"    {RED}Error reading SARIF file {rel_name}: {e}{RESET}")
+            total_issues += 1
+            continue
+
+        runs = data.get("runs", [])
+        for run in runs:
+            tool_info = run.get("tool", {}).get("driver", {})
+            tool_name = tool_info.get("name", "Analyzer")
+            results = run.get("results", [])
+            for res in results:
+                level = res.get("level", "warning")
+                kind = res.get("kind", "")
+                if level in ("error", "warning") or kind == "fail":
+                    rule_id = res.get("ruleId", "Rule")
+                    msg = res.get("message", {}).get("text", "No message")
+                    locations = res.get("locations", [])
+                    loc_str = ""
+                    if locations:
+                        phys = locations[0].get("physicalLocation", {})
+                        art = phys.get("artifactLocation", {}).get("uri", "")
+                        region = phys.get("region", {})
+                        line_no = region.get("startLine", "")
+                        loc_str = f" in {art}" + (f":{line_no}" if line_no else "")
+
+                    color = RED if level == "error" else YELLOW
+                    print(f"    {color}[{tool_name} / {rule_id}] ({level}){loc_str}: {msg}{RESET}")
+                    total_issues += 1
+
+    if total_issues > 0:
+        print(f"\n{RED}{BOLD}SARIF validation failed: found {total_issues} issue(s).{RESET}")
+        return False
+
+    print(f"    {GREEN}All scanned SARIF reports are clean (0 issues).{RESET}")
+    return True
+
+
 def step_tests(repo_root: Path, py_exe: str) -> bool:
     """Krok 4: Testy jednostkowe (pytest)."""
     cmd = [py_exe, "-m", "pytest", "tests/"]
@@ -137,7 +208,18 @@ def main() -> int:
     parser.add_argument(
         "--quick", "-q", action="store_true", help="Quick verification (UI + Lint + MyPy, skips pytest)"
     )
-    parser.add_argument("--step", choices=["ui", "lint", "mypy", "test"], help="Run only specific verification step")
+    parser.add_argument(
+        "--step",
+        choices=["ui", "lint", "mypy", "sarif", "test"],
+        help="Run only specific verification step",
+    )
+    parser.add_argument(
+        "--sarif",
+        nargs="?",
+        const="auto",
+        default=None,
+        help="Validate SARIF report file(s) (optional path to specific file, default: scan repo root)",
+    )
 
     args = parser.parse_args()
     repo_root = get_repo_root()
@@ -158,8 +240,13 @@ def main() -> int:
         steps_to_run.append(args.step)
     elif args.quick:
         steps_to_run = ["ui", "lint", "mypy"]
+        if args.sarif:
+            steps_to_run.append("sarif")
     else:
-        steps_to_run = ["ui", "lint", "mypy", "test"]
+        steps_to_run = ["ui", "lint", "mypy"]
+        if args.sarif:
+            steps_to_run.append("sarif")
+        steps_to_run.append("test")
 
     for step in steps_to_run:
         success = False
@@ -169,6 +256,8 @@ def main() -> int:
             success = step_lint(repo_root, py_exe)
         elif step == "mypy":
             success = step_typecheck(repo_root, py_exe)
+        elif step == "sarif":
+            success = step_sarif(repo_root, args.sarif)
         elif step == "test":
             success = step_tests(repo_root, py_exe)
 

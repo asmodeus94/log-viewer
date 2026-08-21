@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import os
 import re
 import time
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
@@ -83,7 +83,7 @@ class SearchController(QObject):
             return
 
         try:
-            current_size = os.stat(file_path).st_size
+            current_size = Path(file_path).stat().st_size
             if current_size > indexer.size:
                 indexer.update_from(current_size)
                 self.tab.last_file_size = current_size

@@ -5,18 +5,21 @@ Automatycznie kompiluje zmienione pliki .ui (kompilacja przyrostowa)
 a następnie uruchamia aplikację Log Viewer.
 """
 
-import os
+from __future__ import annotations
+
 import sys
+from pathlib import Path
 
 
-def main():
+def main() -> None:
     # Krok 1: Skompiluj pliki UI przyrostowo
-    repo_root = os.path.dirname(os.path.abspath(__file__))
+    repo_root = Path(__file__).resolve().parent
 
     # Dodajemy ścieżkę do sys.path aby zaimportować moduł
-    scripts_dir = os.path.join(repo_root, "scripts")
-    if scripts_dir not in sys.path:
-        sys.path.insert(0, scripts_dir)
+    scripts_dir = repo_root / "scripts"
+    scripts_dir_str = str(scripts_dir)
+    if scripts_dir_str not in sys.path:
+        sys.path.insert(0, scripts_dir_str)
 
     try:
         import compile_ui
@@ -33,8 +36,9 @@ def main():
         sys.exit(1)
 
     # Krok 2: Uruchom aplikację log_viewer
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
+    repo_root_str = str(repo_root)
+    if repo_root_str not in sys.path:
+        sys.path.insert(0, repo_root_str)
 
     try:
         from log_viewer.main import main as log_viewer_main

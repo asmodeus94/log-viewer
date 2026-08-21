@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
@@ -89,7 +89,7 @@ class FileController(QObject):
 
     def open_file(self, path: str, title: str | None = None, preserve_state: bool = False) -> None:
         """Rozpoczyna asynchroniczne otwarcie i indeksowanie pliku."""
-        if not os.path.isfile(path):
+        if not Path(path).is_file():
             QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
             return
 
@@ -101,7 +101,7 @@ class FileController(QObject):
         if self.tab.follow_active:
             self.tab.cmd_toggle_follow()
         self.tab.file_path = path
-        assigned_title = title or os.path.basename(path)
+        assigned_title = title or Path(path).name
         self.tab.assigned_title = assigned_title
         self.tab.set_status(self.tab.t("st_opening"))
         self.tab.title_changed.emit(assigned_title)
@@ -121,7 +121,7 @@ class FileController(QObject):
 
         # QProgressDialog — pokazuje postęp indeksowania z przyciskiem Anuluj dla plików > 50 MB
         try:
-            file_size = os.path.getsize(path)
+            file_size = Path(path).stat().st_size
         except OSError:
             file_size = 0
 
@@ -236,7 +236,7 @@ class FileController(QObject):
         file_path = self.tab.file_path
         if file_path:
             try:
-                st = os.stat(file_path)
+                st = Path(file_path).stat()
                 self.tab.file_mtime_at_open = st.st_mtime_ns
                 self.tab.file_size_at_open = st.st_size
                 self.tab.last_file_inode = st.st_ino
@@ -248,7 +248,7 @@ class FileController(QObject):
         self.tab.refresh_edits_tree()
         # Zaktualizuj tytuł zakładki — przywróć właściwy tytuł
         if file_path:
-            self.tab.title_changed.emit(self.tab.assigned_title or os.path.basename(file_path))
+            self.tab.title_changed.emit(self.tab.assigned_title or Path(file_path).name)
         # Zaktualizuj mini-mapę — natychmiast (dla małych plików) + debounced (dla dużych)
         self.tab.update_minimap()
         self.tab.minimap_update_timer.start()
@@ -321,7 +321,7 @@ class FileController(QObject):
         file_path = self.tab.file_path
         if file_path:
             try:
-                st = os.stat(file_path)
+                st = Path(file_path).stat()
                 self.tab.file_mtime_at_open = st.st_mtime_ns
                 self.tab.file_size_at_open = st.st_size
                 self.tab.last_file_inode = st.st_ino
@@ -370,7 +370,7 @@ class FileController(QObject):
         if not file_path or not indexer:
             return
         try:
-            current_stat = os.stat(file_path)
+            current_stat = Path(file_path).stat()
         except OSError:
             return
         current_size = current_stat.st_size
@@ -410,7 +410,7 @@ class FileController(QObject):
         if self.tab.follow_active:
             self.tab.last_file_size = indexer.size
             try:
-                self.tab.last_file_inode = os.stat(file_path).st_ino
+                self.tab.last_file_inode = Path(file_path).stat().st_ino
             except OSError:
                 self.tab.last_file_inode = 0
 
@@ -432,7 +432,7 @@ class FileController(QObject):
             QTimer.singleShot(200, self._follow_poll)
             return
         try:
-            current_stat = os.stat(file_path)
+            current_stat = Path(file_path).stat()
         except OSError:
             QTimer.singleShot(200, self._follow_poll)
             return
@@ -687,7 +687,7 @@ class FileController(QObject):
         self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
         file_path = self.tab.file_path
         try:
-            mtime = os.stat(file_path).st_mtime if file_path else 0
+            mtime = Path(file_path).stat().st_mtime if file_path else 0
             mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
         except OSError:
             mtime_str = "?"

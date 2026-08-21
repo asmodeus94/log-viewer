@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import array
-import os
 import threading
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -226,7 +226,7 @@ class SaveAsWorker(QObject):
             if cancel_set():
                 self.error.emit("cancelled")
                 try:
-                    os.unlink(self._dst_path)
+                    Path(self._dst_path).unlink()
                 except OSError:
                     pass
                 return
@@ -331,7 +331,7 @@ class ExportWorker(QObject):
             if cancel_set():
                 self.error.emit("cancelled")
                 try:
-                    os.unlink(self._dst_path)
+                    Path(self._dst_path).unlink()
                 except OSError:
                     pass
                 return

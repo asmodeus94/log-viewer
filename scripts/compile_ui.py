@@ -1,49 +1,52 @@
 #!/usr/bin/env python3
+"""scripts/compile_ui.py — Inkrementalna kompilacja plików .ui do formatu Python (PySide6)."""
+
+from __future__ import annotations
+
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main() -> None:
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    ui_dir = os.path.join(repo_root, "log_viewer", "ui")
+    repo_root = Path(__file__).resolve().parent.parent
+    ui_dir = repo_root / "log_viewer" / "ui"
 
-    if not os.path.isdir(ui_dir):
+    if not ui_dir.is_dir():
         print(f"Error: UI directory not found at {ui_dir}")
         sys.exit(1)
 
-    ui_files = [f for f in os.listdir(ui_dir) if f.endswith(".ui")]
+    ui_files = [f for f in ui_dir.iterdir() if f.is_file() and f.suffix == ".ui"]
     if not ui_files:
         print("No .ui files found.")
         sys.exit(0)
 
     compiled_any = False
-    for ui_file in ui_files:
-        input_path = os.path.join(ui_dir, ui_file)
-        output_name = f"ui_{os.path.splitext(ui_file)[0]}.py"
-        output_path = os.path.join(ui_dir, output_name)
+    for ui_path in sorted(ui_files):
+        output_name = f"ui_{ui_path.stem}.py"
+        output_path = ui_dir / output_name
 
         # Sprawdzenie czasów modyfikacji - kompilacja przyrostowa
         # Kompiluj jeśli wygenerowany plik nie istnieje lub jeśli plik .ui jest nowszy
         needs_compile = True
-        if os.path.exists(output_path):
-            input_mtime = os.path.getmtime(input_path)
-            output_mtime = os.path.getmtime(output_path)
+        if output_path.exists():
+            input_mtime = ui_path.stat().st_mtime
+            output_mtime = output_path.stat().st_mtime
             if input_mtime <= output_mtime:
                 needs_compile = False
 
         if needs_compile:
-            print(f"Compiling {ui_file} -> {output_name}")
+            print(f"Compiling {ui_path.name} -> {output_name}")
             try:
-                exec_dir = os.path.dirname(sys.executable)
-                uic_cmd = os.path.join(exec_dir, "pyside6-uic.exe" if os.name == "nt" else "pyside6-uic")
-                if not os.path.isfile(uic_cmd):
-                    uic_cmd = "pyside6-uic"
+                exec_dir = Path(sys.executable).resolve().parent
+                uic_cmd = exec_dir / ("pyside6-uic.exe" if os.name == "nt" else "pyside6-uic")
+                uic_cmd_str = str(uic_cmd) if uic_cmd.is_file() else "pyside6-uic"
 
-                subprocess.run([uic_cmd, input_path, "-o", output_path], check=True)
+                subprocess.run([uic_cmd_str, str(ui_path), "-o", str(output_path)], check=True)
                 compiled_any = True
             except subprocess.CalledProcessError as e:
-                print(f"Error compiling {ui_file}: {e}")
+                print(f"Error compiling {ui_path.name}: {e}")
                 sys.exit(1)
             except FileNotFoundError:
                 print("Error: pyside6-uic not found. Please make sure PySide6 is installed.")

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -906,7 +906,7 @@ class LogViewerWindow(QMainWindow):
 
     def _generate_tab_title(self, path: str) -> str:
         """Generuje tytuł zakładki (z literką, np. [A], [B], [AA]) jeśli plik jest już otwarty."""
-        base_title = os.path.basename(path)
+        base_title = Path(path).name
 
         existing_titles = set()
         for i in range(self.tabs.count()):
@@ -935,7 +935,7 @@ class LogViewerWindow(QMainWindow):
 
     def open_file_in_tab(self, path: str) -> LogTab | None:
         """Otwiera plik w nowej zakładce."""
-        if not os.path.isfile(path):
+        if not Path(path).is_file():
             QMessageBox.critical(self, self.t("app_title"), self.t("msg_no_file"))
             return None
 
@@ -1283,7 +1283,7 @@ class LogViewerWindow(QMainWindow):
     @Slot(list)
     def _on_files_dropped(self, paths: list[str]) -> None:
         """DnD otwiera każdy plik w nowej zakładce sekwencyjnie."""
-        existing = [p for p in paths if os.path.isfile(p)]
+        existing = [p for p in paths if Path(p).is_file()]
         if not existing:
             QMessageBox.information(self, self.t("app_title"), self.t("msg_dnd_no_files"))
             return
