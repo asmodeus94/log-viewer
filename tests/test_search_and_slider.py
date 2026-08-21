@@ -1,5 +1,6 @@
 """Testy dla nowych funkcji: slider inversion, scroll update, search results panel."""
 
+import array
 import os
 import sys
 import tempfile
@@ -15,6 +16,7 @@ libegl = os.path.expanduser("~/.local/lib/libEGL.so.1")
 if os.path.exists(libegl):
     os.environ["LD_LIBRARY_PATH"] = os.path.expanduser("~/.local/lib") + ":" + os.environ.get("LD_LIBRARY_PATH", "")
 
+from log_viewer.bitset import Bitset
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
 from log_viewer.main_window import LogViewerWindow
@@ -161,6 +163,31 @@ class TestSearchResultsModel:
         model.set_results([(1234, "test line content")])
         data = model.data(model.index(0, 0), QtCore.Qt.DisplayRole)
         assert "1,235" in data
+
+    def test_bitset_results_performance_and_operations(self):
+        """Weryfikacja, że SearchResultsModel obsługuje Bitset bez konwersji do list i działa błyskawicznie."""
+        bs = Bitset(1_000_000)
+        words = array.array("Q", [0xAAAAAAAAAAAAAAAA] * bs._num_words)
+        bs._words = words
+        bs._counts = None
+        bs._total_count = -1
+
+        model = SearchResultsModel()
+        start = time.perf_counter()
+        model.set_results(bs)
+        elapsed = time.perf_counter() - start
+
+        # Ustawienie wyników musi być natychmiastowe (O(1), bez freeze)
+        assert elapsed < 0.1
+        assert isinstance(model._all_results, Bitset)
+        assert model.rowCount() == 1000
+        assert model.canFetchMore()
+
+        # Sprawdzenie get_line_no i find_row_by_line_no
+        assert model.get_line_no(0) == 1
+        assert model.find_row_by_line_no(1) == 0
+        assert model.find_row_by_line_no(3) == 1
+        assert model.find_row_by_line_no(2) == -1
 
 
 class TestSearchFlow:
@@ -355,3 +382,43 @@ class TestSearchFlow:
         search_active_color = QtGui.QColor(window._theme_colors["search_active"]).name()
         has_orange = any(s.format.background().color().name() == search_active_color for s in sels)
         assert has_orange, "Current search result should have orange background (search_active)"
+
+    def test_search_in_filtered(self, app_instance):
+        """Wyszukiwanie z zaznaczoną opcją 'szukaj w odfiltrowanych'."""
+        window, _ = app_instance
+        tab = window.tabs.currentWidget()
+
+        # 1. Filtrujemy tylko linie ERROR
+        window.filter_entry.setText("ERROR")
+        window.filter_case_cb.setChecked(True)
+        window.cmd_apply_filter()
+
+        for _ in range(200):
+            QtWidgets.QApplication.processEvents()
+            if tab.filter_active and len(tab.filter_results) == 125:
+                break
+            time.sleep(0.05)
+        QtWidgets.QApplication.processEvents()
+        assert tab.filter_active
+        assert len(tab.filter_results) == 125
+
+        # 2. Wyszukujemy "line 10" z opcją search_in_filter_cb
+        window.search_entry.setText("line 10")
+        window.search_in_filter_cb.setChecked(True)
+        window.cmd_find_next()
+
+        for _ in range(200):
+            QtWidgets.QApplication.processEvents()
+            if tab.search_results_all:
+                break
+            time.sleep(0.05)
+        time.sleep(0.1)
+        QtWidgets.QApplication.processEvents()
+
+        # Weryfikacja, że wszystkie znalezione wyniki są w filtrze i zawierają ERROR oraz "line 10"
+        assert len(tab.search_results_all) > 0
+        for line_no in tab.search_results_all:
+            assert line_no in tab.filter_all_lines
+            line_text = tab.indexer.read_lines(line_no, 1)[0][1]
+            assert "[ERROR]" in line_text
+            assert "line 10" in line_text

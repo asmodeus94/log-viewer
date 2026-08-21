@@ -4,7 +4,7 @@ import array
 import bisect
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any, overload
 
 
@@ -129,6 +129,18 @@ class Bitset(Sequence[int]):
         if self._total_count >= 0:
             return self._total_count > 0
         return any(self._words)
+
+    def __iter__(self) -> Iterator[int]:
+        """Szybki generator po ustawionych bitach O(num_words) bez bisekcji."""
+        for word_idx, w in enumerate(self._words):
+            if not w:
+                continue
+            base = word_idx * 64
+            val = w
+            while val:
+                tz = (val & -val).bit_length() - 1
+                yield base + tz
+                val &= val - 1
 
     def __contains__(self, index: object) -> bool:
         if not isinstance(index, int) or index < 0 or index >= self._size:
