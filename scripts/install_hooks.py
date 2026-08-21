@@ -8,7 +8,6 @@ Uruchomienie:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -57,8 +56,8 @@ exit 0
 
     # Ustawienie uprawnień do wykonywania na systemach POSIX
     try:
-        current_mode = os.stat(pre_commit_file).st_mode
-        os.chmod(pre_commit_file, current_mode | 0o755)
+        current_mode = pre_commit_file.stat().st_mode
+        pre_commit_file.chmod(current_mode | 0o755)
     except Exception:
         pass
 

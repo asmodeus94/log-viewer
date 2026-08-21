@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import array
-import os
 import re
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Slot
@@ -78,7 +78,7 @@ class FilterController(QObject):
             return
 
         try:
-            current_size = os.stat(file_path).st_size
+            current_size = Path(file_path).stat().st_size
             if current_size > indexer.size:
                 indexer.update_from(current_size)
                 self.tab.last_file_size = current_size

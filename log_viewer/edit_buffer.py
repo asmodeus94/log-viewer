@@ -7,6 +7,7 @@ import shutil
 import sys
 import uuid
 from collections.abc import Callable, ItemsView, Iterator, KeysView
+from pathlib import Path
 
 from .exceptions import CompressedSaveError, FileChangedError
 from .helpers import is_compressed
@@ -81,8 +82,9 @@ class EditBuffer:
                 f"Use 'Save As' to write to a new uncompressed file instead."
             )
         # Walidacja przed zapisem — sprawdź czy plik się nie zmienił
+        src_p = Path(src_path)
         try:
-            current_stat = os.stat(src_path)
+            current_stat = src_p.stat()
         except OSError as e:
             raise FileChangedError(f"Cannot stat source file: {e}") from e
         if expected_size is not None and current_stat.st_size != expected_size:
@@ -110,9 +112,8 @@ class EditBuffer:
         # Z tego samego strumienia kopiujemy do backup i jednocześnie
         # zapisujemy edytowane linie do tmp. Nie ma drugiego odczytu pliku,
         # więc inny proces nie może dopisać danych między odczytami.
-        tmp_path = os.path.join(
-            os.path.dirname(os.path.abspath(src_path)) or ".", f".log-viewer_tmp_{uuid.uuid4().hex}"
-        )
+        tmp_p = src_p.resolve().parent / f".log-viewer_tmp_{uuid.uuid4().hex}"
+        tmp_path = str(tmp_p)
         bytes_written = 0
         last_progress_bytes = 0
 
@@ -150,10 +151,10 @@ class EditBuffer:
                 print(f"Warning: could not copy metadata to output ({e})", file=sys.stderr)
 
             # Atomic replace
-            os.replace(tmp_path, src_path)
+            tmp_p.replace(src_path)
         except Exception:
             try:
-                os.unlink(tmp_path)
+                tmp_p.unlink()
             except OSError:
                 pass
             raise

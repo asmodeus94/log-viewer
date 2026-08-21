@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import uuid
+from pathlib import Path
 from typing import Any
 
 from .helpers import (
@@ -50,7 +51,7 @@ class UserConfig:
     }
 
     def __init__(self, config_path: str | None = None):
-        self.path = os.path.expanduser(config_path or CONFIG_FILE_PATH)
+        self.path = str(Path(config_path or CONFIG_FILE_PATH).expanduser())
         self._data: dict[str, Any] = dict(self.DEFAULTS)
         self._load()
 
@@ -71,12 +72,12 @@ class UserConfig:
 
     def save(self) -> None:
         try:
-            tmp_path = os.path.join(
-                os.path.dirname(os.path.abspath(self.path)) or ".", f".log-viewer_cfg_{uuid.uuid4().hex}"
-            )
+            cfg_p = Path(self.path).resolve()
+            tmp_p = cfg_p.parent / f".log-viewer_cfg_{uuid.uuid4().hex}"
+            tmp_path = str(tmp_p)
             with open(tmp_path, "w", encoding="utf-8", opener=secure_opener) as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False, sort_keys=True)
-            os.replace(tmp_path, self.path)
+            tmp_p.replace(self.path)
         except OSError as e:
             print(f"Warning: could not save config to {self.path}: {e}", file=sys.stderr)
 

@@ -21,6 +21,7 @@ select = [
     "BLE",     # flake8-blind-except (wyłapywanie ogólnych wyjątków Exception)
     "A",       # flake8-builtins (przesłanianie wbudowanych nazw Pythona)
     "ARG",     # flake8-unused-arguments (nieużywane argumenty funkcji/metod)
+    "PTH",     # flake8-use-pathlib (wymuszanie pathlib.Path zamiast os.path wg AGENTS.md)
 ]
 ignore = [
     "E501",    # line-too-long (obsługiwane przez formatter)
@@ -30,14 +31,15 @@ ignore = [
     "N802",    # nazwy metod powinny być małą literą (wyłączone dla przeciążeń Qt: paintEvent, rowCount itp.)
     "N815",    # zmienne w klasie w mixedCase (wyłączone dla sygnałów Qt: returnPressed = Signal() itp.)
     "PLW0603", # użycie global w workerach multiprocessing
+    "PTH123",  # open() zamiast Path.open() (standardowy wbudowany open z obsługą niestandardowych openerów)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # W workerach QThread dozwolone jest przechwytywanie BaseException (wymóg stabilności PySide6 wg AGENTS.md)
 "log_viewer/workers.py" = ["BLE001"]
 # W testach i skryptach pomocniczych zezwalamy na badanie prywatnych pól (_data), elastyczniejsze importy i sygnatury fixture'ów
-"tests/*" = ["E402", "F841", "SIM115", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005"]
-"dev-scripts/*" = ["E402", "E741", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PLW0108"]
+"tests/*" = ["E402", "F841", "SIM115", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PTH"]
+"dev-scripts/*" = ["E402", "E741", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PLW0108", "PTH"]
 "scripts/*" = ["BLE001", "SLF001", "ARG001", "ARG002"]
 "run.py" = ["E402"]
 
