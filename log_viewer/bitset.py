@@ -31,7 +31,8 @@ class Bitset(Sequence[int]):
     @classmethod
     def from_raw(cls, size: int, words: array.array[int], total_count: int = -1) -> Bitset:
         """Tworzy instancję Bitset z bezpośredniego bufora 64-bitowych słów."""
-        b = cls(size)
+        b = cls(0)
+        b._size = size
         b._words = words
         b._num_words = len(words)
         b._total_count = total_count
@@ -51,15 +52,10 @@ class Bitset(Sequence[int]):
             self.resize(needed * 64)
 
         global_words = self._words
-        if len(words) == 1:
-            global_words[base_word] |= words[0]
-        elif len(words) > 1:
-            global_words[base_word] |= words[0]
-            global_words[base_word + len(words) - 1] |= words[-1]
-            if len(words) > 2:
-                for i in range(1, len(words) - 1):
-                    global_words[base_word + i] = words[i]
+        for i, w in enumerate(words):
+            global_words[base_word + i] |= w
         self._counts = None
+        self._total_count = -1
 
     def update_indices(self, indices: Iterable[int]) -> None:
         words = self._words
@@ -67,6 +63,7 @@ class Bitset(Sequence[int]):
             if 0 <= idx < self._size:
                 words[idx // 64] |= 1 << (idx % 64)
         self._counts = None
+        self._total_count = -1
 
     def _build_cache(self) -> None:
         if self._counts is not None:
@@ -85,6 +82,7 @@ class Bitset(Sequence[int]):
             self._num_words = new_num_words
         self._size = new_size
         self._counts = None
+        self._total_count = -1
 
     @property
     def size(self) -> int:
@@ -101,26 +99,36 @@ class Bitset(Sequence[int]):
         for i in range(min(len(words), self._num_words)):
             self._words[i] |= words[i]
         self._counts = None
+        self._total_count = -1
 
     def copy_from(self, other: Bitset) -> None:
         """Kopiuje zawartość z innego Bitsetu do bieżącej instancji."""
-        self.resize(other.size)
-        self._words = array.array("Q", other.words)
-        self._num_words = len(other.words)
-        self._counts = None
+        self._size = other._size
+        self._num_words = other._num_words
+        self._words = array.array("Q", other._words)
+        self._total_count = other._total_count
+        self._counts = array.array("Q", other._counts) if other._counts is not None else None
 
     def clone(self) -> Bitset:
         """Zwraca głęboką kopię bieżącego Bitsetu."""
-        new_bs = Bitset(self._size)
+        new_bs = Bitset(0)
+        new_bs._size = self._size
+        new_bs._num_words = self._num_words
         new_bs._words = array.array("Q", self._words)
+        new_bs._total_count = self._total_count
+        new_bs._counts = array.array("Q", self._counts) if self._counts is not None else None
         return new_bs
 
     def __len__(self) -> int:
+        if self._total_count >= 0:
+            return self._total_count
         self._build_cache()
         return self._total_count
 
     def __bool__(self) -> bool:
-        return len(self) > 0
+        if self._total_count >= 0:
+            return self._total_count > 0
+        return any(self._words)
 
     def __contains__(self, index: object) -> bool:
         if not isinstance(index, int) or index < 0 or index >= self._size:
@@ -368,6 +376,7 @@ class Bitset(Sequence[int]):
             target_words[num_words - 1] &= mask
 
         target._counts = None
+        target._total_count = -1
 
     def __and__(self, other: Bitset) -> Bitset:
         if not isinstance(other, Bitset):
@@ -375,45 +384,46 @@ class Bitset(Sequence[int]):
 
         # Ograniczamy do mniejszego rozmiaru
         min_size = min(self._size, other._size)
-        new_bs = Bitset(min_size)
-
         num_words = min(self._num_words, other._num_words)
-        new_words = new_bs._words
         w1 = self._words
         w2 = other._words
 
-        # Używamy zoptymalizowanej metody C (map + operator) i oszczędzamy pamięć (RAM)
-        # bez tworzenia fizycznych kopii bufora list stosując islice (zamiast tab[:num]).
-        new_words[:num_words] = array.array(
+        # Tworzymy pustą instancję Bitset(0) bez alokacji bufora zer i przypisujemy wynik bezpośrednio z map
+        new_bs = Bitset(0)
+        new_bs._size = min_size
+        new_bs._num_words = num_words
+        new_bs._words = array.array(
             "Q", map(operator.and_, itertools.islice(w1, num_words), itertools.islice(w2, num_words))
         )
 
-        if min_size > 0:
+        if min_size > 0 and num_words > 0:
             last_valid_bit = (min_size - 1) % 64
             mask = (1 << (last_valid_bit + 1)) - 1
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF
-            new_words[-1] &= mask
+            new_bs._words[-1] &= mask
 
         return new_bs
 
     def __invert__(self) -> Bitset:
-        new_bs = Bitset(self._size)
-        new_words = new_bs._words
+        new_bs = Bitset(0)
+        new_bs._size = self._size
+        new_bs._num_words = self._num_words
         old_words = self._words
         num_words = self._num_words
 
-        for i in range(num_words):
-            new_words[i] = ~old_words[i] & 0xFFFFFFFFFFFFFFFF
+        # Jednoprzebiegowa alokacja zanegowanych słów bez pośredniego bufora zer
+        new_words = array.array("Q", (~w & 0xFFFFFFFFFFFFFFFF for w in old_words))
+        new_bs._words = new_words
 
-        if self._size > 0:
+        if self._size > 0 and num_words > 0:
             last_valid_bit = (self._size - 1) % 64
             mask = (1 << (last_valid_bit + 1)) - 1
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF
             new_words[-1] &= mask
 
-        if self._counts is not None and self._total_count >= 0:
+        if self._total_count >= 0:
             new_bs._total_count = self._size - self._total_count
 
         return new_bs
