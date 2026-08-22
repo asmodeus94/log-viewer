@@ -73,7 +73,17 @@ Projekt posiada dedykowany skrypt automatyzujący proces budowania aplikacji w f
     ```
 2. Uruchom skrypt budujący w środowisku Twojego docelowego systemu operacyjnego:
     ```bash
+    # Domyślne budowanie aplikacji Log Viewer:
     python scripts/build.py
+
+    # Opcjonalne budowanie narzędzia deweloperskiego Log Generator:
+    python scripts/build.py --target generator
+
+    # Zbudowanie obu aplikacji jednocześnie:
+    python scripts/build.py --target all
+
+    # Zbudowanie z uprzednim wyczyszczeniem katalogów dist/ i build/:
+    python scripts/build.py --clean
     ```
 
 Gotowa aplikacja okienkowa zostanie wygenerowana w folderze `dist/`. Podczas budowania wykorzystywana jest flaga `--onefile` tworząca samowystarczalny plik wykonywalny na systemach Windows oraz Linux (odpowiednio `log-viewer.exe` lub `log-viewer`). Na systemie macOS natywnie polega się na strukturze wbudowanej poprzez flagę `--windowed` pakietu aplikacji (`log-viewer.app`). Folder `dist/`, `build/` oraz pliki z rozszerzeniami systemowych ikon są ignorowane w systemie kontroli wersji.
