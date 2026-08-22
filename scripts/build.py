@@ -283,21 +283,19 @@ def build_app(target: str = "viewer", clean: bool = False) -> None:
 
 def main() -> None:
     """Punkt wejściowy skryptu z obsługą argumentów CLI."""
-    parser = argparse.ArgumentParser(
-        description="Skrypt budujący pliki wykonywalne aplikacji Log Viewer i narzędzi pomocniczych za pomocą PyInstallera."
-    )
+    parser = argparse.ArgumentParser(description="Build script for Log Viewer and auxiliary tools using PyInstaller.")
     parser.add_argument(
         "--target",
         "-t",
         choices=["viewer", "generator", "all", "log-viewer", "generate-logs"],
         default="viewer",
-        help="Cel budowania: 'viewer' (domyślny, aplikacja Log Viewer), 'generator' (narzędzie Generate Logs) lub 'all' (obie aplikacje).",
+        help="Build target: 'viewer' (default, Log Viewer application), 'generator' (Generate Logs utility), or 'all' (both applications).",
     )
     parser.add_argument(
         "--clean",
         "-c",
         action="store_true",
-        help="Wyczyść katalogi wyjściowe dist/ i build/ przed rozpoczęciem budowania.",
+        help="Clean dist/ and build/ output directories before starting the build.",
     )
 
     args = parser.parse_args()
