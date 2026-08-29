@@ -400,7 +400,7 @@ class SearchResultsModel(QAbstractListModel):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._all_results: Sequence[int | tuple[int, str]] | Bitset = []
+        self._all_results: list[int | tuple[int, str]] | Bitset = []
         self._visible_count = 0
         self._batch_size = 1000
         self._indexer: Any = None
@@ -410,7 +410,7 @@ class SearchResultsModel(QAbstractListModel):
         self._color_info = QColor(THEME_DARK["info"])
         self._color_debug = QColor(THEME_DARK["debug"])
 
-    def set_results(self, results: Sequence[int | tuple[int, str]] | Any, indexer: Any = None) -> None:
+    def set_results(self, results: Sequence[int | tuple[int, str]] | Bitset | None, indexer: Any = None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
         if results is None:
@@ -427,11 +427,19 @@ class SearchResultsModel(QAbstractListModel):
         """Dodaje wyniki na końcu. Wywołuje beginInsertRows/endInsertRows."""
         if not results:
             return
-        if not isinstance(self._all_results, list):
-            self._all_results = list(self._all_results)
+
         start = self._visible_count
         self.beginInsertRows(QModelIndex(), start, start + len(results) - 1)
-        self._all_results.extend(results)
+
+        if isinstance(self._all_results, list):
+            self._all_results.extend(results)
+        else:
+            # Wysokowydajna obsługa dla struktury Bitset (zapobiega alokacji ogromnej listy)
+            max_line = max(r[0] for r in results)
+            if max_line >= self._all_results.size:
+                self._all_results.resize(max_line + 1)
+            self._all_results.update_indices(r[0] for r in results)
+
         self._visible_count += len(results)
         self.endInsertRows()
 
