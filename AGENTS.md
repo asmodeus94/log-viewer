@@ -44,7 +44,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - Jeżeli pasek narzędzi lub inne elementy wymagają dynamicznych zmian wynikających np. z tłumaczeń to ich logika powinna rezydować bezpośrednio w kodzie Pythona, nie wewnątrz w `.ui`.
 
 ## 11. Zależności i Wymagania podczas Testów
-- Upewnij się, że odpowiednio zainstalowane są `pip install -r requirements.txt pytest xvfbwrapper` przed uruchomieniem jakichkolwiek testów graficznych. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów używaj polecenia: `xvfb-run -a python -m pytest tests/`.
+- Upewnij się, że odpowiednio zainstalowane są pakiety projektu i deweloperskie (`pip install -r requirements.txt -r requirements-dev.txt`) przed uruchomieniem testów. Należy także puszczać uprzednio kompilację UI w pętli. Do puszczania testów w środowisku bez serwera X używaj polecenia: `xvfb-run -a python -m pytest tests/`.
 
 ## 12. Responsywność Interfejsu (GUI) i Wątkowanie
 - **Złota zasada:** Główny wątek aplikacji (GUI thread) nie może być nigdy blokowany przez operacje wejścia/wyjścia (I/O) ani intensywne obliczenia (np. parsowanie logów, zaawansowane filtrowanie).
@@ -52,7 +52,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 - Do wyświetlania dużych zbiorów danych używaj architektury Model/View w Qt (np. `QAbstractTableModel`, mechanizm `fetchMore()`). Unikaj widgetów uwarunkowanych elementowo (np. `QTableWidget`), ponieważ zniszczy to wydajność przy tysiącach wierszy.
 
 ## 13. Standardy Jakości Kodu (Clean Code)
-- **Typowanie statyczne:** Każda nowa funkcja, metoda i klasa musi posiadać adnotacje typów (Type Hints wg PEP 484) dla argumentów i wartości zwracanych (np. `def parse_line(line: str) -> dict:`).
+- **Typowanie statyczne:** Każda nowa funkcja, metoda i klasa musi posiadać adnotacje typów (Type Hints wg PEP 484) dla argumentów i wartości zwracanych (np. `def parse_line(line: str) -> dict:`). Wymagany Python 3.10+.
 - **Pythonic style:** Wykorzystuj wbudowane mechanizmy języka – używaj f-stringów do formatowania tekstu, list/dict comprehensions dla wydajności, oraz menedżerów kontekstu (`with`) do zarządzania zasobami i blokadami.
 - Preferuj nowoczesny moduł `pathlib` do operacji na ścieżkach nad tradycyjnym `os.path` (chyba że konwencja istniejącego kodu/testów wymaga inaczej).
 - Zmiany w kodzie nie mogą generować nowych ostrzeżeń linterów (utrzymuj kod zgodny ze standardami PEP 8).
@@ -81,6 +81,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
   2. Sprawdzenie formatowania i reguł lintera (`ruff format --check` oraz `ruff check`).
   3. Sprawdzenie statycznej kontroli typów (`mypy log_viewer scripts`).
   4. Pełne wykonanie testów jednostkowych i GUI (`pytest tests/`).
+  5. Opcjonalną walidację raportów SARIF (`scripts/verify.py --sarif`).
 - **Automatyczna naprawa:** W przypadku problemów ze stylem, importami lub formatowaniem, należy użyć:
   ```powershell
   .venv\Scripts\python.exe scripts/verify.py --fix
