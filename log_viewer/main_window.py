@@ -960,6 +960,10 @@ class LogViewerWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         """Aktualizuje status bar, slider, minimap i follow action po zmianie zakładki."""
+        if hasattr(self, "search_entry"):
+            self.search_entry.collapse()
+        if hasattr(self, "filter_entry"):
+            self.filter_entry.collapse()
         self._update_ui_state()
         if index < 0:
             self.setWindowTitle(self.t("app_title"))

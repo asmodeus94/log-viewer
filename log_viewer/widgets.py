@@ -7,27 +7,34 @@ from collections.abc import Sequence
 from typing import Any
 
 from PySide6 import QtCore, QtGui
-from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
     QColor,
     QDragEnterEvent,
     QDropEvent,
+    QFocusEvent,
     QFont,
     QFontDatabase,
     QFontMetrics,
+    QKeyEvent,
     QKeySequence,
+    QMouseEvent,
     QPainter,
     QPen,
+    QResizeEvent,
     QTextCursor,
 )
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QHBoxLayout,
+    QLineEdit,
     QMenu,
     QPlainTextEdit,
+    QSizePolicy,
     QTextEdit,
     QWidget,
 )
@@ -789,87 +796,308 @@ class FormatDialog(QDialog):
         self._apply_format(self.formatter_combo.currentText())
 
 
-class ExpandingLineEdit(QTextEdit):
+class _GlobalClickFilter(QObject):
+    """Filtr zdarzeń myszy wykrywający kliknięcia poza obszarem kontrolki (niezawodny blur)."""
+
+    def __init__(self, target_widget: QWidget, overlay_widget: QWidget, on_click_outside: Any) -> None:
+        super().__init__(target_widget)
+        self._target = target_widget
+        self._overlay = overlay_widget
+        self._callback = on_click_outside
+        self._installed = False
+
+    def install(self) -> None:
+        if not self._installed:
+            app = QApplication.instance()
+            if app:
+                app.installEventFilter(self)
+                self._installed = True
+
+    def remove(self) -> None:
+        if self._installed:
+            app = QApplication.instance()
+            if app:
+                app.removeEventFilter(self)
+            self._installed = False
+
+    def eventFilter(self, _watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.MouseButtonPress and isinstance(event, QMouseEvent):
+            global_pos = event.globalPosition().toPoint()
+            in_target = False
+            if self._target.isVisible():
+                target_rect = QRect(
+                    self._target.mapToGlobal(QPoint(0, 0)),
+                    self._target.size(),
+                )
+                in_target = target_rect.contains(global_pos)
+
+            in_overlay = False
+            if self._overlay.isVisible():
+                overlay_rect = QRect(
+                    self._overlay.mapToGlobal(QPoint(0, 0)),
+                    self._overlay.size(),
+                )
+                in_overlay = overlay_rect.contains(global_pos)
+
+            if not in_target and not in_overlay:
+                self._callback()
+        return False
+
+
+class _BaseLineEdit(QLineEdit):
+    """Wewnętrzne jednowierszowe pole bazowe dla ExpandingLineEdit."""
+
+    shift_enter_pressed = Signal()
+
+    def __init__(self, owner: ExpandingLineEdit) -> None:
+        super().__init__(owner)
+        self._owner = owner
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if (
+            event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+            and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self.shift_enter_pressed.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def focusInEvent(self, event: QFocusEvent) -> None:
+        super().focusInEvent(event)
+        if "\n" in self._owner.text():
+            self._owner.open_overlay()
+
+
+class _MultiLineOverlay(QPlainTextEdit):
+    """Pływająca nakładka edycyjna dla ExpandingLineEdit rozwijająca się w dół ponad innymi kontrolkami."""
+
+    def __init__(self, owner: ExpandingLineEdit) -> None:
+        super().__init__()
+        self._owner = owner
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.setTabChangesFocus(False)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.textChanged.connect(self._on_text_changed)
+
+    def _on_text_changed(self) -> None:
+        self._owner.on_overlay_text_changed()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                super().keyPressEvent(event)
+                self._owner.update_overlay_geometry()
+                event.accept()
+                return
+            self._owner.returnPressed.emit()
+            self._owner.collapse()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Escape:
+            self._owner.collapse()
+            self._owner.clearFocus()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Tab:
+            self._owner.collapse()
+            self._owner.focusNextChild()
+            event.accept()
+            return
+        if event.key() == Qt.Key.Key_Backtab:
+            self._owner.collapse()
+            self._owner.focusPreviousChild()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+        self._owner.update_overlay_geometry()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:
+        super().focusOutEvent(event)
+        if not self._owner.base_edit.hasFocus():
+            self._owner.collapse()
+
+
+class ExpandingLineEdit(QWidget):
     """
-    Pole tekstowe, które dynamicznie dostosowuje swoją szerokość i wysokość.
-    Udaje jednowierszowy QLineEdit, ale pod spodem jest QTextEdit.
-    Po uzyskaniu focusu poszerza się, a w miarę wpisywania dłuższego tekstu rośnie
-    aż do limitu (max_width_limit i max_height_limit). Przy przekroczeniu pojemności
-    pokazuje suwak.
-    Enter zatwierdza, Shift+Enter nowa linia.
+    Pole tekstowe zachowujące stały rozmiar jednowierszowy w layoucie,
+    które w przypadku tekstu wielowierszowego lub naciśnięcia Shift+Enter
+    płynnie rozwija nakładkę (overlay) w dół, nie spychając innych kontrolek.
     """
 
     returnPressed = Signal()
+    textChanged = Signal()
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.base_min_width = 80
-        self.focused_min_width = 150
-        self.max_width_limit = 16777215
-
-        self.setMinimumWidth(self.base_min_width)
-        self.setMaximumWidth(self.max_width_limit)
-
-        self.base_height = self.fontMetrics().height() + 10
-        self.setMaximumHeight(self.base_height)
-        self.setMinimumHeight(self.base_height)
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._full_text = ""
         self.max_height_limit = 150
 
-        self.textChanged.connect(self._adjust_size)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.setAcceptRichText(False)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.base_edit = _BaseLineEdit(self)
+        self.base_edit.returnPressed.connect(self._on_base_return_pressed)
+        self.base_edit.textChanged.connect(self._on_base_text_changed)
+        self.base_edit.shift_enter_pressed.connect(self.open_overlay)
+        layout.addWidget(self.base_edit)
+
+        self._overlay = _MultiLineOverlay(self)
+        self._overlay.hide()
+
+        self._click_filter = _GlobalClickFilter(self, self._overlay, self.collapse)
+
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._update_base_height()
+
+    def _update_base_height(self) -> None:
+        font_metrics = self.fontMetrics()
+        self.base_height = font_metrics.lineSpacing() + 10
+        self.setFixedHeight(self.base_height)
 
     def text(self) -> str:
-        return self.toPlainText()
+        """Zwraca pełny tekst wpisany w kontrolce."""
+        if self._overlay.isVisible():
+            return self._overlay.toPlainText()
+        return self._full_text
 
     def setText(self, t: str) -> None:
-        self.setPlainText(t)
+        """Ustawia tekst w kontrolce."""
+        self._full_text = t
+        self._overlay.blockSignals(True)
+        self._overlay.setPlainText(t)
+        self._overlay.blockSignals(False)
 
-    def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                super().keyPressEvent(event)
-            else:
-                self.returnPressed.emit()
-                event.accept()
+        first_line = t.split("\n")[0] if "\n" in t else t
+        self.base_edit.blockSignals(True)
+        self.base_edit.setText(first_line)
+        self.base_edit.blockSignals(False)
+
+        self.textChanged.emit()
+
+    def clear(self) -> None:
+        """Czyści zawartość pola i zwija nakładkę."""
+        self.setText("")
+        self.collapse()
+
+    def selectAll(self) -> None:
+        """Zaznacza cały tekst w aktywnym polu."""
+        if self._overlay.isVisible():
+            self._overlay.selectAll()
         else:
-            super().keyPressEvent(event)
+            self.base_edit.selectAll()
 
-    def focusInEvent(self, event: QtGui.QFocusEvent) -> None:
-        super().focusInEvent(event)
-        self._adjust_size()
+    def setFocus(self) -> None:
+        """Ustawia focus na kontrolce."""
+        if "\n" in self._full_text:
+            self.open_overlay()
+        else:
+            self.base_edit.setFocus()
 
-    def focusOutEvent(self, event: QtGui.QFocusEvent) -> None:
-        super().focusOutEvent(event)
-        self.setMinimumWidth(self.base_min_width)
-        self.setMaximumHeight(self.base_height)
-        self.setMinimumHeight(self.base_height)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.verticalScrollBar().setValue(0)
+    def hasFocus(self) -> bool:
+        """Sprawdza czy kontrolka lub jej nakładka posiada focus."""
+        return self.base_edit.hasFocus() or self._overlay.hasFocus() or super().hasFocus()
 
-    def _adjust_size(self) -> None:
-        if self.hasFocus():
-            fm = self.fontMetrics()
-            doc = self.document()
+    def setPlaceholderText(self, text: str) -> None:
+        """Ustawia placeholder text."""
+        self.base_edit.setPlaceholderText(text)
+        self._overlay.setPlaceholderText(text)
 
-            text_str = self.toPlainText()
-            lines = text_str.split("\n")
-            max_line_width = max([fm.horizontalAdvance(line) for line in lines] + [0])
+    def setToolTip(self, text: str) -> None:
+        """Ustawia tooltip."""
+        super().setToolTip(text)
+        self.base_edit.setToolTip(text)
+        self._overlay.setToolTip(text)
 
-            text_width = max_line_width + 30
-            new_width = max(self.focused_min_width, text_width)
-            new_width = min(new_width, self.max_width_limit)
-            self.setMinimumWidth(new_width)
+    def setFont(self, font: QFont) -> None:
+        """Ustawia czcionkę dla pola bazowego i nakładki."""
+        super().setFont(font)
+        self.base_edit.setFont(font)
+        self._overlay.setFont(font)
+        self._update_base_height()
 
-            doc_height = int(doc.size().height()) + 10
-            new_height = min(doc_height, self.max_height_limit)
-            new_height = max(new_height, self.base_height)
-            self.setMaximumHeight(new_height)
-            self.setMinimumHeight(new_height)
+    def collapse(self) -> None:
+        """Zwija nakładkę wielowierszową do widoku 1-wierszowego."""
+        if self._overlay.isVisible():
+            self._full_text = self._overlay.toPlainText()
+            first_line = self._full_text.split("\n")[0] if "\n" in self._full_text else self._full_text
+            self.base_edit.blockSignals(True)
+            self.base_edit.setText(first_line)
+            self.base_edit.blockSignals(False)
+            self._overlay.hide()
+            self._click_filter.remove()
 
-            if doc_height > self.max_height_limit:
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            else:
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    def open_overlay(self) -> None:
+        """Otwiera nakładkę wielowierszową rozwijającą się w dół ponad innymi kontrolkami."""
+        win = self.window()
+        if not win:
+            return
+
+        self._overlay.setParent(win)
+        self._overlay.blockSignals(True)
+        self._overlay.setPlainText(self._full_text)
+        self._overlay.blockSignals(False)
+
+        cursor = self._overlay.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self._overlay.setTextCursor(cursor)
+
+        self.update_overlay_geometry()
+        self._overlay.show()
+        self._overlay.raise_()
+        self._overlay.setFocus()
+        self._click_filter.install()
+
+    def update_overlay_geometry(self) -> None:
+        """Przelicza i ustawia pozycję oraz wysokość nakładki."""
+        win = self.window()
+        if not win or not self.isVisible():
+            return
+
+        global_pos = self.mapToGlobal(QPoint(0, 0))
+        local_pos = win.mapFromGlobal(global_pos)
+
+        doc = self._overlay.document()
+        line_count = max(1, doc.blockCount())
+        line_spacing = self._overlay.fontMetrics().lineSpacing()
+        calc_height = line_count * line_spacing + 14
+        target_height = min(max(calc_height, self.base_height), self.max_height_limit)
+
+        if calc_height > self.max_height_limit:
+            self._overlay.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        else:
+            self._overlay.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self._overlay.setGeometry(local_pos.x(), local_pos.y(), self.width(), target_height)
+
+    def _on_base_return_pressed(self) -> None:
+        self.returnPressed.emit()
+
+    def _on_base_text_changed(self, text: str) -> None:
+        if "\n" in text:
+            self._full_text = text
+            self.open_overlay()
+        else:
+            self._full_text = text
+            self._overlay.blockSignals(True)
+            self._overlay.setPlainText(text)
+            self._overlay.blockSignals(False)
+        self.textChanged.emit()
+
+    def on_overlay_text_changed(self) -> None:
+        self._full_text = self._overlay.toPlainText()
+        self.update_overlay_geometry()
+        self.textChanged.emit()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self._overlay.isVisible():
+            self.update_overlay_geometry()
+
+    def moveEvent(self, event: QtGui.QMoveEvent) -> None:
+        super().moveEvent(event)
+        if self._overlay.isVisible():
+            self.update_overlay_geometry()
