@@ -11,6 +11,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import (
     QAction,
+    QColor,
     QGuiApplication,
     QKeySequence,
     QPalette,
@@ -171,8 +172,8 @@ class LogViewerWindow(QMainWindow):
         """Deleguje tab-specific atrybuty/metody do aktywnej zakładki.
 
         Wywoływane tylko gdy normalne wyszukiwanie atrybutu zawiedzie.
-        Dzięki temu window.text, window.position_slider, window._search_results,
-        window._load_window(), window._on_index_done() itp. działają tak samo
+        Dzięki temu `window.text`, `window.position_slider`, `window._search_results`,
+        `window._load_window()`, `window._on_index_done()` itp. działają tak samo
         jak przed refaktorem (delegując do aktywnej zakładki).
         """
         if name.startswith("__") and name.endswith("__"):
@@ -187,13 +188,14 @@ class LogViewerWindow(QMainWindow):
 
     def _delegate_to_tab(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
         """Woła metodę na aktywnej zakładce. No-op jeśli brak zakładki."""
-        tab: QWidget | None = self.tabs.currentWidget()
-        if tab is None:
+        tab = self.tabs.currentWidget()
+        if not isinstance(tab, LogTab):
             return None
-        method = getattr(tab, method_name, None)
-        if method is None:
-            return None
-        return method(*args, **kwargs)
+        method: Any = getattr(tab, method_name, None)
+        if callable(method):
+            # noinspection PyCallingNonCallable
+            return method(*args, **kwargs)
+        return None
 
     # ------------------------------------------------------------------ i18n
     def t(self, key: str) -> str:
@@ -297,6 +299,52 @@ class LogViewerWindow(QMainWindow):
             pass
         return THEME_DARK
 
+    @staticmethod
+    def _create_palette(theme: dict) -> QPalette:
+        pal = QPalette()
+        bg_panel = QColor(theme["bg_panel"])
+        bg_input = QColor(theme["bg_input"])
+        bg_alt = QColor(theme["bg_alt"])
+        fg_main = QColor(theme["fg_main"])
+        fg_bright = QColor(theme["fg_bright"])
+        accent = QColor(theme["accent"])
+        bg_selected = QColor(theme["bg_selected"])
+
+        is_dark = bg_panel.lightness() < 128
+        disabled_fg = QColor("#555555") if is_dark else QColor("#a0a0a0")
+        disabled_bg = QColor(theme["bg_panel"]) if is_dark else QColor("#e0e0e0")
+
+        color_roles = (
+            (QPalette.ColorRole.Window, bg_panel),
+            (QPalette.ColorRole.WindowText, fg_main),
+            (QPalette.ColorRole.Base, bg_input),
+            (QPalette.ColorRole.AlternateBase, bg_alt),
+            (QPalette.ColorRole.ToolTipBase, bg_panel),
+            (QPalette.ColorRole.ToolTipText, fg_main),
+            (QPalette.ColorRole.Text, fg_main),
+            (QPalette.ColorRole.Button, bg_panel),
+            (QPalette.ColorRole.ButtonText, fg_main),
+            (QPalette.ColorRole.BrightText, fg_bright),
+            (QPalette.ColorRole.Link, accent),
+            (QPalette.ColorRole.Highlight, bg_selected),
+            (QPalette.ColorRole.HighlightedText, fg_bright),
+        )
+        for role, col in color_roles:
+            pal.setColor(role, col)
+
+        disabled_roles = (
+            (QPalette.ColorRole.WindowText, disabled_fg),
+            (QPalette.ColorRole.Text, disabled_fg),
+            (QPalette.ColorRole.ButtonText, disabled_fg),
+            (QPalette.ColorRole.Highlight, disabled_bg),
+            (QPalette.ColorRole.HighlightedText, disabled_fg),
+            (QPalette.ColorRole.Base, disabled_bg),
+        )
+        for role, col in disabled_roles:
+            pal.setColor(QPalette.ColorGroup.Disabled, role, col)
+
+        return pal
+
     def apply_theme(self) -> None:
         self._apply_theme()
 
@@ -304,6 +352,18 @@ class LogViewerWindow(QMainWindow):
         """Aplikuje motyw (dark lub light) zgodny z systemem operacyjnym."""
         self.theme = self._detect_system_theme()
         t = self.theme
+
+        app = QtWidgets.QApplication.instance()
+        if isinstance(app, QtWidgets.QApplication):
+            style = app.style()
+            if style is not None and style.objectName().lower() != "fusion":
+                app.setStyle("Fusion")
+            app.setPalette(self._create_palette(t))
+
+        is_dark = QColor(t["bg_panel"]).lightness() < 128
+        disabled_fg = "#555555" if is_dark else "#a0a0a0"
+        disabled_border = "#333333" if is_dark else "#cccccc"
+
         qss = f"""
             QMainWindow, QWidget {{
                 background-color: {t["bg_panel"]};
@@ -340,25 +400,25 @@ class LogViewerWindow(QMainWindow):
                 background-color: {t["accent"]};
             }}
             QMenu::item:disabled {{
-                color: #555555;
+                color: {disabled_fg};
             }}
             QPushButton:disabled {{
-                color: #555555;
+                color: {disabled_fg};
                 background-color: {t["bg_panel"]};
-                border: 1px solid #333333;
+                border: 1px solid {disabled_border};
             }}
             QLineEdit:disabled {{
-                color: #555555;
+                color: {disabled_fg};
                 background-color: {t["bg_panel"]};
-                border: 1px solid #333333;
+                border: 1px solid {disabled_border};
             }}
             QCheckBox:disabled {{
-                color: #555555;
+                color: {disabled_fg};
             }}
             QSpinBox:disabled {{
-                color: #555555;
+                color: {disabled_fg};
                 background-color: {t["bg_panel"]};
-                border: 1px solid #333333;
+                border: 1px solid {disabled_border};
             }}
             QStatusBar {{
                 background-color: {t["bg_statusbar"]};
@@ -373,7 +433,7 @@ class LogViewerWindow(QMainWindow):
                 color: {t["fg_main"]};
             }}
             QLabel#lbl_filter_context:disabled {{
-                color: #555555;
+                color: {disabled_fg};
             }}
             QLineEdit {{
                 background-color: {t["bg_input"]};
@@ -561,6 +621,46 @@ class LogViewerWindow(QMainWindow):
             if isinstance(tab, LogTab):
                 tab.apply_theme()
 
+    @staticmethod
+    def _create_panel_grid() -> tuple[QWidget, QGridLayout]:
+        panel = QWidget()
+        layout = QGridLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.setColumnStretch(0, 0)
+        layout.setColumnStretch(1, 1)
+        return panel, layout
+
+    @staticmethod
+    def _create_h_layout(spacing: int = 4) -> QHBoxLayout:
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(spacing)
+        return layout
+
+    def _create_entry_row(
+        self,
+        label_key: str,
+        on_return: Any,
+        layout: QGridLayout,
+    ) -> tuple[QLabel, ExpandingLineEdit]:
+        lbl = QLabel(self.t(label_key))
+        lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(lbl, 0, 0)
+
+        entry = ExpandingLineEdit()
+        entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        entry.returnPressed.connect(on_return)
+        layout.addWidget(entry, 0, 1)
+        return lbl, entry
+
+    def _create_common_options(self) -> tuple[QCheckBox, QCheckBox, QCheckBox]:
+        return (
+            QCheckBox(self.t("cb_regex")),
+            QCheckBox(self.t("cb_case")),
+            QCheckBox(self.t("cb_negate")),
+        )
+
     def _build_toolbar(self) -> None:
         self.main_toolbar = QToolBar()
         self.main_toolbar.setMovable(False)
@@ -572,56 +672,40 @@ class LogViewerWindow(QMainWindow):
         main_layout.setSpacing(16)
 
         # ----------------- LEWA STRONA (Wyszukiwanie) -----------------
-        search_panel = QWidget()
-        search_layout = QGridLayout(search_panel)
-        search_layout.setContentsMargins(0, 0, 0, 0)
-        search_layout.setSpacing(4)
+        search_panel, search_layout = self._create_panel_grid()
 
-        self.lbl_search = QLabel(self.t("lbl_search"))
-        self.lbl_search.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        search_layout.addWidget(self.lbl_search, 0, 0)
+        self.lbl_search, self.search_entry = self._create_entry_row("lbl_search", self.cmd_find_next, search_layout)
 
-        self.search_entry = ExpandingLineEdit()
-        self.search_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.search_entry.returnPressed.connect(self.cmd_find_next)
-        search_layout.addWidget(self.search_entry, 0, 1)
-
-        search_options_layout = QHBoxLayout()
-        search_options_layout.setContentsMargins(0, 0, 0, 0)
-        search_options_layout.setSpacing(8)
-
-        self.search_regex_cb = QCheckBox(self.t("cb_regex"))
-        self.search_case_cb = QCheckBox(self.t("cb_case"))
-        self.search_negate_cb = QCheckBox(self.t("cb_negate"))
+        search_options_layout = self._create_h_layout(spacing=8)
+        (
+            self.search_regex_cb,
+            self.search_case_cb,
+            self.search_negate_cb,
+        ) = self._create_common_options()
         self.search_in_filter_cb = QCheckBox(self.t("cb_search_in_filter"))
 
-        search_options_layout.addWidget(self.search_regex_cb)
-        search_options_layout.addWidget(self.search_case_cb)
-        search_options_layout.addWidget(self.search_negate_cb)
-        search_options_layout.addWidget(self.search_in_filter_cb)
+        for cb in (
+            self.search_regex_cb,
+            self.search_case_cb,
+            self.search_negate_cb,
+            self.search_in_filter_cb,
+        ):
+            search_options_layout.addWidget(cb)
         search_options_layout.addStretch()
         search_layout.addLayout(search_options_layout, 1, 1)
 
-        search_buttons_layout = QHBoxLayout()
-        search_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        search_buttons_layout.setSpacing(4)
-
+        search_buttons_layout = self._create_h_layout(spacing=4)
         self.btn_find_next = QPushButton(self.t("btn_find_next"))
         self.btn_find_next.clicked.connect(self.cmd_find_next)
-        search_buttons_layout.addWidget(self.btn_find_next)
-
         self.btn_find_prev = QPushButton(self.t("btn_find_prev"))
         self.btn_find_prev.clicked.connect(self.cmd_find_prev)
-        search_buttons_layout.addWidget(self.btn_find_prev)
-
         self.btn_clear_search = QPushButton(self.t("btn_clear_search"))
         self.btn_clear_search.clicked.connect(self.cmd_clear_search)
-        search_buttons_layout.addWidget(self.btn_clear_search)
-        search_buttons_layout.addStretch()
 
+        for btn in (self.btn_find_next, self.btn_find_prev, self.btn_clear_search):
+            search_buttons_layout.addWidget(btn)
+        search_buttons_layout.addStretch()
         search_layout.addLayout(search_buttons_layout, 2, 1)
-        search_layout.setColumnStretch(0, 0)
-        search_layout.setColumnStretch(1, 1)
 
         main_layout.addWidget(search_panel, 1)
 
@@ -632,85 +716,70 @@ class LogViewerWindow(QMainWindow):
         main_layout.addWidget(main_sep)
 
         # ----------------- PRAWA STRONA (Filtrowanie) -----------------
-        filter_panel = QWidget()
-        filter_layout = QGridLayout(filter_panel)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(4)
+        filter_panel, filter_layout = self._create_panel_grid()
 
-        self.lbl_filter = QLabel(self.t("lbl_filter"))
-        self.lbl_filter.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        filter_layout.addWidget(self.lbl_filter, 0, 0)
+        self.lbl_filter, self.filter_entry = self._create_entry_row("lbl_filter", self.cmd_apply_filter, filter_layout)
 
-        self.filter_entry = ExpandingLineEdit()
-        self.filter_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.filter_entry.returnPressed.connect(self.cmd_apply_filter)
-        filter_layout.addWidget(self.filter_entry, 0, 1)
-
-        filter_options_layout = QHBoxLayout()
-        filter_options_layout.setContentsMargins(0, 0, 0, 0)
-        filter_options_layout.setSpacing(8)
-
-        self.filter_regex_cb = QCheckBox(self.t("cb_regex"))
-        self.filter_case_cb = QCheckBox(self.t("cb_case"))
-        self.filter_negate_cb = QCheckBox(self.t("cb_negate"))
-
-        filter_options_layout.addWidget(self.filter_regex_cb)
-        filter_options_layout.addWidget(self.filter_case_cb)
-        filter_options_layout.addWidget(self.filter_negate_cb)
+        filter_options_layout = self._create_h_layout(spacing=8)
+        (
+            self.filter_regex_cb,
+            self.filter_case_cb,
+            self.filter_negate_cb,
+        ) = self._create_common_options()
 
         self.lbl_filter_context = QLabel(self.t("lbl_filter_context"))
         self.lbl_filter_context.setObjectName("lbl_filter_context")
-        filter_options_layout.addWidget(self.lbl_filter_context)
 
         self.filter_context_spin = QSpinBox()
         self.filter_context_spin.setRange(0, 100)
         self.filter_context_spin.setValue(0)
         self.filter_context_spin.setFixedWidth(56)
         self.filter_context_spin.setToolTip(self.t("tt_filter_context"))
-        filter_options_layout.addWidget(self.filter_context_spin)
-        filter_options_layout.addStretch()
 
+        for widget in (
+            self.filter_regex_cb,
+            self.filter_case_cb,
+            self.filter_negate_cb,
+            self.lbl_filter_context,
+            self.filter_context_spin,
+        ):
+            filter_options_layout.addWidget(widget)
+        filter_options_layout.addStretch()
         filter_layout.addLayout(filter_options_layout, 1, 1)
 
-        filter_buttons_layout = QHBoxLayout()
-        filter_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        filter_buttons_layout.setSpacing(4)
-
+        filter_buttons_layout = self._create_h_layout(spacing=4)
         self.btn_apply_filter = QPushButton(self.t("btn_apply_filter"))
         self.btn_apply_filter.clicked.connect(self.cmd_apply_filter)
-        filter_buttons_layout.addWidget(self.btn_apply_filter)
-
         self.btn_clear_filter = QPushButton(self.t("btn_clear_filter"))
         self.btn_clear_filter.clicked.connect(self.cmd_clear_filter)
-        filter_buttons_layout.addWidget(self.btn_clear_filter)
-
         self.btn_refresh = QPushButton(self.t("btn_refresh"))
         self.btn_refresh.clicked.connect(self.cmd_refresh)
-        filter_buttons_layout.addWidget(self.btn_refresh)
-
         self.btn_reload = QPushButton(self.t("btn_reload"))
         self.btn_reload.clicked.connect(self.cmd_reload)
-        filter_buttons_layout.addWidget(self.btn_reload)
-        filter_buttons_layout.addStretch()
 
+        for btn in (self.btn_apply_filter, self.btn_clear_filter, self.btn_refresh, self.btn_reload):
+            filter_buttons_layout.addWidget(btn)
+        filter_buttons_layout.addStretch()
         filter_layout.addLayout(filter_buttons_layout, 2, 1)
-        filter_layout.setColumnStretch(0, 0)
-        filter_layout.setColumnStretch(1, 1)
 
         main_layout.addWidget(filter_panel, 1)
 
         self.main_toolbar.addWidget(container)
 
-        self.search_entry.textChanged.connect(self._save_toolbar_to_tab)
-        self.search_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
-        self.search_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
-        self.search_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
-        self.search_in_filter_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        for edit in (self.search_entry, self.filter_entry):
+            edit.textChanged.connect(self._save_toolbar_to_tab)
 
-        self.filter_entry.textChanged.connect(self._save_toolbar_to_tab)
-        self.filter_regex_cb.stateChanged.connect(self._save_toolbar_to_tab)
-        self.filter_case_cb.stateChanged.connect(self._save_toolbar_to_tab)
-        self.filter_negate_cb.stateChanged.connect(self._save_toolbar_to_tab)
+        for cb in (
+            self.search_regex_cb,
+            self.search_case_cb,
+            self.search_negate_cb,
+            self.search_in_filter_cb,
+            self.filter_regex_cb,
+            self.filter_case_cb,
+            self.filter_negate_cb,
+        ):
+            cb.stateChanged.connect(self._save_toolbar_to_tab)
+
         self.filter_context_spin.valueChanged.connect(self._save_toolbar_to_tab)
 
     def _rebuild_menubar(self) -> None:
@@ -884,7 +953,7 @@ class LogViewerWindow(QMainWindow):
 
     # --------------------------------------------------------- tab mgmt ---
     def _on_tab_title_changed_current(self, title_str: str) -> None:
-        """Slot: aktualizuje tytuł zakładki. Nadawca jest ustalany przez sender()."""
+        """Slot: aktualizuje tytuł zakładki. Nadawca jest ustalany przez `self.sender()`."""
         tab = self.sender()
         if isinstance(tab, LogTab):
             self._on_tab_title_changed(tab, title_str)
@@ -960,6 +1029,10 @@ class LogViewerWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         """Aktualizuje status bar, slider, minimap i follow action po zmianie zakładki."""
+        if hasattr(self, "search_entry"):
+            self.search_entry.collapse()
+        if hasattr(self, "filter_entry"):
+            self.filter_entry.collapse()
         self._update_ui_state()
         if index < 0:
             self.setWindowTitle(self.t("app_title"))
@@ -1341,7 +1414,7 @@ class LogViewerWindow(QMainWindow):
     @Slot(str)
     def _on_dnd_tab_status_changed(self, msg: str) -> None:
         if self._dnd_progress_dialog is not None:
-            # Msg to zwykle format typu: "Budowanie indeksu... X.X%"
+            # Msg to zwykle format typu: "Budowanie indeksu... (np. 12.3%)"
             # Próbujemy wyciągnąć %. Można to zrobić regexem.
             m = re.search(r"(\d+(\.\d+)?)%", msg)
             if m:

@@ -123,6 +123,36 @@ class TestFilterEngine:
         assert len(results) == 0
         idx.close()
 
+    def test_search_file_without_trailing_newline(self, tmp_path):
+        path = tmp_path / "search_no_nl.txt"
+        path.write_bytes(b"first line\nsecond line without newline")
+
+        idx = LineIndexer(path)
+        assert idx.line_count == 2
+        engine = FilterEngine(str(path), idx)
+
+        def run_search(pattern, negate=False):
+            res = []
+            done = threading.Event()
+            engine.start(
+                pattern,
+                use_regex=False,
+                case_sensitive=False,
+                negate=negate,
+                on_progress=lambda *a: None,
+                on_done=lambda r, e: (res.extend(r), done.set()),
+            )
+            done.wait(3.0)
+            return res
+
+        # Dopasowanie do drugiej linii (tej bez \n)
+        assert run_search("second", negate=False) == [1]
+        # Negacja dopasowania do drugiej linii -> pierwsza linia
+        assert run_search("second", negate=True) == [0]
+        # Wzorzec nieistniejący z negacją -> wszystkie linie [0, 1]
+        assert run_search("nonexistent", negate=True) == [0, 1]
+        idx.close()
+
 
 class TestFilterEngineCancel:
     def test_cancel_blocks(self, temp_log_file):

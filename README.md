@@ -1,16 +1,21 @@
 # Log Viewer
 
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)
+![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-green.svg)
 
 **Log Viewer** to wieloplatformowa, wydajna przeglądarka i edytor przeznaczona do pracy z bardzo dużymi plikami logów (nawet wielogigabajtowymi). Główne założenie aplikacji to odczytywanie plików wielkimi partiami bez konieczności ładowania całości do pamięci operacyjnej (RAM). Pozwala na szybkie indeksowanie, podgląd na żywo (*tail -f*), zaawansowane wyszukiwanie i filtrowanie z użyciem wyrażeń regularnych oraz na intuicyjną edycję bezpośrednio w pliku logu.
 
 ## Główne możliwości:
-* **Asynchroniczne ładowanie** plików wielkości wielu GB przy minimalnym zużyciu zasobów,
+* **Asynchroniczne ładowanie** plików wielkości wielu GB przy minimalnym zużyciu zasobów.
+* **Transparentna obsługa plików skompresowanych** – otwieranie i podgląd archiwów logów `.gz`, `.bz2`, `.xz`, `.lzma` w locie bez konieczności wcześniejszego ich rozpakowywania.
 * **Zaawansowane filtrowanie** po konkretnych wzorcach lub wyrażeniach regularnych wraz z możliwością ustawienia tzw. linii kontekstu po każdym wystąpieniu. Wyszukiwanie milionów rekordów jest zoptymalizowane do poziomu sprzętowego dysku, używając skompresowanej struktury **Bitset**.
+* **Pływająca nakładka wielowierszowa (`ExpandingLineEdit`)** – ergonomiczne wprowadzanie i edycja długich filtrów i zapytań regex w rozwijanym oknie nakładki bez rozpychania układu kontrolek (layoutu) okna.
+* **Formatowanie JSON i XML** – wbudowany formater z bezpiecznym parserem `defusedxml` do automatycznego wyodrębniania i estetycznego formatowania (*pretty-print*) struktur danych JSON oraz XML bezpośrednio w podglądzie logu.
 * **Śledzenie plików na żywo (Tail / Follow Mode)** wyposażone w zaawansowany silnik *Incremental Filter*. Aplikacja w locie podłapuje i dopasowuje asynchronicznie przefiltrowane reguły dla napływających MB logów bez lagowania interfejsu.
 * **Mini-mapa** służąca do błyskawicznej nawigacji i podglądu pozycji w pliku.
-* Możliwość robienia **zakładek** (bookmarks) i nanoszenia i zapisywania **edycji** w pliku.
+* **Skok do wiersza lub offsetu bajtowego** – możliwość natychmiastowego przejścia do wybranego numeru wiersza lub bezpośrednio do offsetu bajtowego w pliku za pomocą prefiksu `b:<offset>` (np. `b:1048576`).
+* **Zakładki (bookmarks), edycja i eksport** – tworzenie zakładek, nanoszenie edycji w pliku z mechanizmem atomowego zapisu (ochrona przed kolizjami TOCTOU) oraz eksport przefiltrowanych wyników do nowego pliku (*Save As / Export*).
+* **Wielojęzyczność (i18n)** – pełna obsługa interfejsu użytkownika w języku polskim oraz angielskim.
 * Wsparcie trybów jasnych i ciemnych (Dark/Light).
 * Interfejs wyposażony w funkcjonalność Drag&Drop.
 * Obsługa wielokrotnego otwierania tego samego pliku (w kartach oznaczonych sufiksami `[A]`, `[B]`, itd.).
@@ -19,7 +24,7 @@
 
 ## Wymagania systemowe
 
-Projekt do poprawnego działania wymaga środowiska uruchomieniowego Pythona w wersji co najmniej **3.8**.
+Projekt do poprawnego działania wymaga środowiska uruchomieniowego Pythona w wersji co najmniej **3.10** (ze względu na zoptymalizowane operacje bitowe w strukturze `Bitset` oraz nowoczesne adnotacje typów).
 Graficzny interfejs zrealizowany jest przy użyciu frameworka Qt (wersja 6) poprzez oficjalny pakiet PySide6.
 
 ## Instalacja
@@ -45,6 +50,11 @@ Następnie aktywuj wirtualne środowisko i zainstaluj wymagane pakiety znajdują
   source .venv/bin/activate
   pip install -r requirements.txt
   ```
+
+W przypadku chęci rozwijania projektu, uruchamiania testów lub budowania pakietów zainstaluj zależności deweloperskie:
+```bash
+pip install -r requirements-dev.txt
+```
 
 ## Uruchomienie i Kompilacja interfejsu (UI)
 
