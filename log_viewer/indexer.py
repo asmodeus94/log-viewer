@@ -415,7 +415,8 @@ class LineIndexer:
         self.size = new_size
         return new_lines
 
-    def _advance_lines(self, f: typing.IO[bytes], needed: int) -> bool:
+    @staticmethod
+    def _advance_lines(f: typing.IO[bytes], needed: int) -> bool:
         """Szybkie pomijanie `needed` linii w otwartym pliku bez alokowania zbędnych obiektów."""
         if needed <= 0:
             return True
