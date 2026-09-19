@@ -9,10 +9,10 @@ import sys
 import threading
 import time
 import typing
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, overload
+from typing import Any
 
 from .helpers import (
     DEFAULT_ENCODING,
@@ -125,50 +125,35 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
         return 0, [], chunk_id
 
 
-class _IndexLineProxy(Sequence[int]):
-    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych linii bez alokacji domknięć (closures)."""
+class _IndexProxy:
+    """Bazowa sekwencja proxy na liście IndexEntry dla modułu bisect."""
 
     __slots__ = ("_data",)
 
     def __init__(self, data: list[IndexEntry]) -> None:
         self._data = data
 
-    @overload
-    def __getitem__(self, idx: int) -> int: ...
-
-    @overload
-    def __getitem__(self, idx: slice) -> Sequence[int]: ...
-
-    def __getitem__(self, idx: int | slice) -> int | Sequence[int]:
-        if isinstance(idx, slice):
-            return [e.line for e in self._data[idx]]
-        return self._data[idx].line
-
     def __len__(self) -> int:
         return len(self._data)
 
 
-class _IndexOffsetProxy(Sequence[int]):
-    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych przesunięć bez alokacji domknięć (closures)."""
+class _IndexLineProxy(_IndexProxy):
+    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych linii."""
 
-    __slots__ = ("_data",)
+    __slots__ = ()
 
-    def __init__(self, data: list[IndexEntry]) -> None:
-        self._data = data
+    def __getitem__(self, index: int) -> int:
+        return self._data[index].line
 
-    @overload
-    def __getitem__(self, idx: int) -> int: ...
 
-    @overload
-    def __getitem__(self, idx: slice) -> Sequence[int]: ...
+# noinspection DuplicatedCode
+class _IndexOffsetProxy(_IndexProxy):
+    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych przesunięć."""
 
-    def __getitem__(self, idx: int | slice) -> int | Sequence[int]:
-        if isinstance(idx, slice):
-            return [e.offset for e in self._data[idx]]
-        return self._data[idx].offset
+    __slots__ = ()
 
-    def __len__(self) -> int:
-        return len(self._data)
+    def __getitem__(self, index: int) -> int:
+        return self._data[index].offset
 
 
 class LineIndexer:
@@ -195,6 +180,7 @@ class LineIndexer:
         self.index_interval_bytes = index_interval_bytes if index_interval_bytes is not None else INDEX_INTERVAL_BYTES
         self.size: int = 0
         self.line_count: int = 0
+        self.has_trailing_newline: bool = True
         self.index: list[IndexEntry] = [IndexEntry(0, 0)]
         self._progress_cb = progress_cb
         self._cancel_event = cancel_event  # None = nie można anulować
@@ -309,16 +295,69 @@ class LineIndexer:
         if self._progress_cb:
             self._progress_cb(100.0)
 
+        last_byte = b""
+        if self.size > 0:
+            try:
+                with open(str(self.path), "rb") as f:
+                    f.seek(self.size - 1)
+                    last_byte = f.read(1)
+            except OSError:
+                pass
+
+        if self.size > 0 and last_byte != b"\n":
+            total_lines += 1
+            self.has_trailing_newline = False
+        else:
+            self.has_trailing_newline = True
+
         self.index = full_index
         self.line_count = total_lines
         self._last_indexed_offset = last_indexed_offset
+
+    def _decode_raw_line(self, raw: bytes) -> str:
+        """Dekoduje surowe bajty linii tekstu i usuwa znaki nowej linii."""
+        try:
+            text = raw.decode(self.encoding, errors="replace")
+        except (UnicodeError, LookupError, ValueError, TypeError):
+            text = repr(raw)
+        if text.endswith("\r\n"):
+            return text[:-2]
+        if text.endswith("\n") or text.endswith("\r"):
+            return text[:-1]
+        return text
+
+    def _consume_chunk_index_entries(
+        self,
+        chunk: bytes,
+        base_offset: int,
+        base_line: int,
+        last_indexed_offset: int,
+    ) -> int:
+        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset."""
+        interval = self.index_interval_bytes
+        current_end_offset = base_offset + len(chunk)
+        while current_end_offset - last_indexed_offset >= interval:
+            target_offset = last_indexed_offset + interval
+            target_in_chunk = max(0, target_offset - base_offset)
+
+            nl = chunk.find(b"\n", target_in_chunk)
+            if nl == -1:
+                break
+
+            offset = base_offset + nl + 1
+            nls_before = chunk[:nl].count(b"\n")
+            entry_line = base_line + nls_before + 1
+            self.index.append(IndexEntry(offset, entry_line))
+            last_indexed_offset = offset
+
+        return last_indexed_offset
 
     def _build_single(self) -> None:
         """Implementacja single-thread — fallback i dla małych plików."""
         line_num = 0
         last_indexed_offset = 0
         bytes_read = 0
-        interval = self.index_interval_bytes
+        last_byte = b""
         with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
                 chunk = f.read(INDEX_CHUNK_BYTES)
@@ -327,27 +366,22 @@ class LineIndexer:
                 chunk_len = len(chunk)
                 nl_count = chunk.count(b"\n")
 
-                current_end_offset = bytes_read + chunk_len
-                while current_end_offset - last_indexed_offset >= interval:
-                    target_offset = last_indexed_offset + interval
-                    target_in_chunk = target_offset - bytes_read
-                    if target_in_chunk < 0:
-                        target_in_chunk = 0
-
-                    nl = chunk.find(b"\n", target_in_chunk)
-                    if nl == -1:
-                        break
-
-                    offset = bytes_read + nl + 1
-                    nls_before = chunk[:nl].count(b"\n")
-                    entry_line = line_num + nls_before + 1
-                    self.index.append(IndexEntry(offset, entry_line))
-                    last_indexed_offset = offset
+                last_indexed_offset = self._consume_chunk_index_entries(
+                    chunk, bytes_read, line_num, last_indexed_offset
+                )
 
                 line_num += nl_count
                 bytes_read += chunk_len
+                last_byte = chunk[-1:]
                 if self._progress_cb and self.size > 0:
                     self._progress_cb(bytes_read / self.size * 100.0)
+
+        if bytes_read > 0 and last_byte != b"\n":
+            line_num += 1
+            self.has_trailing_newline = False
+        else:
+            self.has_trailing_newline = True
+
         self.line_count = line_num
         self._last_indexed_offset = last_indexed_offset
 
@@ -362,7 +396,11 @@ class LineIndexer:
         line_num = self.line_count
         last_indexed_offset = self._last_indexed_offset
         bytes_read = 0
-        interval = self.index_interval_bytes
+        total_new_nls = 0
+        last_byte = b""
+        had_trailing_nl = self.has_trailing_newline
+        base_line = line_num if had_trailing_nl else max(0, line_num - 1)
+
         with open(str(self.path), "rb") as f:
             f.seek(old_size)
             while True:
@@ -371,26 +409,13 @@ class LineIndexer:
                     break
                 chunk_len = len(chunk)
                 nl_count = chunk.count(b"\n")
+                total_new_nls += nl_count
+                last_byte = chunk[-1:]
 
                 base = old_size + bytes_read
-                current_end_offset = base + chunk_len
-                while current_end_offset - last_indexed_offset >= interval:
-                    target_offset = last_indexed_offset + interval
-                    target_in_chunk = target_offset - base
-                    if target_in_chunk < 0:
-                        target_in_chunk = 0
+                last_indexed_offset = self._consume_chunk_index_entries(chunk, base, base_line, last_indexed_offset)
 
-                    nl = chunk.find(b"\n", target_in_chunk)
-                    if nl == -1:
-                        break
-
-                    offset = base + nl + 1
-                    nls_before = chunk[:nl].count(b"\n")
-                    entry_line = line_num + nls_before + 1
-                    self.index.append(IndexEntry(offset, entry_line))
-                    last_indexed_offset = offset
-
-                line_num += nl_count
+                base_line += nl_count
                 bytes_read += chunk_len
                 if progress_cb and bytes_to_read > 0:
                     progress_cb(bytes_read / bytes_to_read * 100.0)
@@ -401,8 +426,17 @@ class LineIndexer:
                 except OSError:
                     pass
                 self._file_cache = None
-        new_lines = line_num - self.line_count
-        self.line_count = line_num
+
+        if had_trailing_nl:
+            new_lines = total_new_nls + (1 if bytes_read > 0 and last_byte != b"\n" else 0)
+        else:
+            if total_new_nls == 0:
+                new_lines = 0
+            else:
+                new_lines = (total_new_nls - 1) + (1 if last_byte != b"\n" else 0)
+
+        self.has_trailing_newline = (bytes_read == 0 and had_trailing_nl) or (last_byte == b"\n")
+        self.line_count = line_num + new_lines
         self._last_indexed_offset = last_indexed_offset
         self.size = new_size
         return new_lines
@@ -473,14 +507,7 @@ class LineIndexer:
                     raw = f.readline()
                     if not raw:
                         break
-                    try:
-                        text = raw.decode(self.encoding, errors="replace")
-                    except (UnicodeError, LookupError, ValueError, TypeError):
-                        text = repr(raw)
-                    if text.endswith("\r\n"):
-                        text = text[:-2]
-                    elif text.endswith("\n") or text.endswith("\r"):
-                        text = text[:-1]
+                    text = self._decode_raw_line(raw)
                     out.append((target_line, text))
                     current_line += 1
 
@@ -502,14 +529,7 @@ class LineIndexer:
                 raw = f.readline()
                 if not raw:
                     break
-                try:
-                    text = raw.decode(self.encoding, errors="replace")
-                except (UnicodeError, LookupError, ValueError, TypeError):
-                    text = repr(raw)
-                if text.endswith("\r\n"):
-                    text = text[:-2]
-                elif text.endswith("\n") or text.endswith("\r"):
-                    text = text[:-1]
+                text = self._decode_raw_line(raw)
                 out.append((start_line + i, text))
         return out
 
@@ -535,6 +555,8 @@ class LineIndexer:
                     return current_line, current_offset
                 current_offset += len(line)
                 current_line += 1
+            if 0 < self.line_count <= current_line:
+                current_line = self.line_count - 1
             return current_line, current_offset
 
     def read_tail(self, max_lines: int) -> list[tuple[int, str]]:

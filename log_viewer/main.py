@@ -19,6 +19,7 @@ def main() -> None:
     multiprocessing.freeze_support()
 
     app = QtWidgets.QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName("log-viewer")
     app.setApplicationDisplayName("log-viewer")
     app.setApplicationVersion("1.0")

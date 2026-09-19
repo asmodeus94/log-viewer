@@ -401,3 +401,67 @@ class TestReadSpecificLines:
         assert len(lines) == 10000
 
         idx.close()
+
+
+class TestLineIndexerNoTrailingNewline:
+    """Testy dla plików bez końcowego znaku nowej linii (np. 1-liniowe pliki)."""
+
+    def test_single_line_without_newline(self, tmp_path):
+        path = tmp_path / "single_line.txt"
+        path.write_bytes(b"sad a asd as")
+
+        idx = LineIndexer(path)
+        assert idx.line_count == 1
+        assert idx.has_trailing_newline is False
+        assert idx.offset_of_line(0) == 0
+        assert idx.read_lines(0, 10) == [(0, "sad a asd as")]
+        assert idx.read_tail(10) == [(0, "sad a asd as")]
+        idx.close()
+
+    def test_multiple_lines_without_trailing_newline(self, tmp_path):
+        path = tmp_path / "multi_no_nl.txt"
+        path.write_bytes(b"line 0\nline 1\nline 2")
+
+        idx = LineIndexer(path)
+        assert idx.line_count == 3
+        assert idx.has_trailing_newline is False
+        assert idx.offset_of_line(0) == 0
+        assert idx.offset_of_line(2) == len(b"line 0\nline 1\n")
+        assert idx.read_lines(0, 10) == [(0, "line 0"), (1, "line 1"), (2, "line 2")]
+        assert idx.read_lines(2, 1) == [(2, "line 2")]
+        idx.close()
+
+    def test_incremental_update_without_trailing_newline(self, tmp_path):
+        path = tmp_path / "follow_no_nl.txt"
+        path.write_bytes(b"first")
+
+        idx = LineIndexer(path)
+        assert idx.line_count == 1
+        assert idx.has_trailing_newline is False
+
+        # Dopisanie do tej samej linii (brak \n)
+        with open(path, "ab") as f:
+            f.write(b" line continued")
+        nl = idx.update_from(path.stat().st_size)
+        assert nl == 0
+        assert idx.line_count == 1
+        assert idx.has_trailing_newline is False
+        assert idx.read_lines(0, 10) == [(0, "first line continued")]
+
+        # Dopisanie nowej linii
+        with open(path, "ab") as f:
+            f.write(b"\nsecond line")
+        nl = idx.update_from(path.stat().st_size)
+        assert nl == 1
+        assert idx.line_count == 2
+        assert idx.has_trailing_newline is False
+        assert idx.read_lines(0, 10) == [(0, "first line continued"), (1, "second line")]
+
+        # Domknięcie nowej linii
+        with open(path, "ab") as f:
+            f.write(b"\n")
+        nl = idx.update_from(path.stat().st_size)
+        assert nl == 0
+        assert idx.line_count == 2
+        assert idx.has_trailing_newline is True
+        idx.close()

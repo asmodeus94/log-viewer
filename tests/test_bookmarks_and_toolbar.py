@@ -1007,3 +1007,33 @@ class TestSearchHighlightColor:
 
         has_orange_sel = any(s.format.background().color().name() == orange_color for s in sels)
         assert has_orange_sel, "Search result should have orange background (search_active)"
+
+
+# =============================================================================
+# Styl Fusion i paleta (ciemne checkboxy w trybie zablokowanym)
+# =============================================================================
+
+
+class TestCheckboxStyleAndPalette:
+    def test_fusion_style_and_dark_palette_applied(self, app_instance):
+        """Upewnia sie, ze styl Fusion oraz paleta z ciemnymi tlami sa zaaplikowane."""
+        window, _ = app_instance
+        app = QtWidgets.QApplication.instance()
+        assert app is not None
+        assert app.style().objectName().lower() == "fusion"
+
+        pal = app.palette()
+        disabled_base = pal.color(QtGui.QPalette.ColorGroup.Disabled, QtGui.QPalette.ColorRole.Base)
+        assert disabled_base.name().lower() != "#ffffff"
+
+    def test_disabled_checkbox_indicator_not_white(self, app_instance):
+        """Zablokowany checkbox nie ma bialego tla wskaznika."""
+        window, _ = app_instance
+        cb = window.search_regex_cb
+        cb.setEnabled(False)
+        window.show()
+        QtWidgets.QApplication.processEvents()
+
+        img = cb.grab().toImage()
+        pixel_color = QtGui.QColor.fromRgba(img.pixel(7, 10))
+        assert pixel_color.name().lower() != "#ffffff"
