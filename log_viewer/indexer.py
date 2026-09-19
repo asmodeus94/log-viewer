@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 import multiprocessing
 import multiprocessing.sharedctypes
+import operator
 import sys
 import threading
 import time
@@ -30,6 +31,9 @@ class IndexEntry:
     line: int  # numer linii (0-indexed)
 
 
+_ENTRY_LINE = operator.attrgetter("line")
+_ENTRY_OFFSET = operator.attrgetter("offset")
+
 _shared_progress_bytes: multiprocessing.sharedctypes.Synchronized[int] | Any = None
 
 
@@ -48,8 +52,9 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     Optymalizacje wydajności:
       1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
       2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
-      3. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
-      4. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
+      3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy).
+      4. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
+      5. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
     Liczy znaki nowej linii w przydzielonym zakresie `[start, end)`. Każdy proces
     przetwarza wyłącznie bajty zadeklarowane w swoim wycinku.
@@ -89,11 +94,15 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                 # Policz newline'e w nowo wczytanych bajtach (chunk)
                 nl_count = chunk.count(b"\n")
 
+                chunk_start_line = local_line
                 line_count += nl_count
                 local_line += nl_count
 
                 # Znajdowanie pozycji dla wpisów indeksu w wyznaczonych interwałach
                 current_end_offset = start + bytes_processed
+                last_counted_pos = carry_len
+                running_line = chunk_start_line
+
                 while current_end_offset - last_idx >= interval:
                     target_offset = last_idx + interval
                     target_in_chunk = target_offset - (start + bytes_processed - data_len)
@@ -106,10 +115,10 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                         break
 
                     offset = start + bytes_processed - data_len + nl + 1
-                    nls_before = data[carry_len:nl].count(b"\n")
-                    entry_local_line = (local_line - nl_count) + nls_before + 1
+                    running_line += data.count(b"\n", last_counted_pos, nl) + 1
+                    last_counted_pos = nl + 1
 
-                    index_entries.append((offset, entry_local_line))
+                    index_entries.append((offset, running_line))
                     last_idx = offset
 
                 # Zachowaj niepełną ostatnią linię jako carry dla następnego chunku
@@ -123,37 +132,6 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     except (OSError, ValueError, RuntimeError) as e:
         print(f"Warning: indexer worker {chunk_id} failed: {e}", file=sys.stderr)
         return 0, [], chunk_id
-
-
-class _IndexProxy:
-    """Bazowa sekwencja proxy na liście IndexEntry dla modułu bisect."""
-
-    __slots__ = ("_data",)
-
-    def __init__(self, data: list[IndexEntry]) -> None:
-        self._data = data
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-
-class _IndexLineProxy(_IndexProxy):
-    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych linii."""
-
-    __slots__ = ()
-
-    def __getitem__(self, index: int) -> int:
-        return self._data[index].line
-
-
-# noinspection DuplicatedCode
-class _IndexOffsetProxy(_IndexProxy):
-    """Klasa pomocnicza dla modułu bisect symulująca sekwencję samych przesunięć."""
-
-    __slots__ = ()
-
-    def __getitem__(self, index: int) -> int:
-        return self._data[index].offset
 
 
 class LineIndexer:
@@ -233,7 +211,7 @@ class LineIndexer:
         Emituje postęp niezwykle płynnie przy użyciu współdzielonego licznika.
         Dzieli plik na chunki dla workerów proporcjonalnie do ich ilości.
         """
-        n_workers = max(2, multiprocessing.cpu_count())
+        n_workers = min(max(2, multiprocessing.cpu_count()), 6)
         n_chunks = n_workers * 2
         chunk_size = self.size // n_chunks
         ranges = []
@@ -316,15 +294,11 @@ class LineIndexer:
 
     def _decode_raw_line(self, raw: bytes) -> str:
         """Dekoduje surowe bajty linii tekstu i usuwa znaki nowej linii."""
+        raw = raw.rstrip(b"\r\n")
         try:
-            text = raw.decode(self.encoding, errors="replace")
+            return raw.decode(self.encoding, errors="replace")
         except (UnicodeError, LookupError, ValueError, TypeError):
-            text = repr(raw)
-        if text.endswith("\r\n"):
-            return text[:-2]
-        if text.endswith("\n") or text.endswith("\r"):
-            return text[:-1]
-        return text
+            return repr(raw)
 
     def _consume_chunk_index_entries(
         self,
@@ -441,24 +415,42 @@ class LineIndexer:
         self.size = new_size
         return new_lines
 
+    def _advance_lines(self, f: typing.IO[bytes], needed: int) -> bool:
+        """Szybkie pomijanie `needed` linii w otwartym pliku bez alokowania zbędnych obiektów."""
+        if needed <= 0:
+            return True
+        if needed <= 16:
+            return all(bool(f.readline()) for _ in range(needed))
+
+        chunk_size = 64 * 1024
+        while needed > 0:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                return False
+            c = chunk.count(b"\n")
+            if needed > c:
+                needed -= c
+            else:
+                idx = -1
+                for _ in range(needed):
+                    idx = chunk.find(b"\n", idx + 1)
+                f.seek(f.tell() - len(chunk) + idx + 1)
+                break
+        return True
+
     def offset_of_line(self, target_line: int) -> int | None:
         if target_line < 0:
             target_line = 0
         if target_line >= self.line_count:
             return None
-        proxy = _IndexLineProxy(self.index)
-        idx = bisect.bisect_right(proxy, target_line) - 1
+        idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
         start: IndexEntry = self.index[max(0, idx)]
 
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
-            current: int = start.line
-            while current < target_line:
-                skip_bytes = f.readline()
-                if not skip_bytes:
-                    return None
-                current += 1
+            if not self._advance_lines(f, target_line - start.line):
+                return None
             return f.tell()
 
     def read_specific_lines(self, target_lines: list[int]) -> list[tuple[int, str]]:
@@ -473,7 +465,6 @@ class LineIndexer:
         # Usunięcie duplikatów i posortowanie ułatwia sekwencyjny odczyt
         targets = sorted(set(target_lines))
         out: list[tuple[int, str]] = []
-        proxy = _IndexLineProxy(self.index)
 
         with self._file_lock:
             f = self._get_file()
@@ -484,32 +475,28 @@ class LineIndexer:
                     continue
 
                 # Znajdź najbliższy wpis w indeksie przed pożądaną linią
-                idx = bisect.bisect_right(proxy, target_line) - 1
+                idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
                 start: IndexEntry = self.index[max(0, idx)]
 
                 # Jeśli nasza aktualna pozycja (current_line) jest już bliżej celu niż znacznik z indeksu,
                 # to nie cofamy się (nie robimy f.seek), tylko kontynuujemy czytanie do przodu.
                 if current_line != -1 and start.line <= current_line <= target_line:
-                    pass
+                    needed = target_line - current_line
                 else:
                     # Skaczemy, bo znacznik z indeksu jest bliżej (albo byliśmy za daleko / jeszcze nie zaczęliśmy)
                     f.seek(start.offset)
-                    current_line = start.line
+                    needed = target_line - start.line
 
-                # Przewijaj linie do przodu dopóki nie trafisz w target_line
-                while current_line < target_line:
-                    skip_bytes = f.readline()
-                    if not skip_bytes:
-                        break
-                    current_line += 1
+                if not self._advance_lines(f, needed):
+                    break
+                current_line = target_line
 
-                if current_line == target_line:
-                    raw = f.readline()
-                    if not raw:
-                        break
-                    text = self._decode_raw_line(raw)
-                    out.append((target_line, text))
-                    current_line += 1
+                raw = f.readline()
+                if not raw:
+                    break
+                text = self._decode_raw_line(raw)
+                out.append((target_line, text))
+                current_line += 1
 
         return out
 
@@ -518,13 +505,15 @@ class LineIndexer:
             start_line = 0
         if start_line >= self.line_count:
             return []
-        offset = self.offset_of_line(start_line)
-        if offset is None:
-            return []
+        idx = bisect.bisect_right(self.index, start_line, key=_ENTRY_LINE) - 1
+        start: IndexEntry = self.index[max(0, idx)]
+
         out: list[tuple[int, str]] = []
         with self._file_lock:
             f = self._get_file()
-            f.seek(offset)
+            f.seek(start.offset)
+            if not self._advance_lines(f, start_line - start.line):
+                return []
             for i in range(count):
                 raw = f.readline()
                 if not raw:
@@ -538,8 +527,7 @@ class LineIndexer:
             byte_offset = 0
         if byte_offset > self.size:
             byte_offset = self.size
-        proxy = _IndexOffsetProxy(self.index)
-        idx = bisect.bisect_right(proxy, byte_offset) - 1
+        idx = bisect.bisect_right(self.index, byte_offset, key=_ENTRY_OFFSET) - 1
         start = self.index[max(0, idx)]
 
         with self._file_lock:
