@@ -9,6 +9,10 @@ import pytest
 # Dodaj katalog nadrzędny do path by móc importować pakiet log_viewer
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Konfiguracja platformy Qt — w środowiskach testowych/headless (zwłaszcza macOS i CI)
+# wymuszamy offscreen, aby uniknąć problemów z brakiem aktywnego serwera okien (Cocoa/X11)
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
 # Wycisz ostrzeżenia z qt.qpa.fonts (np. brak czcionki "Sans Serif" na macOS)
 os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 

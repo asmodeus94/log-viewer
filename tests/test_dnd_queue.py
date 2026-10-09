@@ -14,8 +14,7 @@ def test_dnd_multiple_files(qtbot, tmp_path):
     window = LogViewerWindow()
     qtbot.addWidget(window)
     window.show()
-    with qtbot.waitExposed(window):
-        pass
+    qtbot.waitUntil(window.isVisible)
 
     # Początkowo nie ma żadnych zakładek (lub jest jedna pusta)
     initial_tabs = window.tabs.count()
@@ -47,8 +46,7 @@ def test_dnd_large_file_over_50mb(qtbot, tmp_path):
     window = LogViewerWindow()
     qtbot.addWidget(window)
     window.show()
-    with qtbot.waitExposed(window):
-        pass
+    qtbot.waitUntil(window.isVisible)
 
     initial_tabs = window.tabs.count()
     window._on_files_dropped([str(large_file)])
