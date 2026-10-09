@@ -221,7 +221,7 @@ def is_compressed(path: str) -> bool:
     )
 
 
-def open_maybe_compressed(path: str, mode: str = "rb") -> typing.IO[bytes]:
+def open_maybe_compressed(path: str, mode: str = "rb", buffering: int = -1) -> typing.IO[bytes]:
     """Otwiera plik, transparentnie dekompresując na podstawie rozszerzenia."""
     p = path.lower()
     if p.endswith(".gz") or p.endswith(".gzip"):
@@ -230,7 +230,7 @@ def open_maybe_compressed(path: str, mode: str = "rb") -> typing.IO[bytes]:
         return bz2.open(path, mode)  # type: ignore[return-value]
     if p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
         return lzma.open(path, mode)  # type: ignore[return-value]
-    return open(path, mode)
+    return open(path, mode, buffering=buffering)
 
 
 def get_resource_path(relative_path: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import itertools
 import multiprocessing
 import multiprocessing.sharedctypes
 import operator
@@ -193,7 +194,8 @@ class LineIndexer:
 
     def _get_file(self) -> typing.IO[bytes]:
         if self._file_cache is None:
-            self._file_cache = open_maybe_compressed(str(self.path), "rb")
+            buffering = 1024 * 1024 if not self.is_compressed else -1
+            self._file_cache = open_maybe_compressed(str(self.path), "rb", buffering=buffering)
         file_obj = self._file_cache
         assert file_obj is not None
         return file_obj
@@ -515,7 +517,7 @@ class LineIndexer:
     def read_lines(self, start_line: int, count: int) -> list[tuple[int, str]]:
         if start_line < 0:
             start_line = 0
-        if start_line >= self.line_count:
+        if start_line >= self.line_count or count <= 0:
             return []
         idx = bisect.bisect_right(self.index, start_line, key=_ENTRY_LINE) - 1
         start: IndexEntry = self.index[max(0, idx)]
@@ -526,10 +528,7 @@ class LineIndexer:
             f.seek(start.offset)
             if not self._advance_lines(f, start_line - start.line):
                 return []
-            for i in range(count):
-                raw = f.readline()
-                if not raw:
-                    break
+            for i, raw in enumerate(itertools.islice(f, count)):
                 text = self._decode_raw_line(raw)
                 out.append((start_line + i, text))
         return out
