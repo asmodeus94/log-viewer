@@ -605,3 +605,31 @@ class TestConsumeChunkIndexEntries:
                 assert entry.offset == idx.size and entry.line == idx.line_count
 
         idx.close()
+
+
+class TestIndexerWorkerChunk:
+    """Testy dla funkcji roboczej multiprocessing _indexer_worker_chunk i _collect_chunk_index_entries."""
+
+    def test_worker_chunk_direct(self, tmp_path):
+        from log_viewer.indexer import _indexer_worker_chunk
+
+        path = tmp_path / "worker_direct.log"
+        raw_lines = [f"line {i:04d} data\n".encode() for i in range(100)]
+        path.write_bytes(b"".join(raw_lines))
+        size = path.stat().st_size
+
+        # Podziel na 2 równe połówki
+        half = size // 2
+        res1 = _indexer_worker_chunk((0, half, str(path), 128, 0))
+        res2 = _indexer_worker_chunk((half, size, str(path), 128, 1))
+
+        assert res1[2] == 0
+        assert res2[2] == 1
+        total_lines = res1[0] + res2[0]
+        assert total_lines == 100
+
+    def test_worker_chunk_invalid_file(self):
+        from log_viewer.indexer import _indexer_worker_chunk
+
+        res = _indexer_worker_chunk((0, 1000, "nonexistent_file_path_123.log", 128, 99))
+        assert res == (0, [], 99)

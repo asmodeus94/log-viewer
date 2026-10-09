@@ -46,6 +46,41 @@ def _init_worker(progress_val: multiprocessing.sharedctypes.Synchronized[int] | 
 _INDEXER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
 
 
+def _collect_chunk_index_entries(
+    chunk: bytes,
+    base_offset: int,
+    base_line: int,
+    last_indexed_offset: int,
+    interval: int,
+    entries: list[Any],
+    create_entry: Callable[[int, int], Any] | None = None,
+) -> int:
+    """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries.
+
+    Zwraca nowy last_indexed_offset.
+    Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C).
+    """
+    current_end_offset = base_offset + len(chunk)
+    last_counted_pos = 0
+    running_line = base_line
+    while current_end_offset - last_indexed_offset >= interval:
+        target_offset = last_indexed_offset + interval
+        target_in_chunk = max(0, target_offset - base_offset)
+
+        nl = chunk.find(b"\n", target_in_chunk)
+        if nl == -1:
+            break
+
+        offset = base_offset + nl + 1
+        running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
+        last_counted_pos = nl + 1
+        entry = (offset, running_line) if create_entry is None else create_entry(offset, running_line)
+        entries.append(entry)
+        last_indexed_offset = offset
+
+    return last_indexed_offset
+
+
 def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, list[tuple[int, int]], int]:
     """
     Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
@@ -53,7 +88,7 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     Optymalizacje wydajności:
       1. Użycie `bytes.count(b"\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
       2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
-      3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy).
+      3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy) bez łączenia buforów i bez kopiowania carry.
       4. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
       5. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
@@ -66,7 +101,6 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
         index_entries: list[tuple[int, int]] = []
         last_idx = start  # ostatni offset gdzie zapisaliśmy index entry
         local_line = 0
-        carry = b""
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
         with open(path_str, "rb", buffering=1024 * 1024) as f:
@@ -77,57 +111,27 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                 if not chunk:
                     break
                 chunk_len = len(chunk)
-                bytes_processed += chunk_len
 
                 # Aktualizuj postęp płynnie
                 if _shared_progress_bytes is not None:
                     with _shared_progress_bytes.get_lock():
                         _shared_progress_bytes.value += chunk_len
 
-                # Połącz carry z poprzedniego chunka z nowym chunkiem.
-                if carry:
-                    data = carry + chunk
-                else:
-                    data = chunk
-                data_len = len(data)
-                carry_len = data_len - chunk_len  # ile bajtów to carry
-
-                # Policz newline'e w nowo wczytanych bajtach (chunk)
                 nl_count = chunk.count(b"\n")
+                current_base_offset = start + bytes_processed
 
-                chunk_start_line = local_line
+                last_idx = _collect_chunk_index_entries(
+                    chunk,
+                    current_base_offset,
+                    local_line,
+                    last_idx,
+                    interval,
+                    index_entries,
+                )
+
                 line_count += nl_count
                 local_line += nl_count
-
-                # Znajdowanie pozycji dla wpisów indeksu w wyznaczonych interwałach
-                current_end_offset = start + bytes_processed
-                last_counted_pos = carry_len
-                running_line = chunk_start_line
-
-                while current_end_offset - last_idx >= interval:
-                    target_offset = last_idx + interval
-                    target_in_chunk = target_offset - (start + bytes_processed - data_len)
-
-                    if target_in_chunk < carry_len:
-                        target_in_chunk = carry_len
-
-                    nl = data.find(b"\n", target_in_chunk)
-                    if nl == -1:
-                        break
-
-                    offset = start + bytes_processed - data_len + nl + 1
-                    running_line += data.count(b"\n", last_counted_pos, nl) + 1
-                    last_counted_pos = nl + 1
-
-                    index_entries.append((offset, running_line))
-                    last_idx = offset
-
-                # Zachowaj niepełną ostatnią linię jako carry dla następnego chunku
-                last_nl = data.rfind(b"\n")
-                if last_nl != -1:
-                    carry = data[last_nl + 1 :]
-                else:
-                    carry = data
+                bytes_processed += chunk_len
 
         return line_count, index_entries, chunk_id
     except (OSError, ValueError, RuntimeError) as e:
@@ -318,25 +322,15 @@ class LineIndexer:
         wycinka (`chunk[:nl]`) i liczenia od nowa za każdym razem, wykorzystuje
         inkrementalne zliczanie bezalokacyjne (`chunk.count` z zakresem) w kodzie C.
         """
-        interval = self.index_interval_bytes
-        current_end_offset = base_offset + len(chunk)
-        last_counted_pos = 0
-        running_line = base_line
-        while current_end_offset - last_indexed_offset >= interval:
-            target_offset = last_indexed_offset + interval
-            target_in_chunk = max(0, target_offset - base_offset)
-
-            nl = chunk.find(b"\n", target_in_chunk)
-            if nl == -1:
-                break
-
-            offset = base_offset + nl + 1
-            running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
-            last_counted_pos = nl + 1
-            self.index.append(IndexEntry(offset, running_line))
-            last_indexed_offset = offset
-
-        return last_indexed_offset
+        return _collect_chunk_index_entries(
+            chunk,
+            base_offset,
+            base_line,
+            last_indexed_offset,
+            self.index_interval_bytes,
+            self.index,
+            create_entry=IndexEntry,
+        )
 
     def _build_single(self) -> None:
         """Implementacja single-thread — fallback i dla małych plików."""
