@@ -13,6 +13,7 @@ from urllib.parse import unquote
 # Stałe konfiguracyjne (wartości domyślne — mogą być nadpisane przez UserConfig)
 INDEX_INTERVAL_BYTES = 1 * 1024 * 1024
 INDEX_CHUNK_BYTES = 1 * 1024 * 1024
+PARALLEL_INDEX_THRESHOLD_BYTES = 300 * 1024 * 1024
 WINDOW_SIZE_LINES = 5000
 MAX_DISPLAY_LINES = 20000
 MAX_DISPLAY_LINE_LENGTH = 10000
@@ -220,7 +221,7 @@ def is_compressed(path: str) -> bool:
     )
 
 
-def open_maybe_compressed(path: str, mode: str = "rb") -> typing.IO[bytes]:
+def open_maybe_compressed(path: str, mode: str = "rb", buffering: int = -1) -> typing.IO[bytes]:
     """Otwiera plik, transparentnie dekompresując na podstawie rozszerzenia."""
     p = path.lower()
     if p.endswith(".gz") or p.endswith(".gzip"):
@@ -229,7 +230,7 @@ def open_maybe_compressed(path: str, mode: str = "rb") -> typing.IO[bytes]:
         return bz2.open(path, mode)  # type: ignore[return-value]
     if p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
         return lzma.open(path, mode)  # type: ignore[return-value]
-    return open(path, mode)
+    return open(path, mode, buffering=buffering)
 
 
 def get_resource_path(relative_path: str) -> str:

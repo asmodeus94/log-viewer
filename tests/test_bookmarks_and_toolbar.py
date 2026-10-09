@@ -797,7 +797,9 @@ class TestIndexingProgress:
 
             from log_viewer.indexer import LineIndexer
 
-            idx = LineIndexer(test_file, progress_cb=progress_cb, encoding="utf-8")
+            idx = LineIndexer(
+                test_file, progress_cb=progress_cb, encoding="utf-8", parallel_threshold_bytes=100 * 1024 * 1024
+            )
             try:
                 assert len(progress_values) > 0, "Missing progress readings"
                 assert 100.0 in progress_values, "Missing final 100% progress"
@@ -878,6 +880,7 @@ class TestIndexingProgress:
                 test_file,
                 encoding="utf-8",
                 cancel_event=cancel_event,
+                parallel_threshold_bytes=100 * 1024 * 1024,
             )
             try:
                 # Po anulowaniu index powinien być pusty (tylko [IndexEntry(0,0)]).

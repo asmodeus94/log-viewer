@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+import itertools
 import multiprocessing
 import multiprocessing.sharedctypes
 import operator
@@ -19,6 +20,7 @@ from .helpers import (
     DEFAULT_ENCODING,
     INDEX_CHUNK_BYTES,
     INDEX_INTERVAL_BYTES,
+    PARALLEL_INDEX_THRESHOLD_BYTES,
     is_compressed,
     open_maybe_compressed,
 )
@@ -45,14 +47,49 @@ def _init_worker(progress_val: multiprocessing.sharedctypes.Synchronized[int] | 
 _INDEXER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
 
 
+def _collect_chunk_index_entries(
+    chunk: bytes,
+    base_offset: int,
+    base_line: int,
+    last_indexed_offset: int,
+    interval: int,
+    entries: list[Any],
+    create_entry: Callable[[int, int], Any] | None = None,
+) -> int:
+    """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries.
+
+    Zwraca nowy last_indexed_offset.
+    Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C).
+    """
+    current_end_offset = base_offset + len(chunk)
+    last_counted_pos = 0
+    running_line = base_line
+    while current_end_offset - last_indexed_offset >= interval:
+        target_offset = last_indexed_offset + interval
+        target_in_chunk = max(0, target_offset - base_offset)
+
+        nl = chunk.find(b"\n", target_in_chunk)
+        if nl == -1:
+            break
+
+        offset = base_offset + nl + 1
+        running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
+        last_counted_pos = nl + 1
+        entry = (offset, running_line) if create_entry is None else create_entry(offset, running_line)
+        entries.append(entry)
+        last_indexed_offset = offset
+
+    return last_indexed_offset
+
+
 def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, list[tuple[int, int]], int]:
     """
     Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
 
     Optymalizacje wydajności:
-      1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
+      1. Użycie `bytes.count(b"\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
       2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
-      3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy).
+      3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy) bez łączenia buforów i bez kopiowania carry.
       4. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
       5. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
@@ -65,7 +102,6 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
         index_entries: list[tuple[int, int]] = []
         last_idx = start  # ostatni offset gdzie zapisaliśmy index entry
         local_line = 0
-        carry = b""
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
         with open(path_str, "rb", buffering=1024 * 1024) as f:
@@ -76,57 +112,27 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                 if not chunk:
                     break
                 chunk_len = len(chunk)
-                bytes_processed += chunk_len
 
                 # Aktualizuj postęp płynnie
                 if _shared_progress_bytes is not None:
                     with _shared_progress_bytes.get_lock():
                         _shared_progress_bytes.value += chunk_len
 
-                # Połącz carry z poprzedniego chunka z nowym chunkiem.
-                if carry:
-                    data = carry + chunk
-                else:
-                    data = chunk
-                data_len = len(data)
-                carry_len = data_len - chunk_len  # ile bajtów to carry
-
-                # Policz newline'e w nowo wczytanych bajtach (chunk)
                 nl_count = chunk.count(b"\n")
+                current_base_offset = start + bytes_processed
 
-                chunk_start_line = local_line
+                last_idx = _collect_chunk_index_entries(
+                    chunk,
+                    current_base_offset,
+                    local_line,
+                    last_idx,
+                    interval,
+                    index_entries,
+                )
+
                 line_count += nl_count
                 local_line += nl_count
-
-                # Znajdowanie pozycji dla wpisów indeksu w wyznaczonych interwałach
-                current_end_offset = start + bytes_processed
-                last_counted_pos = carry_len
-                running_line = chunk_start_line
-
-                while current_end_offset - last_idx >= interval:
-                    target_offset = last_idx + interval
-                    target_in_chunk = target_offset - (start + bytes_processed - data_len)
-
-                    if target_in_chunk < carry_len:
-                        target_in_chunk = carry_len
-
-                    nl = data.find(b"\n", target_in_chunk)
-                    if nl == -1:
-                        break
-
-                    offset = start + bytes_processed - data_len + nl + 1
-                    running_line += data.count(b"\n", last_counted_pos, nl) + 1
-                    last_counted_pos = nl + 1
-
-                    index_entries.append((offset, running_line))
-                    last_idx = offset
-
-                # Zachowaj niepełną ostatnią linię jako carry dla następnego chunku
-                last_nl = data.rfind(b"\n")
-                if last_nl != -1:
-                    carry = data[last_nl + 1 :]
-                else:
-                    carry = data
+                bytes_processed += chunk_len
 
         return line_count, index_entries, chunk_id
     except (OSError, ValueError, RuntimeError) as e:
@@ -151,11 +157,15 @@ class LineIndexer:
         encoding: str = DEFAULT_ENCODING,
         index_interval_bytes: int | None = None,
         cancel_event: threading.Event | None = None,
+        parallel_threshold_bytes: int | None = None,
     ) -> None:
         self.path: Path = Path(path)
         self.encoding: str = encoding
         self.is_compressed: bool = is_compressed(str(self.path))
         self.index_interval_bytes = index_interval_bytes if index_interval_bytes is not None else INDEX_INTERVAL_BYTES
+        self.parallel_threshold_bytes = (
+            parallel_threshold_bytes if parallel_threshold_bytes is not None else PARALLEL_INDEX_THRESHOLD_BYTES
+        )
         self.size: int = 0
         self.line_count: int = 0
         self.has_trailing_newline: bool = True
@@ -184,7 +194,8 @@ class LineIndexer:
 
     def _get_file(self) -> typing.IO[bytes]:
         if self._file_cache is None:
-            self._file_cache = open_maybe_compressed(str(self.path), "rb")
+            buffering = 1024 * 1024 if not self.is_compressed else -1
+            self._file_cache = open_maybe_compressed(str(self.path), "rb", buffering=buffering)
         file_obj = self._file_cache
         assert file_obj is not None
         return file_obj
@@ -194,8 +205,8 @@ class LineIndexer:
             self.size = self.path.stat().st_size
         except OSError:
             self.size = 0
-        # Dla dużych plików użyj multiprocessing — znacznie szybsze na multicore.
-        if not self.is_compressed and self.size > 100 * 1024 * 1024:
+        # Dla bardzo dużych plików użyj multiprocessing — na Windows dopiero >300 MB amortyzuje spawn 6 procesów.
+        if not self.is_compressed and self.size > self.parallel_threshold_bytes:
             try:
                 self._build_parallel()
                 return
@@ -307,24 +318,21 @@ class LineIndexer:
         base_line: int,
         last_indexed_offset: int,
     ) -> int:
-        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset."""
-        interval = self.index_interval_bytes
-        current_end_offset = base_offset + len(chunk)
-        while current_end_offset - last_indexed_offset >= interval:
-            target_offset = last_indexed_offset + interval
-            target_in_chunk = max(0, target_offset - base_offset)
+        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset.
 
-            nl = chunk.find(b"\n", target_in_chunk)
-            if nl == -1:
-                break
-
-            offset = base_offset + nl + 1
-            nls_before = chunk[:nl].count(b"\n")
-            entry_line = base_line + nls_before + 1
-            self.index.append(IndexEntry(offset, entry_line))
-            last_indexed_offset = offset
-
-        return last_indexed_offset
+        Zoptymalizowane pod kątem alokacji pamięci: zamiast tworzenia kopii
+        wycinka (`chunk[:nl]`) i liczenia od nowa za każdym razem, wykorzystuje
+        inkrementalne zliczanie bezalokacyjne (`chunk.count` z zakresem) w kodzie C.
+        """
+        return _collect_chunk_index_entries(
+            chunk,
+            base_offset,
+            base_line,
+            last_indexed_offset,
+            self.index_interval_bytes,
+            self.index,
+            create_entry=IndexEntry,
+        )
 
     def _build_single(self) -> None:
         """Implementacja single-thread — fallback i dla małych plików."""
@@ -334,6 +342,11 @@ class LineIndexer:
         last_byte = b""
         with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
+                if self._cancel_event is not None and self._cancel_event.is_set():
+                    self.index = [IndexEntry(0, 0)]
+                    self.line_count = 0
+                    self._last_indexed_offset = 0
+                    return
                 chunk = f.read(INDEX_CHUNK_BYTES)
                 if not chunk:
                     break
@@ -504,7 +517,7 @@ class LineIndexer:
     def read_lines(self, start_line: int, count: int) -> list[tuple[int, str]]:
         if start_line < 0:
             start_line = 0
-        if start_line >= self.line_count:
+        if start_line >= self.line_count or count <= 0:
             return []
         idx = bisect.bisect_right(self.index, start_line, key=_ENTRY_LINE) - 1
         start: IndexEntry = self.index[max(0, idx)]
@@ -515,38 +528,56 @@ class LineIndexer:
             f.seek(start.offset)
             if not self._advance_lines(f, start_line - start.line):
                 return []
-            for i in range(count):
-                raw = f.readline()
-                if not raw:
-                    break
+            for i, raw in enumerate(itertools.islice(f, count)):
                 text = self._decode_raw_line(raw)
                 out.append((start_line + i, text))
         return out
 
     def line_at_byte_offset(self, byte_offset: int) -> tuple[int, int]:
+        """Zwraca (numer_linii, byte_offset_początku_linii) dla wskazanego byte_offset.
+
+        Zoptymalizowane pod kątem suwaka/slidera: zamiast powolnego wczytywania
+        tysięcy linii za pomocą `f.readline()`, czyta blok bajtów i szybko zlicza
+        znaki nowej linii w kodzie maszynowym C (`bytes.count` oraz `bytes.rfind`).
+        """
         if byte_offset < 0:
             byte_offset = 0
         if byte_offset > self.size:
             byte_offset = self.size
+        if self.line_count == 0:
+            return 0, 0
+        if byte_offset >= self.size:
+            return (self.line_count - 1, self.size) if self.line_count > 0 else (0, 0)
+
         idx = bisect.bisect_right(self.index, byte_offset, key=_ENTRY_OFFSET) - 1
         start = self.index[max(0, idx)]
+
+        to_read = byte_offset - start.offset
+        nl_cnt = 0
+        last_nl_global = -1
+        bytes_left = to_read
+        chunk_size = 512 * 1024
 
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
-            current_offset = start.offset
-            current_line = start.line
-            while current_offset <= byte_offset:
-                line = f.readline()
-                if not line:
+            read_pos = start.offset
+            while bytes_left > 0:
+                chunk = f.read(min(chunk_size, bytes_left))
+                if not chunk:
                     break
-                if current_offset <= byte_offset < current_offset + len(line):
-                    return current_line, current_offset
-                current_offset += len(line)
-                current_line += 1
-            if 0 < self.line_count <= current_line:
-                current_line = self.line_count - 1
-            return current_line, current_offset
+                c = chunk.count(b"\n")
+                if c > 0:
+                    nl_cnt += c
+                    last_nl_global = read_pos + chunk.rfind(b"\n")
+                read_pos += len(chunk)
+                bytes_left -= len(chunk)
+
+        curr_line = start.line + nl_cnt
+        curr_offset = last_nl_global + 1 if last_nl_global != -1 else start.offset
+        if 0 < self.line_count <= curr_line:
+            curr_line = self.line_count - 1
+        return curr_line, curr_offset
 
     def read_tail(self, max_lines: int) -> list[tuple[int, str]]:
         if self.line_count == 0:
