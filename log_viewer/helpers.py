@@ -13,6 +13,7 @@ from urllib.parse import unquote
 # Stałe konfiguracyjne (wartości domyślne — mogą być nadpisane przez UserConfig)
 INDEX_INTERVAL_BYTES = 1 * 1024 * 1024
 INDEX_CHUNK_BYTES = 1 * 1024 * 1024
+PARALLEL_INDEX_THRESHOLD_BYTES = 300 * 1024 * 1024
 WINDOW_SIZE_LINES = 5000
 MAX_DISPLAY_LINES = 20000
 MAX_DISPLAY_LINE_LENGTH = 10000

@@ -124,7 +124,7 @@ class TestLineIndexerParallel:
         if size <= 100 * 1024 * 1024:
             pytest.skip("File too small for parallel threshold")
 
-        idx = LineIndexer(path)  # użyje parallel
+        idx = LineIndexer(path, parallel_threshold_bytes=50 * 1024 * 1024)  # użyje parallel
         assert idx.line_count == n_lines
 
         # Single-thread (wymuś)
@@ -142,6 +142,29 @@ class TestLineIndexerParallel:
 
         idx.close()
         idx2.close()
+
+    def test_parallel_threshold_config(self, temp_log_file):
+        """LineIndexer respektuje domyślny i przekazany próg parallel_threshold_bytes."""
+        path = temp_log_file(num_lines=10)
+        idx = LineIndexer(path)
+        assert idx.parallel_threshold_bytes == 300 * 1024 * 1024
+        idx.close()
+
+        idx_custom = LineIndexer(path, parallel_threshold_bytes=100)
+        assert idx_custom.parallel_threshold_bytes == 100
+        idx_custom.close()
+
+    def test_single_thread_cancellation(self, temp_log_file):
+        """Single-thread indexing przerywa natychmiast gdy cancel_event jest ustawiony."""
+        import threading
+
+        path = temp_log_file(num_lines=5000)
+        cancel = threading.Event()
+        cancel.set()
+        idx = LineIndexer(path, cancel_event=cancel)
+        assert idx.line_count == 0
+        assert len(idx.index) == 1
+        idx.close()
 
     def test_small_file_uses_single(self, temp_log_file):
         """Małe pliki (<100MB) używają single-thread."""

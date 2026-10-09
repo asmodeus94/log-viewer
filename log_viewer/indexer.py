@@ -19,6 +19,7 @@ from .helpers import (
     DEFAULT_ENCODING,
     INDEX_CHUNK_BYTES,
     INDEX_INTERVAL_BYTES,
+    PARALLEL_INDEX_THRESHOLD_BYTES,
     is_compressed,
     open_maybe_compressed,
 )
@@ -50,7 +51,7 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
 
     Optymalizacje wydajności:
-      1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
+      1. Użycie `bytes.count(b"\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
       2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
       3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy).
       4. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
@@ -151,11 +152,15 @@ class LineIndexer:
         encoding: str = DEFAULT_ENCODING,
         index_interval_bytes: int | None = None,
         cancel_event: threading.Event | None = None,
+        parallel_threshold_bytes: int | None = None,
     ) -> None:
         self.path: Path = Path(path)
         self.encoding: str = encoding
         self.is_compressed: bool = is_compressed(str(self.path))
         self.index_interval_bytes = index_interval_bytes if index_interval_bytes is not None else INDEX_INTERVAL_BYTES
+        self.parallel_threshold_bytes = (
+            parallel_threshold_bytes if parallel_threshold_bytes is not None else PARALLEL_INDEX_THRESHOLD_BYTES
+        )
         self.size: int = 0
         self.line_count: int = 0
         self.has_trailing_newline: bool = True
@@ -194,8 +199,8 @@ class LineIndexer:
             self.size = self.path.stat().st_size
         except OSError:
             self.size = 0
-        # Dla dużych plików użyj multiprocessing — znacznie szybsze na multicore.
-        if not self.is_compressed and self.size > 100 * 1024 * 1024:
+        # Dla bardzo dużych plików użyj multiprocessing — na Windows dopiero >300 MB amortyzuje spawn 6 procesów.
+        if not self.is_compressed and self.size > self.parallel_threshold_bytes:
             try:
                 self._build_parallel()
                 return
@@ -341,6 +346,11 @@ class LineIndexer:
         last_byte = b""
         with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
+                if self._cancel_event is not None and self._cancel_event.is_set():
+                    self.index = [IndexEntry(0, 0)]
+                    self.line_count = 0
+                    self._last_indexed_offset = 0
+                    return
                 chunk = f.read(INDEX_CHUNK_BYTES)
                 if not chunk:
                     break
