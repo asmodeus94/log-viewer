@@ -548,3 +548,37 @@ class TestLineIndexerByteOffset:
             running_off += len(line_b)
 
         idx.close()
+
+
+class TestConsumeChunkIndexEntries:
+    """Testy dla bezalokacyjnej metody _consume_chunk_index_entries."""
+
+    def test_consume_multiple_entries_in_one_chunk(self, tmp_path):
+        path = tmp_path / "multi_entries_chunk.log"
+        lines = [f"line {i:02d} with padding data here\n".encode() for i in range(20)]
+        path.write_bytes(b"".join(lines))
+
+        idx = LineIndexer(path, index_interval_bytes=60)
+        assert len(idx.index) >= 5
+        for entry in idx.index:
+            if entry.line < idx.line_count:
+                assert idx.offset_of_line(entry.line) == entry.offset
+            else:
+                assert entry.offset == idx.size and entry.line == idx.line_count
+        idx.close()
+
+    def test_consume_zero_copy_equivalence(self, tmp_path):
+        path = tmp_path / "zero_copy_equiv.log"
+        lines = [f"2026-07-04 {i:05d} [INFO] sample log entry message\n".encode() for i in range(1000)]
+        path.write_bytes(b"".join(lines))
+
+        idx = LineIndexer(path, index_interval_bytes=512)
+        assert len(idx.index) > 10
+
+        for entry in idx.index:
+            if entry.line < idx.line_count:
+                assert entry.offset == idx.offset_of_line(entry.line)
+            else:
+                assert entry.offset == idx.size and entry.line == idx.line_count
+
+        idx.close()

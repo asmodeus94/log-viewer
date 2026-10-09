@@ -307,9 +307,16 @@ class LineIndexer:
         base_line: int,
         last_indexed_offset: int,
     ) -> int:
-        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset."""
+        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset.
+
+        Zoptymalizowane pod kątem alokacji pamięci: zamiast tworzenia kopii
+        wycinka (`chunk[:nl]`) i liczenia od nowa za każdym razem, wykorzystuje
+        inkrementalne zliczanie bezalokacyjne (`chunk.count` z zakresem) w kodzie C.
+        """
         interval = self.index_interval_bytes
         current_end_offset = base_offset + len(chunk)
+        last_counted_pos = 0
+        running_line = base_line
         while current_end_offset - last_indexed_offset >= interval:
             target_offset = last_indexed_offset + interval
             target_in_chunk = max(0, target_offset - base_offset)
@@ -319,9 +326,9 @@ class LineIndexer:
                 break
 
             offset = base_offset + nl + 1
-            nls_before = chunk[:nl].count(b"\n")
-            entry_line = base_line + nls_before + 1
-            self.index.append(IndexEntry(offset, entry_line))
+            running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
+            last_counted_pos = nl + 1
+            self.index.append(IndexEntry(offset, running_line))
             last_indexed_offset = offset
 
         return last_indexed_offset
