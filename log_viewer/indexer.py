@@ -524,29 +524,50 @@ class LineIndexer:
         return out
 
     def line_at_byte_offset(self, byte_offset: int) -> tuple[int, int]:
+        """Zwraca (numer_linii, byte_offset_początku_linii) dla wskazanego byte_offset.
+
+        Zoptymalizowane pod kątem suwaka/slidera: zamiast powolnego wczytywania
+        tysięcy linii za pomocą `f.readline()`, czyta blok bajtów i szybko zlicza
+        znaki nowej linii w kodzie maszynowym C (`bytes.count` oraz `bytes.rfind`).
+        """
         if byte_offset < 0:
             byte_offset = 0
         if byte_offset > self.size:
             byte_offset = self.size
+        if self.line_count == 0:
+            return 0, 0
+        if byte_offset >= self.size:
+            return (self.line_count - 1, self.size) if self.line_count > 0 else (0, 0)
+
         idx = bisect.bisect_right(self.index, byte_offset, key=_ENTRY_OFFSET) - 1
         start = self.index[max(0, idx)]
+
+        to_read = byte_offset - start.offset
+        nl_cnt = 0
+        last_nl_global = -1
+        bytes_left = to_read
+        chunk_size = 512 * 1024
 
         with self._file_lock:
             f = self._get_file()
             f.seek(start.offset)
-            current_offset = start.offset
-            current_line = start.line
-            while current_offset <= byte_offset:
-                line = f.readline()
-                if not line:
+            read_pos = start.offset
+            while bytes_left > 0:
+                chunk = f.read(min(chunk_size, bytes_left))
+                if not chunk:
                     break
-                if current_offset <= byte_offset < current_offset + len(line):
-                    return current_line, current_offset
-                current_offset += len(line)
-                current_line += 1
-            if 0 < self.line_count <= current_line:
-                current_line = self.line_count - 1
-            return current_line, current_offset
+                c = chunk.count(b"\n")
+                if c > 0:
+                    nl_cnt += c
+                    last_nl_global = read_pos + chunk.rfind(b"\n")
+                read_pos += len(chunk)
+                bytes_left -= len(chunk)
+
+        curr_line = start.line + nl_cnt
+        curr_offset = last_nl_global + 1 if last_nl_global != -1 else start.offset
+        if 0 < self.line_count <= curr_line:
+            curr_line = self.line_count - 1
+        return curr_line, curr_offset
 
     def read_tail(self, max_lines: int) -> list[tuple[int, str]]:
         if self.line_count == 0:

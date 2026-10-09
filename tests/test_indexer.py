@@ -465,3 +465,86 @@ class TestLineIndexerNoTrailingNewline:
         assert idx.line_count == 2
         assert idx.has_trailing_newline is True
         idx.close()
+
+
+class TestLineIndexerByteOffset:
+    """Testy dla zoptymalizowanej metody line_at_byte_offset."""
+
+    def test_byte_offset_various_positions(self, tmp_path):
+        # 3 linie:
+        # "line 0\n" -> 7 bajtów (offset 0..6, \n na 6)
+        # "line 1\n" -> 7 bajtów (offset 7..13, \n na 13)
+        # "line 2\n" -> 7 bajtów (offset 14..20, \n na 20)
+        # size = 21, line_count = 3
+        path = tmp_path / "offset_test.log"
+        path.write_bytes(b"line 0\nline 1\nline 2\n")
+
+        idx = LineIndexer(path)
+        assert idx.size == 21
+        assert idx.line_count == 3
+
+        # Początek linii 0
+        assert idx.line_at_byte_offset(0) == (0, 0)
+        # Środek linii 0
+        assert idx.line_at_byte_offset(3) == (0, 0)
+        # Znak \n linii 0
+        assert idx.line_at_byte_offset(6) == (0, 0)
+
+        # Początek linii 1
+        assert idx.line_at_byte_offset(7) == (1, 7)
+        # Środek linii 1
+        assert idx.line_at_byte_offset(10) == (1, 7)
+        # Znak \n linii 1
+        assert idx.line_at_byte_offset(13) == (1, 7)
+
+        # Początek linii 2
+        assert idx.line_at_byte_offset(14) == (2, 14)
+        # Znak \n linii 2
+        assert idx.line_at_byte_offset(20) == (2, 14)
+
+        # Dokładnie koniec pliku (size)
+        assert idx.line_at_byte_offset(21) == (2, 21)
+        # Poza plikiem
+        assert idx.line_at_byte_offset(999) == (2, 21)
+        # Ujemny offset
+        assert idx.line_at_byte_offset(-10) == (0, 0)
+
+        idx.close()
+
+    def test_byte_offset_no_trailing_newline(self, tmp_path):
+        # "line 0\nline 1" -> 13 bajtów (offset 0..6: line 0, 7..12: line 1)
+        path = tmp_path / "offset_no_nl.log"
+        path.write_bytes(b"line 0\nline 1")
+
+        idx = LineIndexer(path)
+        assert idx.size == 13
+        assert idx.line_count == 2
+        assert idx.has_trailing_newline is False
+
+        assert idx.line_at_byte_offset(0) == (0, 0)
+        assert idx.line_at_byte_offset(6) == (0, 0)
+        assert idx.line_at_byte_offset(7) == (1, 7)
+        assert idx.line_at_byte_offset(12) == (1, 7)
+        assert idx.line_at_byte_offset(13) == (1, 13)
+
+        idx.close()
+
+    def test_byte_offset_multiple_sparse_index_entries(self, tmp_path):
+        path = tmp_path / "sparse_offsets.log"
+        lines = [f"2026-07-04 line {i:04d} payload text\n".encode() for i in range(200)]
+        path.write_bytes(b"".join(lines))
+
+        idx = LineIndexer(path, index_interval_bytes=256)
+        assert len(idx.index) > 3
+
+        running_off = 0
+        for i, line_b in enumerate(lines):
+            res_line, res_off = idx.line_at_byte_offset(running_off)
+            assert (res_line, res_off) == (i, running_off)
+
+            res_mid_line, res_mid_off = idx.line_at_byte_offset(running_off + len(line_b) // 2)
+            assert (res_mid_line, res_mid_off) == (i, running_off)
+
+            running_off += len(line_b)
+
+        idx.close()
