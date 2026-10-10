@@ -176,6 +176,7 @@ class LineIndexer:
         self._file_cache: typing.IO[bytes] | None = None
         self._file_lock = threading.Lock()
         self._last_indexed_offset = 0
+        self._cursor_pos: tuple[int, int] | None = None  # (line_number, byte_offset)
         self._build()
 
     def __del__(self) -> None:
@@ -192,6 +193,7 @@ class LineIndexer:
                 except OSError:
                     pass
                 self._file_cache = None
+            self._cursor_pos = None
 
     def _get_file(self) -> typing.IO[bytes]:
         if self._file_cache is None:
@@ -414,6 +416,7 @@ class LineIndexer:
                 except OSError:
                     pass
                 self._file_cache = None
+            self._cursor_pos = None
 
         if had_trailing_nl:
             new_lines = total_new_nls + (1 if bytes_read > 0 and last_byte != b"\n" else 0)
@@ -453,26 +456,48 @@ class LineIndexer:
                 break
         return True
 
+    def _seek_to_line(self, f: typing.IO[bytes], target_line: int) -> bool:
+        """Ustawia wskaźnik otwartego pliku na początek `target_line`.
+
+        Optymalizacja: jeśli ostatnia pozycja kursora (`_cursor_pos`) znajduje się
+        pomiędzy wpisem z indeksu a `target_line`, wznawia odczyt w przód bez
+        cofania się do punktu indeksu (f.seek).
+        """
+        idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
+        start: IndexEntry = self.index[max(0, idx)]
+
+        if self._cursor_pos is not None and start.line <= self._cursor_pos[0] <= target_line:
+            cur_line, cur_off = self._cursor_pos
+            if f.tell() != cur_off:
+                f.seek(cur_off)
+            needed = target_line - cur_line
+        else:
+            f.seek(start.offset)
+            needed = target_line - start.line
+
+        if not self._advance_lines(f, needed):
+            self._cursor_pos = None
+            return False
+
+        self._cursor_pos = (target_line, f.tell())
+        return True
+
     def offset_of_line(self, target_line: int) -> int | None:
         if target_line < 0:
             target_line = 0
         if target_line >= self.line_count:
             return None
-        idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
-        start: IndexEntry = self.index[max(0, idx)]
 
         with self._file_lock:
             f = self._get_file()
-            f.seek(start.offset)
-            if not self._advance_lines(f, target_line - start.line):
+            if not self._seek_to_line(f, target_line):
                 return None
             return f.tell()
 
     def read_specific_lines(self, target_lines: list[int]) -> list[tuple[int, str]]:
         """
         Zoptymalizowana metoda do wczytywania wielu konkretnych (potencjalnie rzadkich) linii naraz.
-        Zamiast szukać offsetu i przewijać plik dla każdej małej grupy linii z osobna (co psuje wydajność),
-        utrzymuje pozycję odczytu i przechodzi sekwencyjnie między liniami, lub skacze tylko gdy to opłacalne.
+        Wykorzystuje globalny kursor pozycji oraz sekwencyjny odczyt w przód bez zbędnych przewinięć.
         """
         if not target_lines:
             return []
@@ -483,35 +508,20 @@ class LineIndexer:
 
         with self._file_lock:
             f = self._get_file()
-            current_line: int = -1
-
             for target_line in targets:
                 if target_line < 0 or target_line >= self.line_count:
                     continue
 
-                # Znajdź najbliższy wpis w indeksie przed pożądaną linią
-                idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
-                start: IndexEntry = self.index[max(0, idx)]
-
-                # Jeśli nasza aktualna pozycja (current_line) jest już bliżej celu niż znacznik z indeksu,
-                # to nie cofamy się (nie robimy f.seek), tylko kontynuujemy czytanie do przodu.
-                if current_line != -1 and start.line <= current_line <= target_line:
-                    needed = target_line - current_line
-                else:
-                    # Skaczemy, bo znacznik z indeksu jest bliżej (albo byliśmy za daleko / jeszcze nie zaczęliśmy)
-                    f.seek(start.offset)
-                    needed = target_line - start.line
-
-                if not self._advance_lines(f, needed):
+                if not self._seek_to_line(f, target_line):
                     break
-                current_line = target_line
 
                 raw = f.readline()
                 if not raw:
+                    self._cursor_pos = None
                     break
                 text = self._decode_raw_line(raw)
                 out.append((target_line, text))
-                current_line += 1
+                self._cursor_pos = (target_line + 1, f.tell())
 
         return out
 
@@ -520,18 +530,17 @@ class LineIndexer:
             start_line = 0
         if start_line >= self.line_count or count <= 0:
             return []
-        idx = bisect.bisect_right(self.index, start_line, key=_ENTRY_LINE) - 1
-        start: IndexEntry = self.index[max(0, idx)]
 
         out: list[tuple[int, str]] = []
         with self._file_lock:
             f = self._get_file()
-            f.seek(start.offset)
-            if not self._advance_lines(f, start_line - start.line):
+            if not self._seek_to_line(f, start_line):
                 return []
             for i, raw in enumerate(itertools.islice(f, count)):
                 text = self._decode_raw_line(raw)
                 out.append((start_line + i, text))
+            if out:
+                self._cursor_pos = (start_line + len(out), f.tell())
         return out
 
     def line_at_byte_offset(self, byte_offset: int) -> tuple[int, int]:

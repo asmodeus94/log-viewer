@@ -686,3 +686,46 @@ class TestIndexerWorkerChunk:
         assert nl_cnt == 3
         assert entries == []
         assert last_off == 500
+
+
+class TestLineIndexerCursorTracking:
+    def test_cursor_tracking_sequential_and_random_access(self, temp_log_file):
+        path = temp_log_file(num_lines=2000)
+        idx = LineIndexer(path, index_interval_bytes=512)
+
+        # 1. Kursor początkowo None
+        assert idx._cursor_pos is None
+
+        # 2. Odczyt linii 10..15 ustawia kursor na linii 15
+        lines = idx.read_lines(10, 5)
+        assert len(lines) == 5
+        assert idx._cursor_pos is not None
+        assert idx._cursor_pos[0] == 15
+
+        # 3. Sekwencyjny odczyt linii 15..20 wznawia z kursora (bez f.seek wstecz)
+        lines2 = idx.read_lines(15, 5)
+        assert len(lines2) == 5
+        assert lines2[0][0] == 15
+        assert idx._cursor_pos[0] == 20
+
+        # 4. Skok w tył (do linii 5) cofa pozycję i prawidłowo pobiera dane
+        lines_back = idx.read_lines(5, 3)
+        assert len(lines_back) == 3
+        assert lines_back[0][0] == 5
+        assert idx._cursor_pos[0] == 8
+
+        # 4b. Daleki skok w przod (indeks blizej niz kursor)
+        lines_far = idx.read_lines(1500, 2)
+        assert len(lines_far) == 2
+        assert lines_far[0][0] == 1500
+        assert idx._cursor_pos[0] == 1502
+
+        # 5. offset_of_line aktualizuje kursor
+        off = idx.offset_of_line(50)
+        assert off is not None
+        assert idx._cursor_pos is not None
+        assert idx._cursor_pos[0] == 50
+
+        # 6. Zamknięcie resetuje kursor
+        idx.close()
+        assert idx._cursor_pos is None
