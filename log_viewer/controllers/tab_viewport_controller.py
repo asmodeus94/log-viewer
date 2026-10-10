@@ -64,9 +64,9 @@ class ViewportController(QObject):
             return
 
         filter_lines = self.tab.filter_all_lines
-        if self.tab.filter_active and self.tab.filter_results and filter_lines is not None:
+        if self.tab.filter_active and filter_lines is not None:
             n = len(filter_lines)
-            start = max(0, min(at_line, n - 1))
+            start = max(0, min(at_line, max(0, n - 1)))
         else:
             start = max(0, min(at_line, max(0, indexer.line_count - 1)))
 
@@ -118,10 +118,10 @@ class ViewportController(QObject):
             return
 
         all_lines = self.tab.filter_all_lines
-        if self.tab.filter_active and self.tab.filter_results and all_lines is not None:
+        if self.tab.filter_active and all_lines is not None:
             n = len(all_lines)
-            start = max(0, min(at_line, n - 1))
-            chunk_lines = all_lines[start : start + self.tab.window_size_lines]
+            start = max(0, min(at_line, max(0, n - 1)))
+            chunk_lines = all_lines[start : start + self.tab.window_size_lines] if n > 0 else []
             lines = self._get_filtered_lines(chunk_lines)
         else:
             start = max(0, min(at_line, max(0, indexer.line_count - 1)))
@@ -699,12 +699,19 @@ class ViewportController(QObject):
         else:
             self._load_window(at_line=line_no)
         self.tab.text.verticalScrollBar().setValue(0)
+        cursor = self.tab.text.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        self.tab.text.setTextCursor(cursor)
 
     def cmd_goto_start(self) -> None:
         if not self.tab.indexer:
             return
         self.tab.cancel_follow_if_active()
         self._load_window(at_line=0)
+        self.tab.text.verticalScrollBar().setValue(0)
+        cursor = self.tab.text.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
+        self.tab.text.setTextCursor(cursor)
 
     def cmd_goto_end(self) -> None:
         indexer = self.tab.indexer
@@ -723,6 +730,9 @@ class ViewportController(QObject):
 
         scrollbar = self.tab.text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+        cursor = self.tab.text.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self.tab.text.setTextCursor(cursor)
 
     def _goto_file_line(self, ln: int, is_filtered_index: bool = False) -> None:
         self.tab.cancel_follow_if_active()

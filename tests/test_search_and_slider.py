@@ -422,3 +422,34 @@ class TestSearchFlow:
             line_text = tab.indexer.read_lines(line_no, 1)[0][1]
             assert "[ERROR]" in line_text
             assert "line 10" in line_text
+
+    def test_navigation_in_filtered_mode(self, app_instance):
+        """Weryfikacja skakania (start, end, goto) w trybie przefiltrowanym."""
+        window, _ = app_instance
+        tab = window.tabs.currentWidget()
+
+        # 1. Filtrujemy tylko linie ERROR (125 linii z 500)
+        window.filter_entry.setText("ERROR")
+        window.filter_case_cb.setChecked(True)
+        window.cmd_apply_filter()
+
+        for _ in range(200):
+            QtWidgets.QApplication.processEvents()
+            if tab.filter_active and len(tab.filter_results) == 125:
+                break
+            time.sleep(0.05)
+        QtWidgets.QApplication.processEvents()
+        assert tab.filter_active
+
+        # 2. Skok na koniec (cmd_goto_end)
+        window.cmd_goto_end()
+        QtWidgets.QApplication.processEvents()
+        assert tab.text.verticalScrollBar().value() == tab.text.verticalScrollBar().maximum()
+        assert tab.line_map[-1] == tab.filter_all_lines[-1]
+
+        # 3. Skok na początek (cmd_goto_start)
+        window.cmd_goto_start()
+        QtWidgets.QApplication.processEvents()
+        assert tab.text.verticalScrollBar().value() == 0
+        assert tab.line_map[0] == tab.filter_all_lines[0]
+        assert tab.text.textCursor().position() == 0

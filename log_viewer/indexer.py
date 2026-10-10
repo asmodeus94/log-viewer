@@ -477,6 +477,8 @@ class LineIndexer:
                 break
         return True
 
+    advance_lines = _advance_lines
+
     def _seek_to_line(self, f: typing.IO[bytes], target_line: int) -> bool:
         """Ustawia wskaźnik otwartego pliku na początek `target_line`.
 
