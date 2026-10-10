@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Konfiguracja PyInstallera dla aplikacji pomocniczej Log Generator (dev-scripts/generate_logs.py).
+Konfiguracja PyInstallera dla aplikacji pomocniczej Log Generator (dev-scripts/log_generator.py).
 Zoptymalizowana pod kątem minimalnego rozmiaru paczki binarnej.
 """
 
@@ -70,7 +70,7 @@ excluded_binaries = {
     "qicns",
 }
 
-script_path = str(repo_root / "dev-scripts" / "generate_logs.py")
+script_path = str(repo_root / "dev-scripts" / "log_generator.py")
 assets_path = str(repo_root / "assets")
 
 a = Analysis(
@@ -113,7 +113,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name="generate-logs",
+    name="log-generator",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -132,7 +132,7 @@ exe = EXE(
 if is_mac:
     app = BUNDLE(
         exe,
-        name="generate-logs.app",
+        name="log-generator.app",
         icon=str(icon_path) if icon_path.exists() else None,
         bundle_identifier="com.logviewer.generator",
         info_plist={

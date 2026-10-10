@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Skrypt budujący aplikacje projektu (log-viewer oraz opcjonalnie generate-logs) za pomocą PyInstallera.
+Skrypt budujący aplikacje projektu (log-viewer oraz opcjonalnie log-generator) za pomocą PyInstallera.
 
 Automatycznie:
 1. Przetwarza argumenty wiersza poleceń (--target, --clean).
@@ -265,12 +265,12 @@ def build_app(target: str = "viewer", clean: bool = False) -> None:
                 system_name=system_name,
             )
         elif current_target == "generator":
-            target_name = "generate-logs"
+            target_name = "log-generator"
             built_target_names.append(target_name)
             build_single_target(
                 repo_root=repo_root,
                 target_name=target_name,
-                spec_filename="generate-logs.spec",
+                spec_filename="log-generator.spec",
                 dist_dir=dist_dir,
                 build_dir=build_dir,
                 system_name=system_name,
@@ -287,9 +287,9 @@ def main() -> None:
     parser.add_argument(
         "--target",
         "-t",
-        choices=["viewer", "generator", "all", "log-viewer", "generate-logs"],
+        choices=["viewer", "generator", "all", "log-viewer", "log-generator", "generate-logs"],
         default="viewer",
-        help="Build target: 'viewer' (default, Log Viewer application), 'generator' (Generate Logs utility), or 'all' (both applications).",
+        help="Build target: 'viewer' (default, Log Viewer application), 'generator' (Log Generator utility), or 'all' (both applications).",
     )
     parser.add_argument(
         "--clean",

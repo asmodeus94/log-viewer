@@ -1,5 +1,5 @@
 """
-Unified Log Generator Tool
+Log Generator Tool
 Developer utility for generating various types of logs:
 1. Multi-App Live Simulator (concurrent application logs with transactions and stack traces)
 2. Fast Large File Generator (high-throughput binary buffered generation up to GBs)
@@ -285,17 +285,48 @@ class MultiAppWorker:
 
 
 class FastLogGenerator:
-    """High-throughput binary log generator using memory buffer chunks."""
+    """High-throughput binary log generator using pre-encoded byte buffers and buffered I/O."""
 
-    @staticmethod
-    def generate_chunk(lines_count: int) -> bytes:
-        """Generates a byte buffer containing formatted log lines."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        lines = [
-            f"[{timestamp}] [{random.choice(FAST_LOG_LEVELS)}] {random.choice(FAST_LOG_MESSAGES)}\n"
-            for _ in range(lines_count)
-        ]
-        return "".join(lines).encode("utf-8")
+    _SUFFIX_TEMPLATES: list[bytes] = []
+    _POOL_SIZE: int = 10_000
+    _NUM_POOLS: int = 8
+    _POOLS: list[list[bytes]] = []
+    _pool_counter: int = 0
+
+    @classmethod
+    def _init_pools(cls) -> None:
+        """Initializes pre-encoded line suffixes and randomized reference pools."""
+        if not cls._POOLS:
+            suffixes = [f" [{lvl}] {msg}\n".encode() for lvl in FAST_LOG_LEVELS for msg in FAST_LOG_MESSAGES]
+            cls._SUFFIX_TEMPLATES = suffixes
+            cls._POOLS = [[random.choice(suffixes) for _ in range(cls._POOL_SIZE)] for _ in range(cls._NUM_POOLS)]
+
+    @classmethod
+    def generate_chunk(cls, lines_count: int, timestamp: str | None = None) -> bytes:
+        """
+        Generates a byte buffer containing formatted log lines at gigabyte-per-second throughput.
+        Supports custom timestamp or defaults to current timestamp.
+        """
+        if lines_count <= 0:
+            return b""
+        if not cls._POOLS:
+            cls._init_pools()
+
+        ts_str = timestamp if timestamp is not None else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        prefix = f"[{ts_str}]".encode("ascii")
+
+        pool = cls._POOLS[cls._pool_counter % cls._NUM_POOLS]
+        cls._pool_counter += 1
+
+        if lines_count <= cls._POOL_SIZE:
+            return b"".join(prefix + s for s in pool[:lines_count])
+
+        block = b"".join(prefix + s for s in pool)
+        reps = lines_count // cls._POOL_SIZE
+        rem = lines_count % cls._POOL_SIZE
+        if rem == 0:
+            return block * reps
+        return (block * reps) + b"".join(prefix + s for s in pool[:rem])
 
     @classmethod
     def generate_to_size(
@@ -320,26 +351,32 @@ class FastLogGenerator:
             target_mb = target_bytes / (1024 * 1024)
             log_callback(f"Fast write started to '{filepath}'. Target: {target_mb:.2f} MB.")
 
+        cur_dt = datetime.now()
+        last_progress_time = 0.0
+
         try:
-            with open(filepath, mode) as f:
+            with open(filepath, mode, buffering=8 * 1024 * 1024) as f:
                 while written_bytes < target_bytes:
                     if stop_event and stop_event.is_set():
                         if log_callback:
                             log_callback("Generation cancelled by user.")
                         break
 
-                    chunk = cls.generate_chunk(chunk_lines)
+                    chunk = cls.generate_chunk(chunk_lines, timestamp=cur_dt.strftime("%Y-%m-%d %H:%M:%S"))
                     if written_bytes + len(chunk) > target_bytes:
                         chunk = chunk[: target_bytes - written_bytes]
 
                     f.write(chunk)
                     written_bytes += len(chunk)
+                    cur_dt += timedelta(seconds=1)
 
-                    elapsed = time.time() - start_time
+                    now = time.time()
+                    elapsed = now - start_time
                     speed_mb = (written_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
 
-                    if progress_callback:
+                    if progress_callback and ((now - last_progress_time >= 0.05) or (written_bytes >= target_bytes)):
                         progress_callback(written_bytes, target_bytes, speed_mb, elapsed)
+                        last_progress_time = now
 
             elapsed = time.time() - start_time
             if log_callback:
@@ -1464,7 +1501,7 @@ if GUI_AVAILABLE:
 
         def __init__(self) -> None:
             super().__init__()
-            self.setWindowTitle("Log Generator Tool")
+            self.setWindowTitle("Log Generator")
             self.resize(780, 720)
 
             self._auto_scroll: bool = True
@@ -1482,7 +1519,7 @@ if GUI_AVAILABLE:
             main_layout = QVBoxLayout(self)
 
             # Application Header
-            title_lbl = QLabel("🛠️ Developer Utility: Log Generator")
+            title_lbl = QLabel("🛠️ Log Generator")
             title_lbl.setStyleSheet("font-size: 15pt; font-weight: bold; padding: 4px;")
             main_layout.addWidget(title_lbl)
 
@@ -1582,15 +1619,15 @@ if GUI_AVAILABLE:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Unified Log Generator Tool for Developers",
+        description="Log Generator Tool for Developers",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Usage Examples:
-  python generate_logs.py                           # Starts Graphical User Interface (GUI)
-  python generate_logs.py fast --output test.log --size-gb 2
-  python generate_logs.py target --output filter.log --phrase "[TARGET]" --count 5000
-  python generate_logs.py json --output sample.jsonl --count 1000
-  python generate_logs.py live --apps 3 --output-dir ./sim_logs
+  python log_generator.py                           # Starts Graphical User Interface (GUI)
+  python log_generator.py fast --output test.log --size-gb 2
+  python log_generator.py target --output filter.log --phrase "[TARGET]" --count 5000
+  python log_generator.py json --output sample.jsonl --count 1000
+  python log_generator.py live --apps 3 --output-dir ./sim_logs
         """,
     )
 
