@@ -1,6 +1,7 @@
 __pycache__/
 log_viewer/ui/ui_*.py
 .coverage
+.benchmarks/
 
 dist/
 build/

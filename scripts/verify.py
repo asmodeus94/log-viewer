@@ -8,13 +8,15 @@ Sprawdza kod pod kątem:
 3. Zgodności typów (mypy)
 4. Poprawności działania testów jednostkowych (pytest)
 5. Opcjonalnej walidacji raportów SARIF (--sarif)
+6. Opcjonalnych testów wydajnościowych / benchmarków (--benchmark)
 
 Użycie:
-    python scripts/verify.py            # Pełna weryfikacja
-    python scripts/verify.py --fix      # Automatyczna naprawa formatowania i importów + weryfikacja
-    python scripts/verify.py --quick    # Szybka weryfikacja (UI + Lint + MyPy, bez pytest)
-    python scripts/verify.py --step ui  # Tylko wybrany krok: ui, lint, mypy, sarif, test
-    python scripts/verify.py --sarif    # Walidacja raportów SARIF w repozytorium
+    python scripts/verify.py                # Pełna weryfikacja
+    python scripts/verify.py --fix          # Automatyczna naprawa formatowania i importów + weryfikacja
+    python scripts/verify.py --quick        # Szybka weryfikacja (UI + Lint + MyPy, bez pytest)
+    python scripts/verify.py --benchmark    # Uruchomienie benchmarków wydajnościowych (pytest-benchmark)
+    python scripts/verify.py --step ui      # Tylko wybrany krok: ui, lint, mypy, sarif, test, benchmark
+    python scripts/verify.py --sarif        # Walidacja raportów SARIF w repozytorium
 """
 
 from __future__ import annotations
@@ -195,6 +197,13 @@ def step_tests(repo_root: Path, py_exe: str) -> bool:
     return code == 0
 
 
+def step_benchmark(repo_root: Path, py_exe: str) -> bool:
+    """Krok benchmarku: testy wydajnościowe (pytest-benchmark)."""
+    cmd = [py_exe, "-m", "pytest", "tests/test_benchmarks.py", "--benchmark-enable"]
+    code, _ = run_command(cmd, repo_root, "Benchmark Step: Performance tests (pytest-benchmark)")
+    return code == 0
+
+
 def main() -> int:
     enable_windows_ansi()
 
@@ -209,8 +218,14 @@ def main() -> int:
         "--quick", "-q", action="store_true", help="Quick verification (UI + Lint + MyPy, skips pytest)"
     )
     parser.add_argument(
+        "--benchmark",
+        "-b",
+        action="store_true",
+        help="Run performance benchmark tests with statistics (pytest-benchmark)",
+    )
+    parser.add_argument(
         "--step",
-        choices=["ui", "lint", "mypy", "sarif", "test"],
+        choices=["ui", "lint", "mypy", "sarif", "test", "benchmark"],
         help="Run only specific verification step",
     )
     parser.add_argument(
@@ -247,6 +262,8 @@ def main() -> int:
         if args.sarif:
             steps_to_run.append("sarif")
         steps_to_run.append("test")
+        if args.benchmark:
+            steps_to_run.append("benchmark")
 
     for step in steps_to_run:
         success = False
@@ -260,6 +277,8 @@ def main() -> int:
             success = step_sarif(repo_root, args.sarif)
         elif step == "test":
             success = step_tests(repo_root, py_exe)
+        elif step == "benchmark":
+            success = step_benchmark(repo_root, py_exe)
 
         if not success:
             print(f"\n{RED}{BOLD}[QUALITY GATE ERROR] Step '{step}' failed.{RESET}")
