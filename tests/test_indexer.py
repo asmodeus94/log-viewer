@@ -77,18 +77,47 @@ class TestLineIndexerCompression:
             with gzip.open(path, "wb") as f:
                 for i in range(n_lines):
                     f.write(f"line {i} [INFO] hello\n".encode())
-            idx = LineIndexer(path)
-            assert idx.line_count == n_lines
-            assert idx.is_compressed is True
-            lines = idx.read_lines(100, 2)
-            assert len(lines) == 2
-            idx.close()
+            progress_vals = []
+            with LineIndexer(path, progress_cb=progress_vals.append) as idx:
+                assert idx.line_count == n_lines
+                assert idx.is_compressed is True
+                assert idx.size > os.path.getsize(path)
+                lines = idx.read_lines(100, 2)
+                assert len(lines) == 2
+                line_no, _ = idx.line_at_byte_offset(idx.size - 5)
+                assert line_no == n_lines - 1
+                if progress_vals:
+                    assert all(pv <= 100.0 for pv in progress_vals)
         finally:
             if os.path.exists(path):
                 try:
                     os.unlink(path)
                 except PermissionError:
                     pass
+
+    def test_bz2(self, tmp_path):
+        import bz2
+
+        path = tmp_path / "test.log.bz2"
+        with bz2.open(path, "wb") as f:
+            for i in range(50):
+                f.write(f"bz2 line {i}\n".encode())
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 50
+            assert idx.is_compressed is True
+            assert idx.size > path.stat().st_size
+            lines = idx.read_lines(10, 2)
+            assert len(lines) == 2
+            assert "bz2 line 10" in lines[0][1]
+
+    def test_empty_gz(self, tmp_path):
+        path = tmp_path / "empty.log.gz"
+        with gzip.open(path, "wb") as f:
+            pass
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 0
+            assert idx.size == 0
+            assert idx.read_lines(0, 10) == []
 
 
 class TestLineIndexerEncoding:
@@ -713,6 +742,33 @@ class TestIndexerWorkerChunk:
         assert nl_cnt == 3
         assert entries == []
         assert last_off == 500
+
+
+class TestLineIndexerContextManager:
+    def test_context_manager_opens_and_closes(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 100
+            assert idx._file_cache is None
+            idx.read_lines(0, 10)
+            assert idx._file_cache is not None
+
+        assert idx._file_cache is None
+        assert idx._cursor_pos is None
+
+    def test_context_manager_exception_closes(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        idx_ref = None
+        try:
+            with LineIndexer(path) as idx:
+                idx_ref = idx
+                idx.read_lines(0, 10)
+                raise RuntimeError("Simulated error inside with")
+        except RuntimeError:
+            pass
+
+        assert idx_ref is not None
+        assert idx_ref._file_cache is None
 
 
 class TestLineIndexerCursorTracking:

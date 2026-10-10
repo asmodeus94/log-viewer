@@ -10,6 +10,7 @@ import operator
 import sys
 import threading
 import time
+import types
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -45,6 +46,7 @@ def _init_worker(progress_val: multiprocessing.sharedctypes.Synchronized[int] | 
 
 
 _INDEXER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokalność, wykorzystuje cache OS
+_SINGLE_THREAD_READ_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB — optymalny dla single-thread I/O
 
 
 def _collect_chunk_index_entries(
@@ -178,6 +180,17 @@ class LineIndexer:
         self._last_indexed_offset = 0
         self._cursor_pos: tuple[int, int] | None = None  # (line_number, byte_offset)
         self._build()
+
+    def __enter__(self) -> LineIndexer:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+    ) -> None:
+        self.close()
 
     def __del__(self) -> None:
         try:
@@ -343,6 +356,7 @@ class LineIndexer:
         last_indexed_offset = 0
         bytes_read = 0
         last_byte = b""
+        chunk_size = INDEX_CHUNK_BYTES if self.is_compressed else _SINGLE_THREAD_READ_CHUNK_SIZE
         with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
                 if self._cancel_event is not None and self._cancel_event.is_set():
@@ -350,7 +364,7 @@ class LineIndexer:
                     self.line_count = 0
                     self._last_indexed_offset = 0
                     return
-                chunk = f.read(INDEX_CHUNK_BYTES)
+                chunk = f.read(chunk_size)
                 if not chunk:
                     break
                 chunk_len = len(chunk)
@@ -363,13 +377,20 @@ class LineIndexer:
                 bytes_read += chunk_len
                 last_byte = chunk[-1:]
                 if self._progress_cb and self.size > 0:
-                    self._progress_cb(bytes_read / self.size * 100.0)
+                    raw_pct = bytes_read / self.size * 100.0
+                    self._progress_cb(min(99.9, raw_pct) if self.is_compressed else min(100.0, raw_pct))
 
         if bytes_read > 0 and last_byte != b"\n":
             line_num += 1
             self.has_trailing_newline = False
         else:
             self.has_trailing_newline = True
+
+        if self.is_compressed:
+            self.size = bytes_read
+
+        if self._progress_cb and self.size > 0:
+            self._progress_cb(100.0)
 
         self.line_count = line_num
         self._last_indexed_offset = last_indexed_offset
