@@ -22,6 +22,11 @@ _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 _WORKER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
 _FILE_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB
 
+# Maksymalna liczba linii z filtra, które opłaca się przeszukiwać pojedynczo (seek/readline).
+# Powyżej tego progu pełny skan wieloprocesowy (multiprocessing z buforami 32MB w C)
+# jest rzędy wielkości szybszy niż pojedyncze operacje I/O dla dziesiątek tysięcy linii.
+_FAST_FILTERED_LINE_THRESHOLD = 2000
+
 # Współdzielone liczniki postępu — globalne w kontekście procesu roboczego.
 _shared_filter_progress_bytes: multiprocessing.sharedctypes.Synchronized[int] | Any = None
 _shared_filter_hits: multiprocessing.sharedctypes.Synchronized[int] | Any = None
@@ -522,19 +527,33 @@ class FilterEngine:
                         pass
                 return
 
-        # Jeśli wyszukujemy w przefiltrowanych liniach, przeszukaj wyłącznie te linie!
+        # Jeśli wyszukujemy w przefiltrowanych liniach:
         if search_in_filter and filtered_lines is not None:
-            self._run_filtered(
-                session,
-                pattern,
-                use_regex,
-                case_sensitive,
-                negate,
-                on_progress,
-                on_done,
-                filtered_lines,
-            )
-            return
+            flen = len(filtered_lines)
+            if flen == 0:
+                if self._is_current_session(session) and not self._cancel.is_set():
+                    _notify_progress(on_progress, 100.0, 0, "filtering", None)
+                    try:
+                        on_done(Bitset(self.indexer.line_count if self.indexer else 0), None)
+                    except (TypeError, ValueError, RuntimeError, AttributeError):
+                        pass
+                return
+
+            # Dla małej liczby linii w filtrze (<= 2000) bezpośredni odczyt jest natychmiastowy (< 0.5 s).
+            # Dla większej liczby linii w filtrze (> 2000) pełny skan równoległy (multiprocessing z buforami 32MB)
+            # jest rzędy wielkości szybszy niż wykonywanie dziesiątek tysięcy pojedynczych odczytów z dysku!
+            if flen <= _FAST_FILTERED_LINE_THRESHOLD:
+                self._run_filtered(
+                    session,
+                    pattern,
+                    use_regex,
+                    case_sensitive,
+                    negate,
+                    on_progress,
+                    on_done,
+                    filtered_lines,
+                )
+                return
 
         # Wybór trybu na podstawie rozmiaru pliku i jego typu
         use_parallel = (

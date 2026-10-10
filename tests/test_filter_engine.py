@@ -626,3 +626,37 @@ class TestFilterEngineSearchInFilter:
         assert done.is_set()
         assert set(results) == {2, 6, 14}
         idx.close()
+
+    def test_search_in_filtered_large_threshold(self, temp_log_file):
+        """Weryfikacja trybu dla filtrów > 2000 linii (przełączenie na tryb pełny/równoległy z maskowaniem)."""
+        path = temp_log_file(num_lines=10000)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        # 2500 linii w filtrze (> 2000)
+        filtered = Bitset(10000)
+        filtered.update_indices(range(2, 10000, 4))
+        assert len(filtered) == 2500
+
+        results = []
+        done = threading.Event()
+        engine.start(
+            r"line\s+100",
+            use_regex=True,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda *a: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+            search_in_filter=True,
+            filtered_lines=filtered,
+        )
+        done.wait(10.0)
+
+        assert done.is_set()
+        assert len(results) > 0
+        for r in results:
+            assert r in filtered
+            line_text = idx.read_lines(r, 1)[0][1]
+            assert "[ERROR]" in line_text
+            assert "100" in line_text
+        idx.close()
