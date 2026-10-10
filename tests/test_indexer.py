@@ -195,6 +195,33 @@ class TestLineIndexerParallel:
 
 
 class TestLineIndexerUpdateFrom:
+    def test_update_from_concurrent_growth_consistency(self, tmp_path):
+        p = tmp_path / "growing.log"
+        p.write_bytes(b"line 0\nline 1\n")
+        idx = LineIndexer(p)
+        assert idx.size == len(b"line 0\nline 1\n")
+        assert idx.line_count == 2
+
+        with open(p, "ab") as f:
+            f.write(b"line 2\nline 3\nline 4\n")
+        actual_size = p.stat().st_size
+        stale_new_size = idx.size + 7
+
+        new_lines = idx.update_from(stale_new_size)
+        assert new_lines == 3
+        assert idx.line_count == 5
+        assert idx.size == actual_size
+
+        # Kolejny tick follow mode nie powinien powtórnie zliczać linii
+        assert idx.update_from(actual_size) == 0
+        assert idx.line_count == 5
+
+        # Weryfikacja integralności odczytanych linii z indeksu
+        lines = idx.read_lines(0, 5)
+        assert [t for _, t in lines] == [f"line {i}" for i in range(5)]
+
+        idx.close()
+
     def test_incremental_update(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)

@@ -408,7 +408,7 @@ class LineIndexer:
                 base_line += nl_count
                 bytes_read += chunk_len
                 if progress_cb and bytes_to_read > 0:
-                    progress_cb(bytes_read / bytes_to_read * 100.0)
+                    progress_cb(min(100.0, bytes_read / bytes_to_read * 100.0))
         with self._file_lock:
             if self._file_cache is not None:
                 try:
@@ -429,7 +429,7 @@ class LineIndexer:
         self.has_trailing_newline = (bytes_read == 0 and had_trailing_nl) or (last_byte == b"\n")
         self.line_count = line_num + new_lines
         self._last_indexed_offset = last_indexed_offset
-        self.size = new_size
+        self.size = old_size + bytes_read
         return new_lines
 
     @staticmethod
