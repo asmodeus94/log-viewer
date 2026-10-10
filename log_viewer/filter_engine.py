@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import array
+import bisect
 import multiprocessing
 import multiprocessing.sharedctypes
 import re
 import sys
 import threading
+import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from typing import Any
 
 from log_viewer.bitset import Bitset
 from log_viewer.helpers import open_maybe_compressed
-from log_viewer.indexer import LineIndexer
+from log_viewer.indexer import _ENTRY_LINE, LineIndexer
 
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
@@ -520,6 +522,20 @@ class FilterEngine:
                         pass
                 return
 
+        # Jeśli wyszukujemy w przefiltrowanych liniach, przeszukaj wyłącznie te linie!
+        if search_in_filter and filtered_lines is not None:
+            self._run_filtered(
+                session,
+                pattern,
+                use_regex,
+                case_sensitive,
+                negate,
+                on_progress,
+                on_done,
+                filtered_lines,
+            )
+            return
+
         # Wybór trybu na podstawie rozmiaru pliku i jego typu
         use_parallel = (
             not self.indexer.is_compressed
@@ -548,6 +564,135 @@ class FilterEngine:
         self._run_single(
             session, pattern, use_regex, case_sensitive, negate, on_progress, on_done, search_in_filter, filtered_lines
         )
+
+    def _run_filtered(
+        self,
+        session: int,
+        pattern: str,
+        use_regex: bool,
+        case_sensitive: bool,
+        negate: bool,
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
+        filtered_lines: Bitset | Sequence[int],
+    ) -> None:
+        """
+        Błyskawiczne przeszukiwanie wyłącznie linii z podzbioru filtered_lines.
+        Zamiast skanować cały plik, odczytuje bezpośrednio tylko linie przefiltrowane,
+        używając rzadkiego indeksu LineIndexer do przeskakiwania dużych odstępów.
+        """
+        universe_size = self.indexer.line_count if self.indexer else 0
+        total_lines = len(filtered_lines)
+
+        if total_lines == 0:
+            if self._is_current_session(session) and not self._cancel.is_set():
+                _notify_progress(on_progress, 100.0, 0, "filtering", None)
+                try:
+                    on_done(Bitset(universe_size), None)
+                except (TypeError, ValueError, RuntimeError, AttributeError):
+                    pass
+            return
+
+        try:
+            strategy = self._create_strategy(pattern, use_regex, case_sensitive, negate)
+        except re.error as e:
+            if self._is_current_session(session) and not self._cancel.is_set():
+                try:
+                    on_done(Bitset(0), str(e))
+                except (TypeError, ValueError, RuntimeError, AttributeError):
+                    pass
+            return
+
+        merged_bitset = Bitset(universe_size)
+        total_hits = 0
+        batch_hits: list[int] = []
+        last_progress_time = time.time()
+        processed_count = 0
+
+        try:
+            with open_maybe_compressed(str(self.path), "rb") as f:
+                cur_line = 0
+                index = self.indexer.index
+                is_compressed = self.indexer.is_compressed
+
+                for target_line in filtered_lines:
+                    if processed_count % 100 == 0 and (self._cancel.is_set() or not self._is_current_session(session)):
+                        return
+
+                    # Pozycjonowanie w pliku do target_line
+                    if cur_line != target_line:
+                        if cur_line < target_line:
+                            if not is_compressed and len(index) > 1:
+                                idx = bisect.bisect_right(index, target_line, key=_ENTRY_LINE) - 1
+                                start_entry = index[max(0, idx)]
+                                if start_entry.line > cur_line:
+                                    f.seek(start_entry.offset)
+                                    cur_line = start_entry.line
+
+                            needed = target_line - cur_line
+                            if needed > 0:
+                                if not self.indexer.advance_lines(f, needed):
+                                    break
+                                cur_line = target_line
+                        else:
+                            idx = bisect.bisect_right(index, target_line, key=_ENTRY_LINE) - 1
+                            start_entry = index[max(0, idx)]
+                            f.seek(start_entry.offset)
+                            needed = target_line - start_entry.line
+                            if not self.indexer.advance_lines(f, needed):
+                                break
+                            cur_line = target_line
+
+                    raw_line = f.readline()
+                    if not raw_line:
+                        break
+                    cur_line = target_line + 1
+                    processed_count += 1
+
+                    if strategy.match(raw_line):
+                        batch_hits.append(target_line)
+                        total_hits += 1
+
+                    now = time.time()
+                    if now - last_progress_time >= 0.1 or len(batch_hits) >= 2000:
+                        if self._cancel.is_set() or not self._is_current_session(session):
+                            return
+                        pct = (processed_count / total_lines) * 100.0
+                        partial_res = None
+                        if batch_hits:
+                            min_idx = batch_hits[0]
+                            max_idx = batch_hits[-1]
+                            base_w = min_idx // 64
+                            end_w = max_idx // 64
+                            words = array.array("Q", [0] * (end_w - base_w + 1))
+                            for h in batch_hits:
+                                words[h // 64 - base_w] |= 1 << (h % 64)
+                            merged_bitset.update_indices(batch_hits)
+                            partial_res = (base_w, words)
+                            batch_hits = []
+                        _notify_progress(on_progress, min(99.9, pct), total_hits, "filtering", partial_res)
+                        last_progress_time = now
+
+            if batch_hits:
+                merged_bitset.update_indices(batch_hits)
+
+        except (OSError, UnicodeError) as e:
+            if self._is_current_session(session) and not self._cancel.is_set():
+                try:
+                    on_done(Bitset(0), str(e))
+                except (TypeError, ValueError, RuntimeError, AttributeError):
+                    pass
+            return
+
+        if self._cancel.is_set() or not self._is_current_session(session):
+            return
+
+        _notify_progress(on_progress, 100.0, total_hits, "filtering", None)
+        if self._is_current_session(session) and not self._cancel.is_set():
+            try:
+                on_done(merged_bitset, None)
+            except (TypeError, ValueError, RuntimeError, AttributeError):
+                pass
 
     def _run_parallel(
         self,
