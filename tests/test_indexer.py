@@ -633,3 +633,56 @@ class TestIndexerWorkerChunk:
 
         res = _indexer_worker_chunk((0, 1000, "nonexistent_file_path_123.log", 128, 99))
         assert res == (0, [], 99)
+
+    def test_collect_chunk_index_entries_direct(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"line 1\nline 2\nline 3\nline 4\nline 5\n"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=10,
+            entries=entries,
+        )
+        assert nl_cnt == 5
+        assert len(entries) > 0
+        for off, line_no in entries:
+            assert data[off - 1 : off] == b"\n"
+            assert 0 <= line_no <= 5
+
+    def test_collect_chunk_index_entries_no_newlines(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"no newlines here at all"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=5,
+            entries=entries,
+        )
+        assert nl_cnt == 0
+        assert entries == []
+        assert last_off == 0
+
+    def test_collect_chunk_index_entries_zero_entries_with_newlines(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"line 1\nline 2\nline 3\n"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=500,
+            base_line=42,
+            last_indexed_offset=500,
+            interval=10000,
+            entries=entries,
+        )
+        assert nl_cnt == 3
+        assert entries == []
+        assert last_off == 500

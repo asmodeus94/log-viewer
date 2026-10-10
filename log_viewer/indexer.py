@@ -55,11 +55,12 @@ def _collect_chunk_index_entries(
     interval: int,
     entries: list[Any],
     create_entry: Callable[[int, int], Any] | None = None,
-) -> int:
+) -> tuple[int, int]:
     """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries.
 
-    Zwraca nowy last_indexed_offset.
-    Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C).
+    Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
+    Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C),
+    zliczając znaki nowej linii w jednym przebiegu bez redundancji.
     """
     current_end_offset = base_offset + len(chunk)
     last_counted_pos = 0
@@ -79,7 +80,8 @@ def _collect_chunk_index_entries(
         entries.append(entry)
         last_indexed_offset = offset
 
-    return last_indexed_offset
+    total_chunk_nls = (running_line - base_line) + chunk.count(b"\n", last_counted_pos)
+    return last_indexed_offset, total_chunk_nls
 
 
 def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, list[tuple[int, int]], int]:
@@ -118,10 +120,9 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                     with _shared_progress_bytes.get_lock():
                         _shared_progress_bytes.value += chunk_len
 
-                nl_count = chunk.count(b"\n")
                 current_base_offset = start + bytes_processed
 
-                last_idx = _collect_chunk_index_entries(
+                last_idx, nl_count = _collect_chunk_index_entries(
                     chunk,
                     current_base_offset,
                     local_line,
@@ -317,12 +318,12 @@ class LineIndexer:
         base_offset: int,
         base_line: int,
         last_indexed_offset: int,
-    ) -> int:
-        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry. Zwraca nowy last_indexed_offset.
+    ) -> tuple[int, int]:
+        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry.
 
-        Zoptymalizowane pod kątem alokacji pamięci: zamiast tworzenia kopii
-        wycinka (`chunk[:nl]`) i liczenia od nowa za każdym razem, wykorzystuje
-        inkrementalne zliczanie bezalokacyjne (`chunk.count` z zakresem) w kodzie C.
+        Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
+        Zoptymalizowane pod kątem alokacji pamięci: bez kopii wycinków,
+        zliczanie znaków nowej linii w jednym przebiegu w kodzie C.
         """
         return _collect_chunk_index_entries(
             chunk,
@@ -351,9 +352,8 @@ class LineIndexer:
                 if not chunk:
                     break
                 chunk_len = len(chunk)
-                nl_count = chunk.count(b"\n")
 
-                last_indexed_offset = self._consume_chunk_index_entries(
+                last_indexed_offset, nl_count = self._consume_chunk_index_entries(
                     chunk, bytes_read, line_num, last_indexed_offset
                 )
 
@@ -395,12 +395,13 @@ class LineIndexer:
                 if not chunk:
                     break
                 chunk_len = len(chunk)
-                nl_count = chunk.count(b"\n")
-                total_new_nls += nl_count
                 last_byte = chunk[-1:]
 
                 base = old_size + bytes_read
-                last_indexed_offset = self._consume_chunk_index_entries(chunk, base, base_line, last_indexed_offset)
+                last_indexed_offset, nl_count = self._consume_chunk_index_entries(
+                    chunk, base, base_line, last_indexed_offset
+                )
+                total_new_nls += nl_count
 
                 base_line += nl_count
                 bytes_read += chunk_len
