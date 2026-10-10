@@ -77,18 +77,47 @@ class TestLineIndexerCompression:
             with gzip.open(path, "wb") as f:
                 for i in range(n_lines):
                     f.write(f"line {i} [INFO] hello\n".encode())
-            idx = LineIndexer(path)
-            assert idx.line_count == n_lines
-            assert idx.is_compressed is True
-            lines = idx.read_lines(100, 2)
-            assert len(lines) == 2
-            idx.close()
+            progress_vals = []
+            with LineIndexer(path, progress_cb=progress_vals.append) as idx:
+                assert idx.line_count == n_lines
+                assert idx.is_compressed is True
+                assert idx.size > os.path.getsize(path)
+                lines = idx.read_lines(100, 2)
+                assert len(lines) == 2
+                line_no, _ = idx.line_at_byte_offset(idx.size - 5)
+                assert line_no == n_lines - 1
+                if progress_vals:
+                    assert all(pv <= 100.0 for pv in progress_vals)
         finally:
             if os.path.exists(path):
                 try:
                     os.unlink(path)
                 except PermissionError:
                     pass
+
+    def test_bz2(self, tmp_path):
+        import bz2
+
+        path = tmp_path / "test.log.bz2"
+        with bz2.open(path, "wb") as f:
+            for i in range(50):
+                f.write(f"bz2 line {i}\n".encode())
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 50
+            assert idx.is_compressed is True
+            assert idx.size > path.stat().st_size
+            lines = idx.read_lines(10, 2)
+            assert len(lines) == 2
+            assert "bz2 line 10" in lines[0][1]
+
+    def test_empty_gz(self, tmp_path):
+        path = tmp_path / "empty.log.gz"
+        with gzip.open(path, "wb") as f:
+            pass
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 0
+            assert idx.size == 0
+            assert idx.read_lines(0, 10) == []
 
 
 class TestLineIndexerEncoding:
@@ -195,6 +224,33 @@ class TestLineIndexerParallel:
 
 
 class TestLineIndexerUpdateFrom:
+    def test_update_from_concurrent_growth_consistency(self, tmp_path):
+        p = tmp_path / "growing.log"
+        p.write_bytes(b"line 0\nline 1\n")
+        idx = LineIndexer(p)
+        assert idx.size == len(b"line 0\nline 1\n")
+        assert idx.line_count == 2
+
+        with open(p, "ab") as f:
+            f.write(b"line 2\nline 3\nline 4\n")
+        actual_size = p.stat().st_size
+        stale_new_size = idx.size + 7
+
+        new_lines = idx.update_from(stale_new_size)
+        assert new_lines == 3
+        assert idx.line_count == 5
+        assert idx.size == actual_size
+
+        # Kolejny tick follow mode nie powinien powtórnie zliczać linii
+        assert idx.update_from(actual_size) == 0
+        assert idx.line_count == 5
+
+        # Weryfikacja integralności odczytanych linii z indeksu
+        lines = idx.read_lines(0, 5)
+        assert [t for _, t in lines] == [f"line {i}" for i in range(5)]
+
+        idx.close()
+
     def test_incremental_update(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
@@ -633,3 +689,126 @@ class TestIndexerWorkerChunk:
 
         res = _indexer_worker_chunk((0, 1000, "nonexistent_file_path_123.log", 128, 99))
         assert res == (0, [], 99)
+
+    def test_collect_chunk_index_entries_direct(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"line 1\nline 2\nline 3\nline 4\nline 5\n"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=10,
+            entries=entries,
+        )
+        assert nl_cnt == 5
+        assert len(entries) > 0
+        for off, line_no in entries:
+            assert data[off - 1 : off] == b"\n"
+            assert 0 <= line_no <= 5
+
+    def test_collect_chunk_index_entries_no_newlines(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"no newlines here at all"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=5,
+            entries=entries,
+        )
+        assert nl_cnt == 0
+        assert entries == []
+        assert last_off == 0
+
+    def test_collect_chunk_index_entries_zero_entries_with_newlines(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        data = b"line 1\nline 2\nline 3\n"
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=data,
+            base_offset=500,
+            base_line=42,
+            last_indexed_offset=500,
+            interval=10000,
+            entries=entries,
+        )
+        assert nl_cnt == 3
+        assert entries == []
+        assert last_off == 500
+
+
+class TestLineIndexerContextManager:
+    def test_context_manager_opens_and_closes(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        with LineIndexer(path) as idx:
+            assert idx.line_count == 100
+            assert idx._file_cache is None
+            idx.read_lines(0, 10)
+            assert idx._file_cache is not None
+
+        assert idx._file_cache is None
+        assert idx._cursor_pos is None
+
+    def test_context_manager_exception_closes(self, temp_log_file):
+        path = temp_log_file(num_lines=100)
+        idx_ref = None
+        try:
+            with LineIndexer(path) as idx:
+                idx_ref = idx
+                idx.read_lines(0, 10)
+                raise RuntimeError("Simulated error inside with")
+        except RuntimeError:
+            pass
+
+        assert idx_ref is not None
+        assert idx_ref._file_cache is None
+
+
+class TestLineIndexerCursorTracking:
+    def test_cursor_tracking_sequential_and_random_access(self, temp_log_file):
+        path = temp_log_file(num_lines=2000)
+        idx = LineIndexer(path, index_interval_bytes=512)
+
+        # 1. Kursor początkowo None
+        assert idx._cursor_pos is None
+
+        # 2. Odczyt linii 10..15 ustawia kursor na linii 15
+        lines = idx.read_lines(10, 5)
+        assert len(lines) == 5
+        assert idx._cursor_pos is not None
+        assert idx._cursor_pos[0] == 15
+
+        # 3. Sekwencyjny odczyt linii 15..20 wznawia z kursora (bez f.seek wstecz)
+        lines2 = idx.read_lines(15, 5)
+        assert len(lines2) == 5
+        assert lines2[0][0] == 15
+        assert idx._cursor_pos[0] == 20
+
+        # 4. Skok w tył (do linii 5) cofa pozycję i prawidłowo pobiera dane
+        lines_back = idx.read_lines(5, 3)
+        assert len(lines_back) == 3
+        assert lines_back[0][0] == 5
+        assert idx._cursor_pos[0] == 8
+
+        # 4b. Daleki skok w przod (indeks blizej niz kursor)
+        lines_far = idx.read_lines(1500, 2)
+        assert len(lines_far) == 2
+        assert lines_far[0][0] == 1500
+        assert idx._cursor_pos[0] == 1502
+
+        # 5. offset_of_line aktualizuje kursor
+        off = idx.offset_of_line(50)
+        assert off is not None
+        assert idx._cursor_pos is not None
+        assert idx._cursor_pos[0] == 50
+
+        # 6. Zamknięcie resetuje kursor
+        idx.close()
+        assert idx._cursor_pos is None
