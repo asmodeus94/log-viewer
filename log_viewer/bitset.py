@@ -106,8 +106,12 @@ class Bitset(Sequence[int]):
 
     @property
     def words(self) -> array.array[int]:
-        """Zwraca wewnętrzny bufor 64-bitowych słów bitsetu."""
+        """Zwraca wewnetrzny bufor 64-bitowych slow bitsetu."""
         return self._words
+
+    def set_cached_total_count(self, count: int) -> None:
+        """Ustawia znana calkowita liczbe bitow bez ponownego przeliczania bufora."""
+        self._total_count = count
 
     def or_words(self, words: Sequence[int]) -> None:
         """Laczy alternatywa bitowa (OR) slowa bitsetu z przekazana sekwencja."""

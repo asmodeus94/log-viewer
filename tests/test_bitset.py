@@ -383,3 +383,12 @@ def test_bitset_merge_chunk_words_and_or_words_optimized():
     # 6. Puste slowa (brak zmian)
     bs5.merge_chunk_words(0, [])
     bs5.or_words([])
+
+
+def test_bitset_set_cached_total_count():
+    bs = Bitset(100)
+    assert bs._total_count == -1
+    bs.set_cached_total_count(15)
+    assert bs._total_count == 15
+    assert len(bs) == 15
+    assert bs._counts is None  # nie wywoluje _build_cache
