@@ -76,7 +76,7 @@ class Bitset(Sequence[int]):
         words = self._words
         for idx in indices:
             if 0 <= idx < self._size:
-                words[idx // 64] |= 1 << (idx % 64)
+                words[idx >> 6] |= 1 << (idx & 63)
         self._counts = None
         self._total_count = -1
 
@@ -175,7 +175,7 @@ class Bitset(Sequence[int]):
     def __contains__(self, index: object) -> bool:
         if not isinstance(index, int) or index < 0 or index >= self._size:
             return False
-        return bool(self._words[index // 64] & (1 << (index % 64)))
+        return bool(self._words[index >> 6] & (1 << (index & 63)))
 
     def bisect_left(self, index: int) -> int:
         if index <= 0:
@@ -185,8 +185,8 @@ class Bitset(Sequence[int]):
 
         self._build_cache()
         assert self._counts is not None
-        word_idx = index // 64
-        bit_idx = index % 64
+        word_idx = index >> 6
+        bit_idx = index & 63
 
         count = self._counts[word_idx]
         if bit_idx > 0:
@@ -345,7 +345,7 @@ class Bitset(Sequence[int]):
         """
         target.resize(self._size)
         if context_after <= 0:
-            start_word = max(0, from_line // 64)
+            start_word = max(0, from_line >> 6)
             for i in range(start_word, self._num_words):
                 target._words[i] = self._words[i]
             target._counts = None
@@ -357,7 +357,7 @@ class Bitset(Sequence[int]):
 
         # Wyznacz słowo początkowe, biorąc pod uwagę zasięg poprzednich trafień
         lookback_words = (context_after + 63) // 64
-        start_word = max(0, (from_line // 64) - lookback_words)
+        start_word = max(0, (from_line >> 6) - lookback_words)
 
         # Znajdź początkowy horizon z poprzednich słów
         horizon = -1
