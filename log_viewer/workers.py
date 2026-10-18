@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import bisect
 import threading
 from pathlib import Path
 from typing import Any
@@ -243,6 +244,21 @@ class SaveAsWorker(QObject):
             self.error.emit(str(e))
 
 
+def _seek_file_to_line(f: Any, target_line: int, indexer: LineIndexer) -> bool:
+    lines = indexer.lines
+    offsets = indexer.offsets
+    if not lines or not offsets:
+        return False
+    idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+    if idx >= len(offsets):
+        idx = len(offsets) - 1
+    start_offset = offsets[idx]
+    start_line = lines[idx]
+    f.seek(start_offset)
+    needed = target_line - start_line
+    return LineIndexer.advance_lines(f, needed)
+
+
 class ExportWorker(QObject):
     """Worker eksportujący wyniki filtrowania lub pełny plik z uwzględnieniem edycji z edit_buffer."""
 
@@ -259,6 +275,7 @@ class ExportWorker(QObject):
         filter_active: bool = False,
         filter_results: Bitset | None = None,
         total_lines: int = 0,
+        indexer: LineIndexer | None = None,
     ) -> None:
         super().__init__()
         self._edit_buffer = edit_buffer
@@ -268,6 +285,7 @@ class ExportWorker(QObject):
         self._filter_active = filter_active
         self._filter_results = filter_results
         self._total_lines = total_lines
+        self._indexer = indexer
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -302,16 +320,43 @@ class ExportWorker(QObject):
                             self.progress.emit(line_no / self._total_lines * 100.0)
                             last_progress_lines = line_no
                 elif self._filter_results is not None:
-                    words = self._filter_results.words
-                    num_words = len(words)
-                    word_idx = 0
-                    bit_idx = 0
-                    w = words[0] if num_words > 0 else 0
+                    total_hits = len(self._filter_results)
+                    if total_hits > 0:
+                        current_line = 0
+                        last_progress_lines = 0
+                        can_seek = (
+                            self._indexer is not None and not self._indexer.is_compressed and hasattr(src, "seek")
+                        )
 
-                    for raw in src:
-                        if w & (1 << bit_idx):
-                            if line_no in edits:
-                                new_text = edits[line_no]
+                        for target_line in self._filter_results:
+                            if cancel_set():
+                                break
+
+                            if target_line < current_line:
+                                continue
+
+                            gap = target_line - current_line
+                            if gap > 128 and can_seek:
+                                assert self._indexer is not None
+                                if not _seek_file_to_line(src, target_line, self._indexer):
+                                    break
+                                current_line = target_line
+                            else:
+                                while current_line < target_line:
+                                    skipped = src.readline()
+                                    if not skipped:
+                                        break
+                                    current_line += 1
+                                if current_line < target_line:
+                                    break
+
+                            raw = src.readline()
+                            if not raw:
+                                break
+                            current_line += 1
+
+                            if target_line in edits:
+                                new_text = edits[target_line]
                                 if new_text is not None:
                                     out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
                                     count += 1
@@ -319,21 +364,9 @@ class ExportWorker(QObject):
                                 out.write(raw)
                                 count += 1
 
-                        line_no += 1
-                        if self._total_lines and (line_no - last_progress_lines) > 5000:
-                            if cancel_set():
-                                break
-                            self.progress.emit(line_no / self._total_lines * 100.0)
-                            last_progress_lines = line_no
-
-                        bit_idx += 1
-                        if bit_idx == 64:
-                            bit_idx = 0
-                            word_idx += 1
-                            if word_idx < num_words:
-                                w = words[word_idx]
-                            else:
-                                w = 0
+                            if self._total_lines and (target_line - last_progress_lines) > 5000:
+                                self.progress.emit(target_line / self._total_lines * 100.0)
+                                last_progress_lines = target_line
 
             if cancel_set():
                 self.error.emit("cancelled")
