@@ -106,12 +106,18 @@ def _collect_chunk_index_entries(
     Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
     Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C),
     zliczając znaki nowej linii w jednym przebiegu bez redundancji.
+    Progi indeksowania są wyznaczane jako bezwzględne wielokrotności `interval`.
     """
     current_end_offset = base_offset + len(chunk)
     last_counted_pos = 0
     running_line = base_line
-    while current_end_offset - last_indexed_offset >= interval:
-        target_offset = last_indexed_offset + interval
+
+    if last_indexed_offset == 0:
+        target_offset = interval
+    else:
+        target_offset = ((last_indexed_offset // interval) + 1) * interval
+
+    while current_end_offset >= target_offset:
         target_in_chunk = max(0, target_offset - base_offset)
 
         nl = chunk.find(b"\n", target_in_chunk)
@@ -131,6 +137,7 @@ def _collect_chunk_index_entries(
             entries.append(entry)
 
         last_indexed_offset = offset
+        target_offset = ((last_indexed_offset // interval) + 1) * interval
 
     total_chunk_nls = (running_line - base_line) + chunk.count(b"\n", last_counted_pos)
     return last_indexed_offset, total_chunk_nls
@@ -141,10 +148,10 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     Funkcja robocza (worker) dla modułu multiprocessing — indeksuje fragment pliku.
 
     Optymalizacje wydajności:
-      1. Użycie `bytes.count(b"\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
+      1. Użycie `bytes.count(b"\\n")` do szybkiego liczenia znaków nowej linii w kodzie maszynowym (C).
       2. Wykorzystanie większych fragmentów odczytu (`_INDEXER_READ_CHUNK_SIZE` = 32 MB) dla lepszej lokalności pamięci podręcznej.
       3. Liniowe, bezalokacyjne zliczanie nowych linii w buforze (zero-copy) bez łączenia buforów i bez kopiowania carry.
-      4. Wywoływanie operacji `find()` jedynie w momencie, gdy minął wymagany `interval` bajtów.
+      4. Deterministyczne wyznaczanie progów jako bezwzględnych wielokrotności `interval` (brak luk na granicach).
       5. Zastosowanie dużego bufora wejściowego przy wywoływaniu `open()`.
 
     Liczy znaki nowej linii w przydzielonym zakresie `[start, end)`. Każdy proces
@@ -154,7 +161,11 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     try:
         line_count = 0
         index_entries: list[tuple[int, int]] = []
-        last_idx = max(0, start - interval)  # ostatni offset gdzie zapisaliśmy index entry
+        if start == 0:
+            last_idx = 0
+        else:
+            first_target = ((start + interval - 1) // interval) * interval
+            last_idx = first_target - 1
         local_line = 0
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
@@ -371,15 +382,12 @@ class LineIndexer:
         total_lines = 0
         full_offsets = array.array("Q", [0])
         full_lines = array.array("Q", [0])
-        last_indexed_offset = 0
         for line_count, index_entries, _chunk_id in results:
             line_offset = total_lines
             for offset, local_line in index_entries:
-                global_line = line_offset + local_line
-                if offset - last_indexed_offset >= self.index_interval_bytes:
+                if offset > full_offsets[-1]:
                     full_offsets.append(offset)
-                    full_lines.append(global_line)
-                    last_indexed_offset = offset
+                    full_lines.append(line_offset + local_line)
             total_lines += line_count
 
         if self._progress_cb:
@@ -403,7 +411,7 @@ class LineIndexer:
         self._offsets = full_offsets
         self._lines = full_lines
         self.line_count = total_lines
-        self._last_indexed_offset = last_indexed_offset
+        self._last_indexed_offset = full_offsets[-1] if full_offsets else 0
 
     def _decode_raw_line(self, raw: bytes) -> str:
         """Dekoduje surowe bajty linii tekstu i usuwa znaki nowej linii."""

@@ -812,3 +812,47 @@ class TestLineIndexerCursorTracking:
         # 6. Zamknięcie resetuje kursor
         idx.close()
         assert idx._cursor_pos is None
+
+
+class TestParallelIndexGapless:
+    """Testy weryfikujące determinizm i eliminację luk na granicach chunków w _build_parallel."""
+
+    def test_worker_chunk_respects_absolute_intervals(self, tmp_path):
+        from log_viewer.indexer import _indexer_worker_chunk
+
+        path = tmp_path / "worker_boundary.log"
+        lines = [f"line {i:04d} payload01\n".encode() for i in range(100)]
+        path.write_bytes(b"".join(lines))
+
+        interval = 128
+        res = _indexer_worker_chunk((150, 1000, str(path), interval, 1))
+        _line_cnt, entries, _chunk_id = res
+
+        assert len(entries) > 0
+        first_off, _first_line = entries[0]
+        assert first_off >= 256
+
+    def test_parallel_vs_single_thread_equivalence(self, tmp_path):
+        path = tmp_path / "equivalence.log"
+        raw_lines = [
+            f"2026-10-18 12:00:00 [{i:05d}] test payload message with variable length padding {i % 17 * 'x'}\n".encode()
+            for i in range(5000)
+        ]
+        path.write_bytes(b"".join(raw_lines))
+
+        interval = 16 * 1024
+
+        idx_parallel = LineIndexer(path, index_interval_bytes=interval, parallel_threshold_bytes=10 * 1024)
+        idx_single = LineIndexer(path, index_interval_bytes=interval, parallel_threshold_bytes=100 * 1024 * 1024)
+
+        assert idx_parallel.line_count == idx_single.line_count
+        assert len(idx_parallel.offsets) == len(idx_single.offsets)
+        assert idx_parallel.offsets == idx_single.offsets
+        assert idx_parallel.lines == idx_single.lines
+
+        for i in range(len(idx_parallel.offsets) - 1):
+            diff = idx_parallel.offsets[i + 1] - idx_parallel.offsets[i]
+            assert diff < 2 * interval, f"Gap of {diff} bytes between entry {i} and {i + 1} exceeds 2*interval"
+
+        idx_parallel.close()
+        idx_single.close()
