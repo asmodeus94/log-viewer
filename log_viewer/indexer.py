@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import array
 import bisect
 import itertools
 import multiprocessing
@@ -12,7 +13,7 @@ import threading
 import time
 import types
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,47 @@ from .helpers import (
 class IndexEntry:
     offset: int  # byte offset początku tej linii (0-indexed)
     line: int  # numer linii (0-indexed)
+
+
+class IndexView(Sequence[IndexEntry]):
+    """Wstecznie kompatybilny widok sekwencji dla indeksu bazującego na array.array."""
+
+    __slots__ = ("_offsets", "_lines")
+    __hash__ = None  # type: ignore[assignment]
+
+    def __init__(self, offsets: array.array[int], lines: array.array[int]) -> None:
+        self._offsets = offsets
+        self._lines = lines
+
+    def __len__(self) -> int:
+        return len(self._offsets)
+
+    @typing.overload
+    def __getitem__(self, idx: int) -> IndexEntry: ...
+
+    @typing.overload
+    def __getitem__(self, idx: slice) -> list[IndexEntry]: ...
+
+    def __getitem__(self, idx: int | slice) -> IndexEntry | list[IndexEntry]:
+        if isinstance(idx, slice):
+            return [IndexEntry(self._offsets[i], self._lines[i]) for i in range(*idx.indices(len(self._offsets)))]
+        return IndexEntry(self._offsets[idx], self._lines[idx])
+
+    def __iter__(self) -> Iterator[IndexEntry]:
+        for i in range(len(self._offsets)):
+            yield IndexEntry(self._offsets[i], self._lines[i])
+
+    def __repr__(self) -> str:
+        return f"IndexView(len={len(self._offsets)})"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, IndexView):
+            return self._offsets == other._offsets and self._lines == other._lines
+        if isinstance(other, (list, tuple)):
+            if len(self) != len(other):
+                return False
+            return all(a == b for a, b in zip(self, other, strict=True))
+        return False
 
 
 _ENTRY_LINE = operator.attrgetter("line")
@@ -54,10 +96,12 @@ def _collect_chunk_index_entries(
     base_line: int,
     last_indexed_offset: int,
     interval: int,
-    entries: list[Any],
+    entries: list[Any] | None = None,
     create_entry: Callable[[int, int], Any] | type[IndexEntry] | None = None,
+    offsets: array.array[int] | None = None,
+    lines: array.array[int] | None = None,
 ) -> tuple[int, int]:
-    """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries.
+    """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries lub tablic offsets/lines.
 
     Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
     Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C),
@@ -77,8 +121,15 @@ def _collect_chunk_index_entries(
         offset = base_offset + nl + 1
         running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
         last_counted_pos = nl + 1
-        entry = (offset, running_line) if create_entry is None else create_entry(offset, running_line)
-        entries.append(entry)
+
+        if offsets is not None and lines is not None:
+            offsets.append(offset)
+            lines.append(running_line)
+
+        if entries is not None:
+            entry = (offset, running_line) if create_entry is None else create_entry(offset, running_line)
+            entries.append(entry)
+
         last_indexed_offset = offset
 
     total_chunk_nls = (running_line - base_line) + chunk.count(b"\n", last_counted_pos)
@@ -129,7 +180,7 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
                     local_line,
                     last_idx,
                     interval,
-                    index_entries,
+                    entries=index_entries,
                 )
 
                 line_count += nl_count
@@ -171,7 +222,8 @@ class LineIndexer:
         self.size: int = 0
         self.line_count: int = 0
         self.has_trailing_newline: bool = True
-        self.index: list[IndexEntry] = [IndexEntry(0, 0)]
+        self._offsets: array.array[int] = array.array("Q", [0])
+        self._lines: array.array[int] = array.array("Q", [0])
         self._progress_cb = progress_cb
         self._cancel_event = cancel_event  # None = nie można anulować
         self._file_cache: typing.IO[bytes] | None = None
@@ -179,6 +231,36 @@ class LineIndexer:
         self._last_indexed_offset = 0
         self._cursor_pos: tuple[int, int] | None = None  # (line_number, byte_offset)
         self._build()
+
+    @property
+    def offsets(self) -> array.array[int]:
+        return self._offsets
+
+    @property
+    def lines(self) -> array.array[int]:
+        return self._lines
+
+    @property
+    def index(self) -> IndexView:
+        return IndexView(self._offsets, self._lines)
+
+    @index.setter
+    def index(self, entries: Sequence[Any]) -> None:
+        self._offsets = array.array("Q")
+        self._lines = array.array("Q")
+        for e in entries:
+            if isinstance(e, IndexEntry):
+                self._offsets.append(e.offset)
+                self._lines.append(e.line)
+            elif isinstance(e, (tuple, list)):
+                self._offsets.append(e[0])
+                self._lines.append(e[1])
+            else:
+                self._offsets.append(getattr(e, "offset", 0))
+                self._lines.append(getattr(e, "line", 0))
+        if not self._offsets:
+            self._offsets.append(0)
+            self._lines.append(0)
 
     def __enter__(self) -> LineIndexer:
         return self
@@ -227,7 +309,8 @@ class LineIndexer:
                 return
             except (OSError, RuntimeError, ValueError) as e:
                 print(f"Warning: parallel indexing failed ({e}), falling back to single-thread", file=sys.stderr)
-                self.index = [IndexEntry(0, 0)]
+                self._offsets = array.array("Q", [0])
+                self._lines = array.array("Q", [0])
                 self._last_indexed_offset = 0
         self._build_single()
 
@@ -278,21 +361,24 @@ class LineIndexer:
 
         if cancelled:
             # Nie buduj indeksu — wróć z pustym. Worker sprawdzi cancel_event i wyemituje error("cancelled").
-            self.index = [IndexEntry(0, 0)]
+            self._offsets = array.array("Q", [0])
+            self._lines = array.array("Q", [0])
             self.line_count = 0
             self._last_indexed_offset = 0
             return
 
         results.sort(key=lambda x: x[2])
         total_lines = 0
-        full_index: list[IndexEntry] = [IndexEntry(0, 0)]
+        full_offsets = array.array("Q", [0])
+        full_lines = array.array("Q", [0])
         last_indexed_offset = 0
         for line_count, index_entries, _chunk_id in results:
             line_offset = total_lines
             for offset, local_line in index_entries:
                 global_line = line_offset + local_line
                 if offset - last_indexed_offset >= self.index_interval_bytes:
-                    full_index.append(IndexEntry(offset, global_line))
+                    full_offsets.append(offset)
+                    full_lines.append(global_line)
                     last_indexed_offset = offset
             total_lines += line_count
 
@@ -314,7 +400,8 @@ class LineIndexer:
         else:
             self.has_trailing_newline = True
 
-        self.index = full_index
+        self._offsets = full_offsets
+        self._lines = full_lines
         self.line_count = total_lines
         self._last_indexed_offset = last_indexed_offset
 
@@ -333,11 +420,11 @@ class LineIndexer:
         base_line: int,
         last_indexed_offset: int,
     ) -> tuple[int, int]:
-        """Wyszukuje granice indeksowania w chunku i dodaje nowe IndexEntry.
+        """Wyszukuje granice indeksowania w chunku i dodaje nowe pozycje do tablic indeksu.
 
         Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
-        Zoptymalizowane pod kątem alokacji pamięci: bez kopii wycinków,
-        zliczanie znaków nowej linii w jednym przebiegu w kodzie C.
+        Zoptymalizowane pod kątem alokacji pamięci: bezpośrednie dodawanie do
+        array.array("Q") bez tworzenia obiektów pośrednich.
         """
         return _collect_chunk_index_entries(
             chunk,
@@ -345,8 +432,8 @@ class LineIndexer:
             base_line,
             last_indexed_offset,
             self.index_interval_bytes,
-            self.index,
-            create_entry=IndexEntry,
+            offsets=self._offsets,
+            lines=self._lines,
         )
 
     def _build_single(self) -> None:
@@ -359,7 +446,8 @@ class LineIndexer:
         with open_maybe_compressed(str(self.path), "rb") as f:
             while True:
                 if self._cancel_event is not None and self._cancel_event.is_set():
-                    self.index = [IndexEntry(0, 0)]
+                    self._offsets = array.array("Q", [0])
+                    self._lines = array.array("Q", [0])
                     self.line_count = 0
                     self._last_indexed_offset = 0
                     return
@@ -485,17 +573,18 @@ class LineIndexer:
         pomiędzy wpisem z indeksu a `target_line`, wznawia odczyt w przód bez
         cofania się do punktu indeksu (f.seek).
         """
-        idx = bisect.bisect_right(self.index, target_line, key=_ENTRY_LINE) - 1
-        start: IndexEntry = self.index[max(0, idx)]
+        idx = max(0, bisect.bisect_right(self._lines, target_line) - 1)
+        start_offset = self._offsets[idx]
+        start_line = self._lines[idx]
 
-        if self._cursor_pos is not None and start.line <= self._cursor_pos[0] <= target_line:
+        if self._cursor_pos is not None and start_line <= self._cursor_pos[0] <= target_line:
             cur_line, cur_off = self._cursor_pos
             if f.tell() != cur_off:
                 f.seek(cur_off)
             needed = target_line - cur_line
         else:
-            f.seek(start.offset)
-            needed = target_line - start.line
+            f.seek(start_offset)
+            needed = target_line - start_line
 
         if not self._advance_lines(f, needed):
             self._cursor_pos = None
@@ -581,10 +670,11 @@ class LineIndexer:
         if byte_offset >= self.size:
             return (self.line_count - 1, self.size) if self.line_count > 0 else (0, 0)
 
-        idx = bisect.bisect_right(self.index, byte_offset, key=_ENTRY_OFFSET) - 1
-        start = self.index[max(0, idx)]
+        idx = max(0, bisect.bisect_right(self._offsets, byte_offset) - 1)
+        start_offset = self._offsets[idx]
+        start_line = self._lines[idx]
 
-        to_read = byte_offset - start.offset
+        to_read = byte_offset - start_offset
         nl_cnt = 0
         last_nl_global = -1
         bytes_left = to_read
@@ -592,8 +682,8 @@ class LineIndexer:
 
         with self._file_lock:
             f = self._get_file()
-            f.seek(start.offset)
-            read_pos = start.offset
+            f.seek(start_offset)
+            read_pos = start_offset
             while bytes_left > 0:
                 chunk = f.read(min(chunk_size, bytes_left))
                 if not chunk:
@@ -605,8 +695,8 @@ class LineIndexer:
                 read_pos += len(chunk)
                 bytes_left -= len(chunk)
 
-        curr_line = start.line + nl_cnt
-        curr_offset = last_nl_global + 1 if last_nl_global != -1 else start.offset
+        curr_line = start_line + nl_cnt
+        curr_offset = last_nl_global + 1 if last_nl_global != -1 else start_offset
         if 0 < self.line_count <= curr_line:
             curr_line = self.line_count - 1
         return curr_line, curr_offset
