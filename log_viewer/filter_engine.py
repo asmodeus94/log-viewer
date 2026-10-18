@@ -20,8 +20,8 @@ from log_viewer.indexer import LineIndexer
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
 _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
-_WORKER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
-_FILE_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB
+_WORKER_READ_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB — optymalne dopasowanie do L3 cache CPU i eliminacja alokacji 32 MB
+_FILE_READ_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
 
 # Maksymalna liczba linii z filtra, które bezwarunkowo opłaca się przeszukiwać pojedynczo (Fast-Path).
 # Powyżej tego progu decyzja podejmowana jest adaptacyjnie na podstawie gęstości i rozpiętości filtra.
@@ -63,7 +63,9 @@ def _filter_worker_chunk(
     """
     (chunk_id, start_offset, end_offset, start_line, path, pattern, use_regex, case_sensitive, negate, encoding) = args
 
-    results: array.array[int] = array.array("Q")
+    words: array.array[int] = array.array("Q")
+    base_word: int = -1
+    hit_count: int = 0
 
     # Utwórz strategię wewnątrz workera — obiekty re nie są picklowalne
     try:
@@ -116,43 +118,58 @@ def _filter_worker_chunk(
                         continue
 
                 local_hits_list = strategy.match_chunk(complete_data, line_no)
-                results.extend(local_hits_list)
                 local_hits = len(local_hits_list)
+                if local_hits > 0:
+                    hit_count += local_hits
+                    first_h = local_hits_list[0]
+                    last_h = local_hits_list[-1]
+                    needed_end = last_h // 64
+                    if base_word == -1:
+                        base_word = first_h // 64
+                        words.extend([0] * (needed_end - base_word + 1))
+                    elif needed_end >= base_word + len(words):
+                        words.extend([0] * (needed_end - (base_word + len(words)) + 1))
+
+                    bw = base_word
+                    for h in local_hits_list:
+                        words[(h >> 6) - bw] |= 1 << (h & 63)
+
+                    if _shared_filter_hits is not None:
+                        with _shared_filter_hits.get_lock():
+                            _shared_filter_hits.value += local_hits
 
                 lines_count = complete_data.count(b"\n")
                 if complete_data and not complete_data.endswith(b"\n"):
                     lines_count += 1
                 line_no += lines_count
 
-                if local_hits > 0 and _shared_filter_hits is not None:
-                    with _shared_filter_hits.get_lock():
-                        _shared_filter_hits.value += local_hits
-
         # Obsłuż ewentualny carry na samym końcu zakresu (linia bez \n)
         if carry:
             carry_hits = strategy.match_chunk(carry, line_no)
-            results.extend(carry_hits)
-            if _shared_filter_hits is not None and carry_hits:
-                with _shared_filter_hits.get_lock():
-                    _shared_filter_hits.value += len(carry_hits)
+            if carry_hits:
+                hit_count += len(carry_hits)
+                first_h = carry_hits[0]
+                last_h = carry_hits[-1]
+                needed_end = last_h // 64
+                if base_word == -1:
+                    base_word = first_h // 64
+                    words.extend([0] * (needed_end - base_word + 1))
+                elif needed_end >= base_word + len(words):
+                    words.extend([0] * (needed_end - (base_word + len(words)) + 1))
+
+                bw = base_word
+                for h in carry_hits:
+                    words[(h >> 6) - bw] |= 1 << (h & 63)
+
+                if _shared_filter_hits is not None:
+                    with _shared_filter_hits.get_lock():
+                        _shared_filter_hits.value += len(carry_hits)
 
     except OSError:
         pass
 
-    hit_count = len(results)
-    if hit_count == 0:
+    if hit_count == 0 or base_word == -1:
         return chunk_id, 0, array.array("Q"), 0
-
-    min_idx = results[0]
-    max_idx = results[-1]
-
-    base_word = min_idx // 64
-    end_word = max_idx // 64
-
-    words = array.array("Q", [0] * (end_word - base_word + 1))
-
-    for idx in results:
-        words[idx // 64 - base_word] |= 1 << (idx % 64)
 
     return chunk_id, base_word, words, hit_count
 

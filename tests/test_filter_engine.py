@@ -546,6 +546,42 @@ class TestParallelSearch:
         assert ranges[-1][1] == idx.size, "Last range must reach end of file"
         idx.close()
 
+    def test_filter_worker_chunk_direct_words(self, temp_log_file):
+        """Weryfikacja bezposredniego kodowania slow bitsetu w _filter_worker_chunk (Punkt 2.1)."""
+        from log_viewer.filter_engine import _filter_worker_chunk
+
+        path = temp_log_file(num_lines=1000)
+        file_size = os.path.getsize(path)
+
+        # 1. Chunk z trafeniami (ERROR = 1/4 linii)
+        args = (0, 0, file_size, 0, path, "ERROR", False, True, False, "utf-8")
+        chunk_id, base_word, words, hit_count = _filter_worker_chunk(args)
+
+        assert chunk_id == 0
+        assert hit_count == 250
+        assert base_word == 0
+        indices = []
+        for w_idx, word in enumerate(words):
+            for b in range(64):
+                if word & (1 << b):
+                    indices.append((base_word + w_idx) * 64 + b)
+        assert len(indices) == 250
+        assert indices == list(range(2, 1000, 4))
+
+        # 2. Chunk bez trafien
+        args_empty = (1, 0, file_size, 0, path, "NON_EXISTENT_PATTERN_XYZ", False, True, False, "utf-8")
+        chunk_id_e, base_word_e, words_e, hit_count_e = _filter_worker_chunk(args_empty)
+        assert chunk_id_e == 1
+        assert hit_count_e == 0
+        assert len(words_e) == 0
+
+        # 3. Chunk z blednym regexem
+        args_err = (2, 0, file_size, 0, path, "[invalid", True, True, False, "utf-8")
+        chunk_id_err, _, words_err, hit_count_err = _filter_worker_chunk(args_err)
+        assert chunk_id_err == 2
+        assert hit_count_err == 0
+        assert len(words_err) == 0
+
 
 class TestFilterEngineSearchInFilter:
     def test_search_in_filtered_lines(self, temp_log_file):
