@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import bz2
 import gzip
+import io
 import lzma
 import sys
 import typing
@@ -222,15 +223,22 @@ def is_compressed(path: str) -> bool:
 
 
 def open_maybe_compressed(path: str, mode: str = "rb", buffering: int = -1) -> typing.IO[bytes]:
-    """Otwiera plik, transparentnie dekompresując na podstawie rozszerzenia."""
+    """Otwiera plik, transparentnie dekompresujac na podstawie rozszerzenia."""
     p = path.lower()
+    stream: typing.Any
     if p.endswith(".gz") or p.endswith(".gzip"):
-        return gzip.open(path, mode)  # type: ignore[return-value]
-    if p.endswith(".bz2") or p.endswith(".bzip2"):
-        return bz2.open(path, mode)  # type: ignore[return-value]
-    if p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
-        return lzma.open(path, mode)  # type: ignore[return-value]
-    return open(path, mode, buffering=buffering)
+        stream = gzip.open(path, mode)  # noqa: SIM115
+    elif p.endswith(".bz2") or p.endswith(".bzip2"):
+        stream = bz2.open(path, mode)  # noqa: SIM115
+    elif p.endswith(".xz") or p.endswith(".lzma") or p.endswith(".lz"):
+        stream = lzma.open(path, mode)  # noqa: SIM115
+    else:
+        return open(path, mode, buffering=buffering)
+
+    if "r" in mode and buffering != 0:
+        buf_size = buffering if buffering > 0 else 1024 * 1024
+        return io.BufferedReader(stream, buffer_size=buf_size)
+    return stream  # type: ignore[no-any-return]
 
 
 def get_resource_path(relative_path: str) -> str:

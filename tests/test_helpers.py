@@ -192,6 +192,38 @@ class TestOpenMaybeCompressed:
             content = f.read()
         assert b"line" in content
 
+    def test_compressed_buffered_reader_wrapper(self, tmp_path):
+        import io
+
+        # 1. Gz
+        gz_path = str(tmp_path / "test.log.gz")
+        with open_maybe_compressed(gz_path, "wb") as f:
+            f.write(b"line 0\nline 1\n")
+        with open_maybe_compressed(gz_path, "rb") as f:
+            assert isinstance(f, io.BufferedReader)
+            assert f.readline() == b"line 0\n"
+            assert f.readline() == b"line 1\n"
+
+        # 2. Bz2
+        bz_path = str(tmp_path / "test.log.bz2")
+        with open_maybe_compressed(bz_path, "wb") as f:
+            f.write(b"line 0\nline 1\n")
+        with open_maybe_compressed(bz_path, "rb") as f:
+            assert isinstance(f, io.BufferedReader)
+            assert f.readline() == b"line 0\n"
+
+        # 3. Xz
+        xz_path = str(tmp_path / "test.log.xz")
+        with open_maybe_compressed(xz_path, "wb") as f:
+            f.write(b"line 0\nline 1\n")
+        with open_maybe_compressed(xz_path, "rb") as f:
+            assert isinstance(f, io.BufferedReader)
+            assert f.readline() == b"line 0\n"
+
+        # 4. Buffering == 0
+        with open_maybe_compressed(gz_path, "rb", buffering=0) as f:
+            assert not isinstance(f, io.BufferedReader)
+
 
 class TestThemeDetection:
     """Testy wykrywania motywu systemowego."""
