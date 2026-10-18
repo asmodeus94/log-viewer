@@ -4,7 +4,6 @@ import array
 import re
 import time
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
@@ -84,14 +83,6 @@ class SearchController(QObject):
         if pattern is None:
             return
 
-        try:
-            current_size = Path(file_path).stat().st_size
-            if current_size > indexer.size:
-                indexer.update_from(current_size)
-                self.tab.last_file_size = current_size
-        except OSError:
-            pass
-
         self.tab.search_pattern = pattern
         self.tab.last_search_regex = self.tab.main_window.search_regex_cb.isChecked()
         self.tab.last_search_case = self.tab.main_window.search_case_cb.isChecked()
@@ -167,6 +158,12 @@ class SearchController(QObject):
             if not isinstance(getattr(self.tab, "search_results_all", None), Bitset):
                 total = self.tab.indexer.line_count if self.tab.indexer else 0
                 self.tab.search_results_all = Bitset(total)
+            elif (
+                self.tab.indexer is not None
+                and self.tab.search_results_all is not None
+                and self.tab.indexer.line_count > self.tab.search_results_all.size
+            ):
+                self.tab.search_results_all.expand_size(self.tab.indexer.line_count)
 
             if isinstance(partial_results, tuple) and len(partial_results) == 2:
                 base_word, words = partial_results
@@ -243,6 +240,8 @@ class SearchController(QObject):
             filter_all_lines = Bitset(0)
 
         self.tab.search_results_all = filter_all_lines
+        if self.tab.indexer is not None:
+            self.tab.last_file_size = self.tab.indexer.size
 
         total_hits = len(self.tab.search_results_all)
 

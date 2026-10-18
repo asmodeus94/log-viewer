@@ -392,3 +392,37 @@ def test_bitset_set_cached_total_count():
     assert bs._total_count == 15
     assert len(bs) == 15
     assert bs._counts is None  # nie wywoluje _build_cache
+
+
+def test_bitset_expand_size():
+    bs = Bitset(10)
+    bs.update_indices([1, 5, 9])
+    assert bs.size == 10
+    assert len(bs) == 3
+    assert 1 in bs
+    assert 5 in bs
+    assert 9 in bs
+    assert 50 not in bs
+
+    # Rozszerzenie mniejsze lub rowne nic nie robi
+    bs.expand_size(10)
+    assert bs.size == 10
+    bs.expand_size(5)
+    assert bs.size == 10
+
+    # Rozszerzenie do 150 (przekracza granice slow 64-bitowych)
+    bs.expand_size(150)
+    assert bs.size == 150
+    assert len(bs) == 3
+    assert 1 in bs
+    assert 5 in bs
+    assert 9 in bs
+    assert 50 not in bs
+
+    # Dodanie indeksow w nowym zakresie
+    bs.update_indices([50, 100, 149])
+    assert bs.size == 150
+    assert len(bs) == 6
+    assert 50 in bs
+    assert 100 in bs
+    assert 149 in bs

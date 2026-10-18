@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import array
 import re
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Slot
@@ -77,14 +76,6 @@ class FilterController(QObject):
             QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
             return
 
-        try:
-            current_size = Path(file_path).stat().st_size
-            if current_size > indexer.size:
-                indexer.update_from(current_size)
-                self.tab.last_file_size = current_size
-        except OSError:
-            pass
-
         self.tab.filter_engine = FilterEngine(file_path, indexer)
         self.tab.filter_active = True
         self.tab.filter_results = array.array("Q")
@@ -148,6 +139,8 @@ class FilterController(QObject):
         self.tab.filter_context_lines = context_lines
         self.tab.filter_hit_text_map = hit_text_map
         self.tab.filter_hit_lines = hit_lines_set
+        if self.tab.indexer is not None:
+            self.tab.last_file_size = self.tab.indexer.size
 
         self.tab.ignore_scroll_events = True
         try:

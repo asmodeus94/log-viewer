@@ -98,6 +98,13 @@ class FilterWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        try:
+            current_size = Path(self._engine.path).stat().st_size
+            if current_size > self._engine.indexer.size:
+                self._engine.indexer.update_from(current_size)
+        except OSError:
+            pass
+
         def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None) -> None:
             self.progress.emit(pct, hits, state, partial_results)
 

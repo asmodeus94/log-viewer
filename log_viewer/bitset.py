@@ -113,6 +113,17 @@ class Bitset(Sequence[int]):
         """Ustawia znana calkowita liczbe bitow bez ponownego przeliczania bufora."""
         self._total_count = count
 
+    def expand_size(self, new_size: int) -> None:
+        """Rozszerza uniwersum bitsetu do new_size zachowujac dotychczasowe bity."""
+        if new_size <= self._size:
+            return
+        new_num_words = (new_size + 63) >> 6
+        if new_num_words > self._num_words:
+            self._words.extend(itertools.repeat(0, new_num_words - self._num_words))
+            self._num_words = new_num_words
+        self._size = new_size
+        self._counts = None
+
     def or_words(self, words: Sequence[int]) -> None:
         """Laczy alternatywa bitowa (OR) slowa bitsetu z przekazana sekwencja."""
         count = min(len(words), self._num_words)
