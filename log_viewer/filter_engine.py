@@ -45,8 +45,7 @@ def _filter_init_worker(
 def _filter_worker_chunk(
     args: tuple[int, int, int, int, str, str, bool, bool, bool, str],
 ) -> tuple[int, int, array.array[int], int]:
-    """
-    Worker dla multiprocessing — przeszukuje przydzielony zakres bajtów pliku.
+    """Worker dla multiprocessing — przeszukuje przydzielony zakres bajtów pliku.
 
     Parametry (args):
         chunk_id      – identyfikator kawałka (do scalenia w kolejności)
@@ -159,8 +158,8 @@ def _filter_worker_chunk(
 
 
 class FilterStrategy(ABC):
-    """
-    Abstrakcyjna klasa bazowa dla strategii filtrowania (Wzorzec Strategii).
+    """Abstrakcyjna klasa bazowa dla strategii filtrowania (Wzorzec Strategii).
+
     Definiuje wspólny interfejs sprawdzania czy dana linia pasuje do wzorca.
     """
 
@@ -389,8 +388,8 @@ def _notify_progress(
 
 
 class FilterEngine:
-    """
-    Przeszukuje plik w tle. Każde wywołanie start() dostaje nowy _session_id.
+    """Przeszukuje plik w tle. Każde wywołanie start() dostaje nowy _session_id.
+
     Bezpieczeństwo wątkowe: start() czeka na zakończenie poprzedniego wątku.
 
     Dla plików >= 50 MB (nieskompresowanych) automatycznie używa multiprocessing
@@ -463,8 +462,7 @@ class FilterEngine:
         return PlainTextStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
 
     def _compute_search_ranges(self, n_workers: int) -> list[tuple[int, int, int]]:
-        """
-        Wyznacza zakresy (start_offset, end_offset, start_line) dla workerów.
+        """Wyznacza zakresy (start_offset, end_offset, start_line) dla workerów.
 
         Korzysta z istniejącego rzadkiego indeksu LineIndexer — zero dodatkowego I/O.
         Każdy zakres zaczyna i kończy się na granicy linii (gwarantowane przez indeks).
@@ -509,8 +507,7 @@ class FilterEngine:
         search_in_filter: bool = False,
         filtered_lines: Bitset | None = None,
     ) -> None:
-        """
-        Dyspozytor — wybiera tryb równoległy lub single-thread i deleguje pracę.
+        """Dyspozytor — wybiera tryb równoległy lub single-thread i deleguje pracę.
 
         Tryb równoległy (multiprocessing) dla plików >= 50 MB nieskompresowanych.
         Tryb single-thread dla małych plików i plików skompresowanych.
@@ -595,8 +592,8 @@ class FilterEngine:
         on_done: Callable[[Bitset, str | None], None],
         filtered_lines: Bitset | Sequence[int],
     ) -> None:
-        """
-        Błyskawiczne przeszukiwanie wyłącznie linii z podzbioru filtered_lines.
+        """Błyskawiczne przeszukiwanie wyłącznie linii z podzbioru filtered_lines.
+
         Zamiast skanować cały plik, odczytuje bezpośrednio tylko linie przefiltrowane,
         używając rzadkiego indeksu LineIndexer do przeskakiwania dużych odstępów.
         """
@@ -728,8 +725,7 @@ class FilterEngine:
         search_in_filter: bool = False,
         filtered_lines: Bitset | None = None,
     ) -> None:
-        """
-        Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
+        """Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
 
         Plik dzielony jest na N zakresów wzdłuż granic linii (z istniejącego indeksu).
         Każdy rdzeń CPU dostaje swój zakres i zwraca pasujące numery linii.
@@ -742,9 +738,33 @@ class FilterEngine:
         n_workers = max(2, multiprocessing.cpu_count())
         ranges = self._compute_search_ranges(n_workers)
 
+        # Optymalizacja 1.1: Pomijanie pustych chunków w search_in_filter (Chunk Skipping via Bitset.any_in_range)
+        active_ranges: list[tuple[int, int, int, int]] = []
+        skipped_bytes = 0
+
+        for i, (start_off, end_off, start_ln) in enumerate(ranges):
+            end_ln = (
+                ranges[i + 1][2] if i + 1 < len(ranges) else (self.indexer.line_count if self.indexer else start_ln)
+            )
+            if search_in_filter and filtered_lines is not None and not filtered_lines.any_in_range(start_ln, end_ln):
+                skipped_bytes += end_off - start_off
+                continue
+            active_ranges.append((i, start_off, end_off, start_ln))
+
+        if search_in_filter and filtered_lines is not None and not active_ranges:
+            if self._is_current_session(session) and not self._cancel.is_set():
+                _notify_progress(on_progress, 100.0, 0, "filtering", None)
+                try:
+                    on_done(Bitset(self.indexer.line_count if self.indexer else 0), None)
+                except (TypeError, ValueError, RuntimeError, AttributeError):
+                    pass
+            return
+
+        pool_workers = min(n_workers, max(1, len(active_ranges)))
+
         args_list = [
             (
-                i,
+                chunk_id,
                 start_off,
                 end_off,
                 start_ln,
@@ -755,17 +775,17 @@ class FilterEngine:
                 False,
                 self.indexer.encoding,
             )
-            for i, (start_off, end_off, start_ln) in enumerate(ranges)
+            for (chunk_id, start_off, end_off, start_ln) in active_ranges
         ]
 
-        shared_bytes = multiprocessing.Value("Q", 0)
+        shared_bytes = multiprocessing.Value("Q", skipped_bytes)
         shared_hits = multiprocessing.Value("Q", 0)
         # Słownik: chunk_id → (base_word, words)
         chunk_results: dict[int, tuple[int, array.array[int]]] = {}
 
         try:
             with multiprocessing.Pool(
-                n_workers, initializer=_filter_init_worker, initargs=(shared_bytes, shared_hits)
+                pool_workers, initializer=_filter_init_worker, initargs=(shared_bytes, shared_hits)
             ) as pool:
                 # imap_unordered — iterator dostarczający wyniki chunk po chunku,
                 # w kolejności ich ukończenia (nie koniecznie wg chunk_id).
@@ -848,8 +868,7 @@ class FilterEngine:
         search_in_filter: bool = False,
         filtered_lines: Bitset | None = None,
     ) -> None:
-        """
-        Sekwencyjne przeszukiwanie pliku w jednym wątku.
+        """Sekwencyjne przeszukiwanie pliku w jednym wątku.
 
         Używane dla małych plików (< 50 MB) oraz plików skompresowanych,
         gdzie multiprocessing przyniósłby zbyt duży narzut.
@@ -877,6 +896,29 @@ class FilterEngine:
                     return
                 bytes_read += len(block)
 
+                lines_count = block.count(b"\n")
+                if block and not block.endswith(b"\n"):
+                    lines_count += 1
+                chunk_end_line = line_no + lines_count
+
+                # Optymalizacja 1.1: Pomijanie match_chunk dla bloków bez linii w filtrze
+                if (
+                    search_in_filter
+                    and filtered_lines is not None
+                    and not filtered_lines.any_in_range(line_no, chunk_end_line)
+                ):
+                    line_no = chunk_end_line
+                    if self._is_current_session(session) and not self._cancel.is_set():
+                        pct = (bytes_read / size * 100.0) if size else 0.0
+                        _notify_progress(
+                            on_progress,
+                            pct,
+                            total_hits,
+                            "filtering",
+                            None,
+                        )
+                    continue
+
                 chunk_hits = strategy.match_chunk(block, line_no)
                 partial_res = None
 
@@ -893,10 +935,7 @@ class FilterEngine:
                     total_hits += len(chunk_hits)
                     partial_res = (base_word, words)
 
-                lines_count = block.count(b"\n")
-                if block and not block.endswith(b"\n"):
-                    lines_count += 1
-                line_no += lines_count
+                line_no = chunk_end_line
 
                 if self._is_current_session(session) and not self._cancel.is_set():
                     pct = (bytes_read / size * 100.0) if size else 0.0

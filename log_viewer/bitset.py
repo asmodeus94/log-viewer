@@ -192,6 +192,49 @@ class Bitset(Sequence[int]):
             return False
         return bool(self._words[index >> 6] & (1 << (index & 63)))
 
+    def any_in_range(self, start: int, end: int) -> bool:
+        """Sprawdza w czasie O(słowa) bez alokacji i bisekcji czy w przedziale [start, end)
+
+        znajduje się przynajmniej jeden ustawiony bit.
+        Zoptymalizowane pod kątem błyskawicznego pomijania pustych chunków (Chunk Skipping).
+        """
+        if start >= end or start >= self._size:
+            return False
+        if start < 0:
+            start = 0
+        if end > self._size:
+            end = self._size
+        if start >= end:
+            return False
+
+        start_word = start >> 6
+        end_word = (end - 1) >> 6
+
+        words = self._words
+        if start_word == end_word:
+            start_bit = start & 63
+            end_bit = (end - 1) & 63
+            if start_bit == 0 and end_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            else:
+                mask = ((1 << (end_bit - start_bit + 1)) - 1) << start_bit
+            return bool(words[start_word] & mask)
+
+        start_bit = start & 63
+        if start_bit == 0:
+            start_mask = 0xFFFFFFFFFFFFFFFF
+        else:
+            start_mask = (0xFFFFFFFFFFFFFFFF << start_bit) & 0xFFFFFFFFFFFFFFFF
+        if words[start_word] & start_mask:
+            return True
+
+        if end_word > start_word + 1 and any(itertools.islice(words, start_word + 1, end_word)):
+            return True
+
+        end_bit = (end - 1) & 63
+        end_mask = 0xFFFFFFFFFFFFFFFF if end_bit == 63 else (1 << (end_bit + 1)) - 1
+        return bool(words[end_word] & end_mask)
+
     def bisect_left(self, index: int) -> int:
         if index <= 0:
             return 0
@@ -354,8 +397,8 @@ class Bitset(Sequence[int]):
         return new_bs
 
     def expand_context_incremental(self, target: Bitset, from_line: int, context_after: int) -> None:
-        """
-        Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+        """Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+
         Optymalizacja O(nowe_linie) zamiast O(cały_plik) dla trybu Follow przy dopisywaniu logów.
         """
         target.resize(self._size)

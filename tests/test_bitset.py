@@ -426,3 +426,43 @@ def test_bitset_expand_size():
     assert 50 in bs
     assert 100 in bs
     assert 149 in bs
+
+
+def test_bitset_any_in_range():
+    # 1. Pusty bitset
+    bs = Bitset(1000)
+    assert not bs.any_in_range(0, 1000)
+    assert not bs.any_in_range(50, 100)
+
+    # 2. Niepoprawne i brzegowe zakresy
+    assert not bs.any_in_range(100, 50)
+    assert not bs.any_in_range(50, 50)
+    assert not bs.any_in_range(1000, 2000)
+    assert not bs.any_in_range(2000, 3000)
+
+    # 3. Pojedyncze słowo (0..63)
+    bs.update_indices([10, 63])
+    assert bs.any_in_range(10, 11)
+    assert bs.any_in_range(0, 11)
+    assert not bs.any_in_range(0, 10)
+    assert not bs.any_in_range(11, 63)
+    assert bs.any_in_range(63, 64)
+    assert not bs.any_in_range(64, 100)
+
+    # 4. Granice słów (63 vs 64)
+    bs.update_indices([64])
+    assert bs.any_in_range(63, 65)  # obejmuje 63 i 64
+    assert bs.any_in_range(64, 65)  # obejmuje 64
+    assert not bs.any_in_range(65, 70)
+
+    # 5. Zakres wielosłowny z bitem w środkowym słowie
+    bs2 = Bitset(64 * 10)
+    bs2.update_indices([64 * 5 + 10])
+    assert not bs2.any_in_range(0, 64 * 5)
+    assert bs2.any_in_range(0, 64 * 6)
+    assert bs2.any_in_range(64 * 5, 64 * 6)
+    assert not bs2.any_in_range(64 * 6, 64 * 10)
+
+    # 6. Zakres ujemny i wykraczający poza rozmiar (clamping)
+    assert bs2.any_in_range(-50, 64 * 10 + 50)
+    assert not bs.any_in_range(-50, 0)

@@ -660,3 +660,31 @@ class TestFilterEngineSearchInFilter:
             assert "[ERROR]" in line_text
             assert "100" in line_text
         idx.close()
+
+    def test_search_in_filtered_chunk_skipping(self, temp_log_file):
+        """Weryfikacja pomijania chunków gdy filtered_lines są zlokalizowane tylko w części pliku."""
+        path = temp_log_file(num_lines=10000)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        # Tylko linie 10..20 w filtrze (z 10 000 linii)
+        filtered = Bitset(10000)
+        filtered.update_indices(range(10, 20))
+
+        results = []
+        done = threading.Event()
+        engine.start(
+            "ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            on_progress=lambda *a: None,
+            on_done=lambda r, e: (results.extend(r), done.set()),
+            search_in_filter=True,
+            filtered_lines=filtered,
+        )
+        done.wait(5.0)
+        assert done.is_set()
+        # W liniach 10..19: linie o indeksie % 4 == 2 to ERROR: 10, 14, 18
+        assert set(results) == {10, 14, 18}
+        idx.close()
