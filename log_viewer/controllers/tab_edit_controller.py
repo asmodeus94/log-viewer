@@ -431,7 +431,8 @@ class EditController(QObject):
             encoding=self.tab.encoding,
             filter_active=self.tab.filter_active,
             filter_results=self.tab.filter_results,
-            total_lines=self.tab.indexer.line_count,
+            total_lines=self.tab.indexer.line_count if self.tab.indexer else 0,
+            indexer=self.tab.indexer,
         )
         self.tab.export_thread = export_thread
         self.tab.export_worker = export_worker

@@ -294,6 +294,35 @@ class TestLineIndexerFileDescriptorCache:
 
         idx.close()
 
+    def test_update_from_reuses_fd(self, tmp_path):
+        """update_from nie niszczy otwartego deskryptora i pozwala na dalsze ponowne uzycie w read_lines."""
+        p = tmp_path / "growing_fd.log"
+        p.write_bytes(b"line 0\nline 1\n")
+        idx = LineIndexer(p)
+
+        idx.read_lines(0, 2)
+        cached_f = idx._file_cache
+        assert cached_f is not None
+
+        with open(p, "ab") as f:
+            f.write(b"line 2\nline 3\n")
+        new_size = p.stat().st_size
+
+        new_lines = idx.update_from(new_size)
+        assert new_lines == 2
+        assert idx._file_cache is cached_f
+        assert not cached_f.closed
+
+        tail = idx.read_tail(2)
+        assert len(tail) == 2
+        assert tail[0][1] == "line 2"
+        assert tail[1][1] == "line 3"
+        assert idx._file_cache is cached_f
+
+        idx.close()
+        assert cached_f.closed
+        assert idx._file_cache is None
+
     def test_close_releases_fd(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
@@ -743,6 +772,28 @@ class TestIndexerWorkerChunk:
         assert entries == []
         assert last_off == 500
 
+    def test_collect_chunk_index_entries_with_preallocated_bytearray(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        ba = bytearray(256)
+        data = b"line 1\nline 2\nline 3\n"
+        ba[: len(data)] = data
+        ba[len(data) :] = b"\n\n\n\n\n\n" * 10  # dane resztkowe (stale) poza chunk_len
+
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=ba,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=10,
+            entries=entries,
+            chunk_len=len(data),
+        )
+        assert nl_cnt == 3
+        assert len(entries) == 2
+        assert last_off == 21
+
 
 class TestLineIndexerContextManager:
     def test_context_manager_opens_and_closes(self, temp_log_file):
@@ -812,3 +863,153 @@ class TestLineIndexerCursorTracking:
         # 6. Zamknięcie resetuje kursor
         idx.close()
         assert idx._cursor_pos is None
+
+
+class TestParallelIndexGapless:
+    """Testy weryfikujące determinizm i eliminację luk na granicach chunków w _build_parallel."""
+
+    def test_worker_chunk_respects_absolute_intervals(self, tmp_path):
+        from log_viewer.indexer import _indexer_worker_chunk
+
+        path = tmp_path / "worker_boundary.log"
+        lines = [f"line {i:04d} payload01\n".encode() for i in range(100)]
+        path.write_bytes(b"".join(lines))
+
+        interval = 128
+        res = _indexer_worker_chunk((150, 1000, str(path), interval, 1))
+        _line_cnt, entries, _chunk_id = res
+
+        assert len(entries) > 0
+        first_off, _first_line = entries[0]
+        assert first_off >= 256
+
+    def test_parallel_vs_single_thread_equivalence(self, tmp_path):
+        path = tmp_path / "equivalence.log"
+        raw_lines = [
+            f"2026-10-18 12:00:00 [{i:05d}] test payload message with variable length padding {i % 17 * 'x'}\n".encode()
+            for i in range(5000)
+        ]
+        path.write_bytes(b"".join(raw_lines))
+
+        interval = 16 * 1024
+
+        idx_parallel = LineIndexer(path, index_interval_bytes=interval, parallel_threshold_bytes=10 * 1024)
+        idx_single = LineIndexer(path, index_interval_bytes=interval, parallel_threshold_bytes=100 * 1024 * 1024)
+
+        assert idx_parallel.line_count == idx_single.line_count
+        assert len(idx_parallel.offsets) == len(idx_single.offsets)
+        assert idx_parallel.offsets == idx_single.offsets
+        assert idx_parallel.lines == idx_single.lines
+
+        for i in range(len(idx_parallel.offsets) - 1):
+            diff = idx_parallel.offsets[i + 1] - idx_parallel.offsets[i]
+            assert diff < 2 * interval, f"Gap of {diff} bytes between entry {i} and {i + 1} exceeds 2*interval"
+
+        idx_parallel.close()
+        idx_single.close()
+
+
+class TestLineIndexerSeekFastPath:
+    """Testy weryfikujace sciezke Fast-Path kursora w _seek_to_line."""
+
+    def test_seek_fast_path_exact_match(self, temp_log_file):
+        """Jesli kursor jest na target_line, seek_to_line natychmiast zwraca True."""
+        path = temp_log_file(num_lines=200)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 10)
+            assert idx._cursor_pos == (10, idx.offset_of_line(10))
+
+            assert idx._seek_to_line(f, 10) is True
+            assert idx._cursor_pos == (10, idx.offset_of_line(10))
+
+            f.seek(0)
+            assert idx._seek_to_line(f, 10) is True
+            assert f.tell() == idx.offset_of_line(10)
+
+        idx.close()
+
+    def test_seek_fast_path_short_forward_jump(self, temp_log_file):
+        """Krotki skok w przod (<= 128 linii) wykorzystuje _advance_lines bez bisekcji."""
+        path = temp_log_file(num_lines=300)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 50)
+
+            assert idx._seek_to_line(f, 60) is True
+            assert idx._cursor_pos == (60, idx.offset_of_line(60))
+            line_data = f.readline().decode()
+            assert "line      60" in line_data
+
+            assert idx._seek_to_line(f, 188) is True
+            assert idx._cursor_pos == (188, idx.offset_of_line(188))
+            line_data = f.readline().decode()
+            assert "line     188" in line_data
+
+        idx.close()
+
+    def test_seek_fallback_for_backward_or_far_jump(self, temp_log_file):
+        """Skok wstecz lub daleki (> 128 linii) poprawnie korzysta z indeksu bazowego."""
+        path = temp_log_file(num_lines=500)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 200)
+
+            assert idx._seek_to_line(f, 400) is True
+            assert idx._cursor_pos == (400, idx.offset_of_line(400))
+            line_data = f.readline().decode()
+            assert "line     400" in line_data
+
+            assert idx._seek_to_line(f, 50) is True
+            assert idx._cursor_pos == (50, idx.offset_of_line(50))
+            line_data = f.readline().decode()
+            assert "line      50" in line_data
+
+        idx.close()
+
+    def test_line_at_byte_offset_resets_cursor(self, temp_log_file):
+        """line_at_byte_offset uniewaznia _cursor_pos, aby uniknac desynchronizacji uchwytu."""
+        path = temp_log_file(num_lines=100)
+        idx = LineIndexer(path)
+        idx.read_lines(10, 5)
+        assert idx._cursor_pos is not None
+
+        idx.line_at_byte_offset(100)
+        assert idx._cursor_pos is None
+
+        idx.close()
+
+
+class TestLineIndexerReadRawLines:
+    def test_read_raw_lines_matches_read_lines(self, temp_log_file):
+        path = temp_log_file(num_lines=50)
+        idx = LineIndexer(path)
+
+        raw_res = idx.read_raw_lines(10, 5)
+        str_res = idx.read_lines(10, 5)
+
+        assert len(raw_res) == 5
+        assert len(str_res) == 5
+
+        for (l_raw, b_data), (l_str, s_data) in zip(raw_res, str_res, strict=True):
+            assert l_raw == l_str
+            assert isinstance(b_data, bytes)
+            assert b_data.decode("utf-8") == s_data
+            assert not b_data.endswith(b"\n")
+            assert not b_data.endswith(b"\r")
+
+        idx.close()
+
+    def test_read_raw_lines_out_of_bounds(self, temp_log_file):
+        path = temp_log_file(num_lines=20)
+        idx = LineIndexer(path)
+
+        assert idx.read_raw_lines(-5, 5) == idx.read_raw_lines(0, 5)
+        assert idx.read_raw_lines(100, 5) == []
+        assert idx.read_raw_lines(5, 0) == []
+        assert idx.read_raw_lines(5, -1) == []
+
+        idx.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import array
+import bisect
 import threading
 from pathlib import Path
 from typing import Any
@@ -98,6 +99,13 @@ class FilterWorker(QObject):
 
     @Slot()
     def run(self) -> None:
+        try:
+            current_size = Path(self._engine.path).stat().st_size
+            if current_size > self._engine.indexer.size:
+                self._engine.indexer.update_from(current_size)
+        except OSError:
+            pass
+
         def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None) -> None:
             self.progress.emit(pct, hits, state, partial_results)
 
@@ -108,13 +116,13 @@ class FilterWorker(QObject):
 
             if self._context_after > 0:
                 self.progress.emit(100.0, len(results), "context", None)
+                filter_all_lines = results.expand_context(self._context_after)
+                res_tuple = results.to_raw()
+                all_tuple = filter_all_lines.to_raw()
             else:
                 self.progress.emit(100.0, len(results), "filtering", None)
-
-            filter_all_lines = results.expand_context(self._context_after)
-
-            res_tuple = results.to_raw()
-            all_tuple = filter_all_lines.to_raw()
+                res_tuple = results.to_raw()
+                all_tuple = res_tuple
 
             self.finished.emit(res_tuple, set(), all_tuple, {}, set(), error)
 
@@ -204,24 +212,41 @@ class SaveAsWorker(QObject):
         try:
             edits = self._edit_buffer.edits
             cancel_set = self._cancel_event.is_set
-            line_no = 0
-            last_progress_lines = 0
 
             with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as dst:
-                for raw in src:
-                    if line_no in edits:
-                        new_text = edits[line_no]
-                        if new_text is not None:
-                            dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
-                    else:
-                        dst.write(raw)
-
-                    line_no += 1
-                    if self._total_lines and (line_no - last_progress_lines) > 5000:
+                if not edits:
+                    total_bytes = 0
+                    try:
+                        total_bytes = Path(self._src_path).stat().st_size
+                    except OSError:
+                        pass
+                    bytes_copied = 0
+                    chunk_size = 16 * 1024 * 1024
+                    while True:
                         if cancel_set():
                             break
-                        self.progress.emit(line_no / self._total_lines * 100.0)
-                        last_progress_lines = line_no
+                        chunk = src.read(chunk_size)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        bytes_copied += len(chunk)
+                        if total_bytes > 0:
+                            self.progress.emit(min(100.0, bytes_copied / total_bytes * 100.0))
+                else:
+                    last_progress_lines = 0
+                    for line_no, raw in enumerate(src):
+                        if line_no in edits:
+                            new_text = edits[line_no]
+                            if new_text is not None:
+                                dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                        else:
+                            dst.write(raw)
+
+                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                            if cancel_set():
+                                break
+                            self.progress.emit(line_no / self._total_lines * 100.0)
+                            last_progress_lines = line_no
 
             if cancel_set():
                 self.error.emit("cancelled")
@@ -234,6 +259,21 @@ class SaveAsWorker(QObject):
             self.finished.emit()
         except BaseException as e:
             self.error.emit(str(e))
+
+
+def _seek_file_to_line(f: Any, target_line: int, indexer: LineIndexer) -> bool:
+    lines = indexer.lines
+    offsets = indexer.offsets
+    if not lines or not offsets:
+        return False
+    idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+    if idx >= len(offsets):
+        idx = len(offsets) - 1
+    start_offset = offsets[idx]
+    start_line = lines[idx]
+    f.seek(start_offset)
+    needed = target_line - start_line
+    return LineIndexer.advance_lines(f, needed)
 
 
 class ExportWorker(QObject):
@@ -252,6 +292,7 @@ class ExportWorker(QObject):
         filter_active: bool = False,
         filter_results: Bitset | None = None,
         total_lines: int = 0,
+        indexer: LineIndexer | None = None,
     ) -> None:
         super().__init__()
         self._edit_buffer = edit_buffer
@@ -261,6 +302,7 @@ class ExportWorker(QObject):
         self._filter_active = filter_active
         self._filter_results = filter_results
         self._total_lines = total_lines
+        self._indexer = indexer
         self._cancel_event = threading.Event()
 
     def cancel(self) -> None:
@@ -278,31 +320,35 @@ class ExportWorker(QObject):
 
             with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as out:
                 if not self._filter_active:
-                    for raw in src:
-                        if line_no in edits:
-                            new_text = edits[line_no]
-                            if new_text is not None:
-                                out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
-                                count += 1
-                        else:
-                            out.write(raw)
-                            count += 1
-
-                        line_no += 1
-                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                    if not edits:
+                        total_bytes = 0
+                        try:
+                            total_bytes = Path(self._src_path).stat().st_size
+                        except OSError:
+                            pass
+                        bytes_copied = 0
+                        chunk_size = 16 * 1024 * 1024
+                        last_byte = b""
+                        while True:
                             if cancel_set():
                                 break
-                            self.progress.emit(line_no / self._total_lines * 100.0)
-                            last_progress_lines = line_no
-                elif self._filter_results is not None:
-                    words = self._filter_results.words
-                    num_words = len(words)
-                    word_idx = 0
-                    bit_idx = 0
-                    w = words[0] if num_words > 0 else 0
-
-                    for raw in src:
-                        if w & (1 << bit_idx):
+                            chunk = src.read(chunk_size)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            bytes_copied += len(chunk)
+                            last_byte = chunk[-1:]
+                            if self._total_lines <= 0:
+                                count += chunk.count(b"\n")
+                            if total_bytes > 0:
+                                self.progress.emit(min(100.0, bytes_copied / total_bytes * 100.0))
+                        if self._total_lines > 0:
+                            count = self._total_lines
+                        elif bytes_copied > 0 and last_byte != b"\n":
+                            count += 1
+                    else:
+                        last_progress_lines = 0
+                        for line_no, raw in enumerate(src):
                             if line_no in edits:
                                 new_text = edits[line_no]
                                 if new_text is not None:
@@ -312,21 +358,59 @@ class ExportWorker(QObject):
                                 out.write(raw)
                                 count += 1
 
-                        line_no += 1
-                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                            if self._total_lines and (line_no - last_progress_lines) > 5000:
+                                if cancel_set():
+                                    break
+                                self.progress.emit(line_no / self._total_lines * 100.0)
+                                last_progress_lines = line_no
+                elif self._filter_results is not None:
+                    total_hits = len(self._filter_results)
+                    if total_hits > 0:
+                        current_line = 0
+                        last_progress_lines = 0
+                        can_seek = (
+                            self._indexer is not None and not self._indexer.is_compressed and hasattr(src, "seek")
+                        )
+
+                        for target_line in self._filter_results:
                             if cancel_set():
                                 break
-                            self.progress.emit(line_no / self._total_lines * 100.0)
-                            last_progress_lines = line_no
 
-                        bit_idx += 1
-                        if bit_idx == 64:
-                            bit_idx = 0
-                            word_idx += 1
-                            if word_idx < num_words:
-                                w = words[word_idx]
+                            if target_line < current_line:
+                                continue
+
+                            gap = target_line - current_line
+                            if gap > 128 and can_seek:
+                                assert self._indexer is not None
+                                if not _seek_file_to_line(src, target_line, self._indexer):
+                                    break
+                                current_line = target_line
                             else:
-                                w = 0
+                                while current_line < target_line:
+                                    skipped = src.readline()
+                                    if not skipped:
+                                        break
+                                    current_line += 1
+                                if current_line < target_line:
+                                    break
+
+                            raw = src.readline()
+                            if not raw:
+                                break
+                            current_line += 1
+
+                            if target_line in edits:
+                                new_text = edits[target_line]
+                                if new_text is not None:
+                                    out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                    count += 1
+                            else:
+                                out.write(raw)
+                                count += 1
+
+                            if self._total_lines and (target_line - last_progress_lines) > 5000:
+                                self.progress.emit(target_line / self._total_lines * 100.0)
+                                last_progress_lines = target_line
 
             if cancel_set():
                 self.error.emit("cancelled")
@@ -386,20 +470,38 @@ class IncrementalFilterWorker(QObject):
 
             start_offset = self._indexer.offset_of_line(self._start_line)
             if start_offset is not None and not self._indexer.is_compressed:
+                chunk_size = 16 * 1024 * 1024
+                current_line = self._start_line
+                carry = b""
                 with open(str(self._indexer.path), "rb") as f:
                     f.seek(start_offset)
-                    chunk = f.read()
-                if not self._cancel_event.is_set():
-                    hits = strategy.match_chunk(chunk, self._start_line)
-                    results_array.extend(hits)
+                    while not self._cancel_event.is_set():
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        data = carry + chunk if carry else chunk
+                        last_nl = data.rfind(b"\n")
+                        if last_nl != -1:
+                            complete_data = data[: last_nl + 1]
+                            carry = data[last_nl + 1 :]
+                        else:
+                            carry = data
+                            continue
+
+                        hits = strategy.match_chunk(complete_data, current_line)
+                        results_array.extend(hits)
+                        current_line += complete_data.count(b"\n")
+
+                    if not self._cancel_event.is_set() and carry:
+                        hits = strategy.match_chunk(carry, current_line)
+                        results_array.extend(hits)
             else:
-                lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
+                raw_lines = self._indexer.read_raw_lines(self._start_line, self._end_line - self._start_line)
                 cancel_set = self._cancel_event.is_set
-                for line_no, text in lines:
+                for line_no, raw in raw_lines:
                     if cancel_set():
                         return
-                    text_bytes = text.encode(self._encoding, errors="replace")
-                    if strategy.match(text_bytes):
+                    if strategy.match(raw):
                         results_array.append(line_no)
         except BaseException:
             pass

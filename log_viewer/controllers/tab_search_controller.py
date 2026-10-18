@@ -4,7 +4,6 @@ import array
 import re
 import time
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
@@ -21,6 +20,7 @@ class SearchController(QObject):
         self.tab = tab
         self._search_start_from_end = False
         self._last_search_model_update: float = 0.0
+        self._search_hits_count: int = 0
 
     def cmd_find_dialog(self) -> None:
         self.tab.main_window.search_entry.setFocus()
@@ -83,14 +83,6 @@ class SearchController(QObject):
         if pattern is None:
             return
 
-        try:
-            current_size = Path(file_path).stat().st_size
-            if current_size > indexer.size:
-                indexer.update_from(current_size)
-                self.tab.last_file_size = current_size
-        except OSError:
-            pass
-
         self.tab.search_pattern = pattern
         self.tab.last_search_regex = self.tab.main_window.search_regex_cb.isChecked()
         self.tab.last_search_case = self.tab.main_window.search_case_cb.isChecked()
@@ -117,6 +109,7 @@ class SearchController(QObject):
         self.tab.search_engine = FilterEngine(file_path, indexer)
 
         self.tab.search_results = []
+        self._search_hits_count = 0
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab.search_results_all = Bitset(total)
         self.tab.search_result_index = -1
@@ -165,6 +158,12 @@ class SearchController(QObject):
             if not isinstance(getattr(self.tab, "search_results_all", None), Bitset):
                 total = self.tab.indexer.line_count if self.tab.indexer else 0
                 self.tab.search_results_all = Bitset(total)
+            elif (
+                self.tab.indexer is not None
+                and self.tab.search_results_all is not None
+                and self.tab.indexer.line_count > self.tab.search_results_all.size
+            ):
+                self.tab.search_results_all.expand_size(self.tab.indexer.line_count)
 
             if isinstance(partial_results, tuple) and len(partial_results) == 2:
                 base_word, words = partial_results
@@ -178,19 +177,30 @@ class SearchController(QObject):
                         else:
                             masked_words[i] = 0
                     self.tab.search_results_all.merge_chunk_words(base_word, masked_words)
+                    self._search_hits_count += sum(map(int.bit_count, masked_words))
                 else:
                     self.tab.search_results_all.merge_chunk_words(base_word, words)
+                    self._search_hits_count += sum(map(int.bit_count, words))
             elif isinstance(partial_results, Bitset):
                 if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
-                    self.tab.search_results_all.or_words((partial_results & self.tab.filter_all_lines).words)
+                    res_and = partial_results & self.tab.filter_all_lines
+                    self.tab.search_results_all.or_words(res_and.words)
+                    self._search_hits_count += len(res_and)
                 else:
                     self.tab.search_results_all.or_words(partial_results.words)
+                    self._search_hits_count += len(partial_results)
             elif isinstance(partial_results, list):
                 if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
                     filtered_set = self.tab.filter_all_lines
-                    self.tab.search_results_all.update_indices(x for x in partial_results if x in filtered_set)
+                    matched = [x for x in partial_results if x in filtered_set]
+                    self.tab.search_results_all.update_indices(matched)
+                    self._search_hits_count += len(matched)
                 else:
                     self.tab.search_results_all.update_indices(partial_results)
+                    self._search_hits_count += len(partial_results)
+
+            if self.tab.search_results_all is not None:
+                self.tab.search_results_all.set_cached_total_count(self._search_hits_count)
 
             now = time.time()
             # Throttle model updates to max 2 times per second to prevent GUI freeze on huge results
@@ -199,7 +209,7 @@ class SearchController(QObject):
                 self._last_search_model_update = now
 
         current_hits = (
-            len(self.tab.search_results_all)
+            self._search_hits_count
             if (self.tab.last_search_in_filter and self.tab.filter_active and self.tab.search_results_all is not None)
             else hits
         )
@@ -209,7 +219,7 @@ class SearchController(QObject):
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(
         self,
-        results_data: Any,
+        _results_data: Any,
         _context_lines: Any,
         filter_all_data: Any,
         _hit_text_map: Any,
@@ -224,13 +234,14 @@ class SearchController(QObject):
                     pass
             return
 
-        if results_data:
-            _results = Bitset.from_raw(results_data[0], results_data[1], results_data[2])
+        if filter_all_data:
             filter_all_lines = Bitset.from_raw(filter_all_data[0], filter_all_data[1], filter_all_data[2])
         else:
             filter_all_lines = Bitset(0)
 
         self.tab.search_results_all = filter_all_lines
+        if self.tab.indexer is not None:
+            self.tab.last_file_size = self.tab.indexer.size
 
         total_hits = len(self.tab.search_results_all)
 

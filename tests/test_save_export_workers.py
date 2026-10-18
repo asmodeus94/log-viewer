@@ -56,6 +56,39 @@ class TestSaveAsWorker:
                     except PermissionError:
                         pass
 
+    def test_save_as_no_edits_block_copy(self):
+        raw_lines = [f"Data line {i} content" for i in range(100)]
+        src_path = create_temp_file(raw_lines)
+        dst_path = src_path + ".dst"
+
+        try:
+            buf = EditBuffer()  # brak edycji
+            worker = SaveAsWorker(buf, src_path, dst_path, encoding="utf-8")
+
+            finished_called = False
+
+            def on_finished():
+                nonlocal finished_called
+                finished_called = True
+
+            worker.finished.connect(on_finished)
+            worker.run()
+
+            assert finished_called
+            assert os.path.exists(dst_path)
+
+            with open(dst_path, encoding="utf-8") as f:
+                content = f.read().splitlines()
+
+            assert content == raw_lines
+        finally:
+            for p in (src_path, dst_path):
+                if os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except PermissionError:
+                        pass
+
 
 class TestExportWorker:
     def test_export_without_filter(self):
@@ -128,6 +161,126 @@ class TestExportWorker:
                 content = f.read().splitlines()
 
             assert content == ["FIXED ERROR at line 1", "ERROR at line 3"]
+        finally:
+            for p in (src_path, dst_path):
+                if os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except PermissionError:
+                        pass
+
+    def test_export_with_filter_and_indexer_sparse(self):
+        # Tworzymy 600 linii z duzymi przerwami pomiedzy dopasowaniami (>128 linii)
+        raw_lines = [f"Line {i:04d} payload data" for i in range(600)]
+        src_path = create_temp_file(raw_lines)
+        dst_path = src_path + ".export"
+
+        from log_viewer.bitset import Bitset
+        from log_viewer.indexer import LineIndexer
+
+        idx = LineIndexer(src_path, index_interval_bytes=256)
+        try:
+            buf = EditBuffer()
+            buf.set(300, "EDITED LINE 300")
+
+            # Wybieramy rzadkie linie: 5, 300 (zmieniona), 550
+            targets = [5, 300, 550]
+            filter_results = Bitset.from_indices(targets, 600)
+
+            worker = ExportWorker(
+                buf,
+                src_path,
+                dst_path,
+                encoding="utf-8",
+                filter_active=True,
+                filter_results=filter_results,
+                total_lines=600,
+                indexer=idx,
+            )
+
+            result_count = 0
+
+            def on_finished(count):
+                nonlocal result_count
+                result_count = count
+
+            worker.finished.connect(on_finished)
+            worker.run()
+
+            assert result_count == 3
+            assert os.path.exists(dst_path)
+
+            with open(dst_path, encoding="utf-8") as f:
+                content = f.read().splitlines()
+
+            assert content == ["Line 0005 payload data", "EDITED LINE 300", "Line 0550 payload data"]
+        finally:
+            idx.close()
+            for p in (src_path, dst_path):
+                if os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except PermissionError:
+                        pass
+
+    def test_export_no_edits_block_copy(self):
+        raw_lines = [f"Log line {i} data payload" for i in range(100)]
+        src_path = create_temp_file(raw_lines)
+        dst_path = src_path + ".export"
+
+        try:
+            buf = EditBuffer()  # brak edycji
+            worker = ExportWorker(buf, src_path, dst_path, encoding="utf-8", filter_active=False, total_lines=100)
+
+            result_count = 0
+
+            def on_finished(count):
+                nonlocal result_count
+                result_count = count
+
+            worker.finished.connect(on_finished)
+            worker.run()
+
+            assert result_count == 100
+            assert os.path.exists(dst_path)
+
+            with open(dst_path, encoding="utf-8") as f:
+                content = f.read().splitlines()
+
+            assert content == raw_lines
+        finally:
+            for p in (src_path, dst_path):
+                if os.path.exists(p):
+                    try:
+                        os.unlink(p)
+                    except PermissionError:
+                        pass
+
+    def test_export_no_edits_block_copy_unknown_total_lines(self):
+        raw_lines = [f"Log line {i} data payload" for i in range(50)]
+        src_path = create_temp_file(raw_lines)
+        dst_path = src_path + ".export"
+
+        try:
+            buf = EditBuffer()  # brak edycji
+            worker = ExportWorker(buf, src_path, dst_path, encoding="utf-8", filter_active=False, total_lines=0)
+
+            result_count = 0
+
+            def on_finished(count):
+                nonlocal result_count
+                result_count = count
+
+            worker.finished.connect(on_finished)
+            worker.run()
+
+            assert result_count == 50
+            assert os.path.exists(dst_path)
+
+            with open(dst_path, encoding="utf-8") as f:
+                content = f.read().splitlines()
+
+            assert content == raw_lines
         finally:
             for p in (src_path, dst_path):
                 if os.path.exists(p):

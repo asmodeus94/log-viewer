@@ -14,7 +14,7 @@ from typing import Any
 
 from log_viewer.bitset import Bitset
 from log_viewer.helpers import open_maybe_compressed
-from log_viewer.indexer import _ENTRY_LINE, LineIndexer
+from log_viewer.indexer import LineIndexer
 
 # Próg rozmiaru pliku (w bajtach), od którego aktywowany jest tryb równoległy.
 # Dla plików poniżej tego progu single-thread jest szybszy (brak narzutu na Pool).
@@ -469,8 +469,9 @@ class FilterEngine:
         Korzysta z istniejącego rzadkiego indeksu LineIndexer — zero dodatkowego I/O.
         Każdy zakres zaczyna i kończy się na granicy linii (gwarantowane przez indeks).
         """
-        index = self.indexer.index
-        n_entries = len(index)
+        offsets = self.indexer.offsets
+        lines = self.indexer.lines
+        n_entries = len(offsets)
         file_size = self.indexer.size
 
         if n_entries < 2:
@@ -483,12 +484,11 @@ class FilterEngine:
 
         ranges: list[tuple[int, int, int]] = []
         for i, idx in enumerate(split_indices):
-            entry = index[idx]
-            start_offset = entry.offset
-            start_line = entry.line
+            start_offset = offsets[idx]
+            start_line = lines[idx]
 
             if i + 1 < len(split_indices):
-                end_offset = index[split_indices[i + 1]].offset
+                end_offset = offsets[split_indices[i + 1]]
             else:
                 end_offset = file_size
 
@@ -559,7 +559,7 @@ class FilterEngine:
         use_parallel = (
             not self.indexer.is_compressed
             and self.indexer.size >= _PARALLEL_SEARCH_THRESHOLD
-            and len(self.indexer.index) >= 4
+            and len(self.indexer.offsets) >= 4
         )
 
         if use_parallel:
@@ -631,7 +631,8 @@ class FilterEngine:
         try:
             with open_maybe_compressed(str(self.path), "rb") as f:
                 cur_line = 0
-                index = self.indexer.index
+                offsets = self.indexer.offsets
+                lines = self.indexer.lines
                 is_compressed = self.indexer.is_compressed
 
                 for target_line in filtered_lines:
@@ -641,12 +642,13 @@ class FilterEngine:
                     # Pozycjonowanie w pliku do target_line
                     if cur_line != target_line:
                         if cur_line < target_line:
-                            if not is_compressed and len(index) > 1:
-                                idx = bisect.bisect_right(index, target_line, key=_ENTRY_LINE) - 1
-                                start_entry = index[max(0, idx)]
-                                if start_entry.line > cur_line:
-                                    f.seek(start_entry.offset)
-                                    cur_line = start_entry.line
+                            if not is_compressed and len(lines) > 1:
+                                idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+                                start_line = lines[idx]
+                                start_offset = offsets[idx]
+                                if start_line > cur_line:
+                                    f.seek(start_offset)
+                                    cur_line = start_line
 
                             needed = target_line - cur_line
                             if needed > 0:
@@ -654,10 +656,11 @@ class FilterEngine:
                                     break
                                 cur_line = target_line
                         else:
-                            idx = bisect.bisect_right(index, target_line, key=_ENTRY_LINE) - 1
-                            start_entry = index[max(0, idx)]
-                            f.seek(start_entry.offset)
-                            needed = target_line - start_entry.line
+                            idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+                            start_line = lines[idx]
+                            start_offset = offsets[idx]
+                            f.seek(start_offset)
+                            needed = target_line - start_line
                             if not self.indexer.advance_lines(f, needed):
                                 break
                             cur_line = target_line

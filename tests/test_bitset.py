@@ -315,3 +315,114 @@ def test_bitset_iter():
     # Pusty bitset
     bs_empty = Bitset(100)
     assert list(iter(bs_empty)) == []
+
+
+def test_bitset_logarithmic_expand_context():
+    # Test roznych wartosci kontekstu w zakresie 1..63 (potegi 2 i wartosci posrednie)
+    for ctx in [1, 2, 3, 7, 8, 15, 16, 31, 32, 50, 63]:
+        bs = Bitset(200)
+        bs.update_indices([10, 80])
+        exp = bs.expand_context(ctx)
+
+        expected_lines = set(range(10, 10 + ctx + 1)) | set(range(80, 80 + ctx + 1))
+        assert set(exp) == expected_lines
+
+    # Test przecinajacych sie zakresow
+    bs_overlap = Bitset(100)
+    bs_overlap.update_indices([10, 15])
+    exp_overlap = bs_overlap.expand_context(10)
+    assert set(exp_overlap) == set(range(10, 26))
+
+    # Test spojnosci expand_context i expand_context_incremental
+    bs_full = Bitset(250)
+    bs_full.update_indices([5, 60, 120])
+    exp_direct = bs_full.expand_context(45)
+
+    exp_incr = Bitset(250)
+    bs_full.expand_context_incremental(exp_incr, from_line=0, context_after=45)
+    assert list(exp_direct) == list(exp_incr)
+
+
+def test_bitset_merge_chunk_words_and_or_words_optimized():
+    # 1. merge_chunk_words do pustego zakresu (> 16 slow, array.array)
+    bs1 = Bitset(64 * 40)
+    arr_words = array.array("Q", [i * 2 + 1 for i in range(30)])
+    bs1.merge_chunk_words(5, arr_words)
+    assert bs1._words[5:35] == arr_words
+    assert all(w == 0 for w in bs1._words[:5])
+    assert all(w == 0 for w in bs1._words[35:])
+
+    # 2. merge_chunk_words z lista intow
+    bs2 = Bitset(64 * 40)
+    list_words = [100 + i for i in range(25)]
+    bs2.merge_chunk_words(10, list_words)
+    assert list(bs2._words[10:35]) == list_words
+
+    # 3. merge_chunk_words do niepustego zakresu (|=)
+    bs3 = Bitset(64 * 40)
+    bs3.update_indices([64 * 12 + 1])  # ustawia bit w slowie 12
+    old_val = bs3._words[12]
+    new_chunk = array.array("Q", [1 << 50] * 30)
+    bs3.merge_chunk_words(10, new_chunk)
+    assert bs3._words[12] == old_val | (1 << 50)
+    assert bs3._words[10] == 1 << 50
+
+    # 4. or_words do pustego bitsetu (> 16 slow)
+    bs4 = Bitset(64 * 30)
+    or_arr = array.array("Q", [1 << (i % 64) for i in range(25)])
+    bs4.or_words(or_arr)
+    assert bs4._words[:25] == or_arr
+
+    # 5. or_words do niepustego bitsetu (> 16 slow, |=)
+    bs5 = Bitset(64 * 30)
+    bs5.update_indices([0, 64 * 5 + 3])
+    bs5.or_words(or_arr)
+    assert bs5._words[0] == 1 | or_arr[0]
+    assert bs5._words[5] == (1 << 3) | or_arr[5]
+
+    # 6. Puste slowa (brak zmian)
+    bs5.merge_chunk_words(0, [])
+    bs5.or_words([])
+
+
+def test_bitset_set_cached_total_count():
+    bs = Bitset(100)
+    assert bs._total_count == -1
+    bs.set_cached_total_count(15)
+    assert bs._total_count == 15
+    assert len(bs) == 15
+    assert bs._counts is None  # nie wywoluje _build_cache
+
+
+def test_bitset_expand_size():
+    bs = Bitset(10)
+    bs.update_indices([1, 5, 9])
+    assert bs.size == 10
+    assert len(bs) == 3
+    assert 1 in bs
+    assert 5 in bs
+    assert 9 in bs
+    assert 50 not in bs
+
+    # Rozszerzenie mniejsze lub rowne nic nie robi
+    bs.expand_size(10)
+    assert bs.size == 10
+    bs.expand_size(5)
+    assert bs.size == 10
+
+    # Rozszerzenie do 150 (przekracza granice slow 64-bitowych)
+    bs.expand_size(150)
+    assert bs.size == 150
+    assert len(bs) == 3
+    assert 1 in bs
+    assert 5 in bs
+    assert 9 in bs
+    assert 50 not in bs
+
+    # Dodanie indeksow w nowym zakresie
+    bs.update_indices([50, 100, 149])
+    assert bs.size == 150
+    assert len(bs) == 6
+    assert 50 in bs
+    assert 100 in bs
+    assert 149 in bs
