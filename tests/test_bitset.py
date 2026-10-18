@@ -315,3 +315,29 @@ def test_bitset_iter():
     # Pusty bitset
     bs_empty = Bitset(100)
     assert list(iter(bs_empty)) == []
+
+
+def test_bitset_logarithmic_expand_context():
+    # Test roznych wartosci kontekstu w zakresie 1..63 (potegi 2 i wartosci posrednie)
+    for ctx in [1, 2, 3, 7, 8, 15, 16, 31, 32, 50, 63]:
+        bs = Bitset(200)
+        bs.update_indices([10, 80])
+        exp = bs.expand_context(ctx)
+
+        expected_lines = set(range(10, 10 + ctx + 1)) | set(range(80, 80 + ctx + 1))
+        assert set(exp) == expected_lines
+
+    # Test przecinajacych sie zakresow
+    bs_overlap = Bitset(100)
+    bs_overlap.update_indices([10, 15])
+    exp_overlap = bs_overlap.expand_context(10)
+    assert set(exp_overlap) == set(range(10, 26))
+
+    # Test spojnosci expand_context i expand_context_incremental
+    bs_full = Bitset(250)
+    bs_full.update_indices([5, 60, 120])
+    exp_direct = bs_full.expand_context(45)
+
+    exp_incr = Bitset(250)
+    bs_full.expand_context_incremental(exp_incr, from_line=0, context_after=45)
+    assert list(exp_direct) == list(exp_incr)

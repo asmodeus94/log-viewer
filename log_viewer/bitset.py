@@ -274,9 +274,14 @@ class Bitset(Sequence[int]):
             if w:
                 if context_after < 64:
                     expanded_w = w
-                    for shift in range(1, context_after + 1):
-                        expanded_w |= w << shift
-                    new_w |= expanded_w & 0xFFFFFFFFFFFFFFFF
+                    rem = context_after
+                    shift = 1
+                    while rem > 0:
+                        step = min(shift, rem)
+                        expanded_w |= (expanded_w << step) & 0xFFFFFFFFFFFFFFFF
+                        rem -= step
+                        shift <<= 1
+                    new_w |= expanded_w
 
                     highest_bit = w.bit_length() - 1
                     reach = base + highest_bit + context_after
@@ -362,9 +367,14 @@ class Bitset(Sequence[int]):
             if w:
                 if context_after < 64:
                     expanded_w = w
-                    for shift in range(1, context_after + 1):
-                        expanded_w |= w << shift
-                    new_w |= expanded_w & 0xFFFFFFFFFFFFFFFF
+                    rem = context_after
+                    shift = 1
+                    while rem > 0:
+                        step = min(shift, rem)
+                        expanded_w |= (expanded_w << step) & 0xFFFFFFFFFFFFFFFF
+                        rem -= step
+                        shift <<= 1
+                    new_w |= expanded_w
 
                     highest_bit = w.bit_length() - 1
                     reach = base + highest_bit + context_after
