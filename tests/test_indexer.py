@@ -878,3 +878,77 @@ class TestParallelIndexGapless:
 
         idx_parallel.close()
         idx_single.close()
+
+
+class TestLineIndexerSeekFastPath:
+    """Testy weryfikujace sciezke Fast-Path kursora w _seek_to_line."""
+
+    def test_seek_fast_path_exact_match(self, temp_log_file):
+        """Jesli kursor jest na target_line, seek_to_line natychmiast zwraca True."""
+        path = temp_log_file(num_lines=200)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 10)
+            assert idx._cursor_pos == (10, idx.offset_of_line(10))
+
+            assert idx._seek_to_line(f, 10) is True
+            assert idx._cursor_pos == (10, idx.offset_of_line(10))
+
+            f.seek(0)
+            assert idx._seek_to_line(f, 10) is True
+            assert f.tell() == idx.offset_of_line(10)
+
+        idx.close()
+
+    def test_seek_fast_path_short_forward_jump(self, temp_log_file):
+        """Krotki skok w przod (<= 128 linii) wykorzystuje _advance_lines bez bisekcji."""
+        path = temp_log_file(num_lines=300)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 50)
+
+            assert idx._seek_to_line(f, 60) is True
+            assert idx._cursor_pos == (60, idx.offset_of_line(60))
+            line_data = f.readline().decode()
+            assert "line      60" in line_data
+
+            assert idx._seek_to_line(f, 188) is True
+            assert idx._cursor_pos == (188, idx.offset_of_line(188))
+            line_data = f.readline().decode()
+            assert "line     188" in line_data
+
+        idx.close()
+
+    def test_seek_fallback_for_backward_or_far_jump(self, temp_log_file):
+        """Skok wstecz lub daleki (> 128 linii) poprawnie korzysta z indeksu bazowego."""
+        path = temp_log_file(num_lines=500)
+        idx = LineIndexer(path)
+        with idx._file_lock:
+            f = idx._get_file()
+            idx._seek_to_line(f, 200)
+
+            assert idx._seek_to_line(f, 400) is True
+            assert idx._cursor_pos == (400, idx.offset_of_line(400))
+            line_data = f.readline().decode()
+            assert "line     400" in line_data
+
+            assert idx._seek_to_line(f, 50) is True
+            assert idx._cursor_pos == (50, idx.offset_of_line(50))
+            line_data = f.readline().decode()
+            assert "line      50" in line_data
+
+        idx.close()
+
+    def test_line_at_byte_offset_resets_cursor(self, temp_log_file):
+        """line_at_byte_offset uniewaznia _cursor_pos, aby uniknac desynchronizacji uchwytu."""
+        path = temp_log_file(num_lines=100)
+        idx = LineIndexer(path)
+        idx.read_lines(10, 5)
+        assert idx._cursor_pos is not None
+
+        idx.line_at_byte_offset(100)
+        assert idx._cursor_pos is None
+
+        idx.close()

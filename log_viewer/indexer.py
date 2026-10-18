@@ -610,10 +610,30 @@ class LineIndexer:
     def _seek_to_line(self, f: typing.IO[bytes], target_line: int) -> bool:
         """Ustawia wskaźnik otwartego pliku na początek `target_line`.
 
-        Optymalizacja: jeśli ostatnia pozycja kursora (`_cursor_pos`) znajduje się
-        pomiędzy wpisem z indeksu a `target_line`, wznawia odczyt w przód bez
-        cofania się do punktu indeksu (f.seek).
+        Fast-Path optymalizacja:
+          1. Jeśli kursor znajduje się już dokładnie na target_line, natychmiast kończy sukcesem.
+          2. Jeśli kursor znajduje się tuż przed target_line (do 128 linii w przód), wznawia odczyt
+             bez bisekcji w indeksie i bez cofania się do punktu bazowego.
+          3. W pozostałych przypadkach (skok wstecz lub daleki skok) wykonuje binarne wyszukiwanie
+             w indeksie i skacze do najbliższego punktu indeksu.
         """
+        if self._cursor_pos is not None:
+            cur_line, cur_off = self._cursor_pos
+            if cur_line == target_line:
+                if f.tell() == cur_off:
+                    return True
+                f.seek(cur_off)
+                return True
+            if 0 < target_line - cur_line <= 128:
+                if f.tell() != cur_off:
+                    f.seek(cur_off)
+                needed = target_line - cur_line
+                if not self._advance_lines(f, needed):
+                    self._cursor_pos = None
+                    return False
+                self._cursor_pos = (target_line, f.tell())
+                return True
+
         idx = max(0, bisect.bisect_right(self._lines, target_line) - 1)
         start_offset = self._offsets[idx]
         start_line = self._lines[idx]
@@ -735,6 +755,7 @@ class LineIndexer:
                     last_nl_global = read_pos + chunk.rfind(b"\n")
                 read_pos += len(chunk)
                 bytes_left -= len(chunk)
+            self._cursor_pos = None
 
         curr_line = start_line + nl_cnt
         curr_offset = last_nl_global + 1 if last_nl_global != -1 else start_offset
