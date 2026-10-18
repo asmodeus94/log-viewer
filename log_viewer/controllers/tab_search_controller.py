@@ -222,7 +222,7 @@ class SearchController(QObject):
     @Slot(object, object, object, object, object, object)
     def _on_search_finished(
         self,
-        results_data: Any,
+        _results_data: Any,
         _context_lines: Any,
         filter_all_data: Any,
         _hit_text_map: Any,
@@ -237,8 +237,7 @@ class SearchController(QObject):
                     pass
             return
 
-        if results_data:
-            _results = Bitset.from_raw(results_data[0], results_data[1], results_data[2])
+        if filter_all_data:
             filter_all_lines = Bitset.from_raw(filter_all_data[0], filter_all_data[1], filter_all_data[2])
         else:
             filter_all_lines = Bitset(0)
