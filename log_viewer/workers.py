@@ -212,24 +212,41 @@ class SaveAsWorker(QObject):
         try:
             edits = self._edit_buffer.edits
             cancel_set = self._cancel_event.is_set
-            line_no = 0
-            last_progress_lines = 0
 
             with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as dst:
-                for raw in src:
-                    if line_no in edits:
-                        new_text = edits[line_no]
-                        if new_text is not None:
-                            dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
-                    else:
-                        dst.write(raw)
-
-                    line_no += 1
-                    if self._total_lines and (line_no - last_progress_lines) > 5000:
+                if not edits:
+                    total_bytes = 0
+                    try:
+                        total_bytes = Path(self._src_path).stat().st_size
+                    except OSError:
+                        pass
+                    bytes_copied = 0
+                    chunk_size = 16 * 1024 * 1024
+                    while True:
                         if cancel_set():
                             break
-                        self.progress.emit(line_no / self._total_lines * 100.0)
-                        last_progress_lines = line_no
+                        chunk = src.read(chunk_size)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        bytes_copied += len(chunk)
+                        if total_bytes > 0:
+                            self.progress.emit(min(100.0, bytes_copied / total_bytes * 100.0))
+                else:
+                    last_progress_lines = 0
+                    for line_no, raw in enumerate(src):
+                        if line_no in edits:
+                            new_text = edits[line_no]
+                            if new_text is not None:
+                                dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                        else:
+                            dst.write(raw)
+
+                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                            if cancel_set():
+                                break
+                            self.progress.emit(line_no / self._total_lines * 100.0)
+                            last_progress_lines = line_no
 
             if cancel_set():
                 self.error.emit("cancelled")
@@ -303,22 +320,49 @@ class ExportWorker(QObject):
 
             with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as out:
                 if not self._filter_active:
-                    for raw in src:
-                        if line_no in edits:
-                            new_text = edits[line_no]
-                            if new_text is not None:
-                                out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
-                                count += 1
-                        else:
-                            out.write(raw)
-                            count += 1
-
-                        line_no += 1
-                        if self._total_lines and (line_no - last_progress_lines) > 5000:
+                    if not edits:
+                        total_bytes = 0
+                        try:
+                            total_bytes = Path(self._src_path).stat().st_size
+                        except OSError:
+                            pass
+                        bytes_copied = 0
+                        chunk_size = 16 * 1024 * 1024
+                        last_byte = b""
+                        while True:
                             if cancel_set():
                                 break
-                            self.progress.emit(line_no / self._total_lines * 100.0)
-                            last_progress_lines = line_no
+                            chunk = src.read(chunk_size)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            bytes_copied += len(chunk)
+                            last_byte = chunk[-1:]
+                            if self._total_lines <= 0:
+                                count += chunk.count(b"\n")
+                            if total_bytes > 0:
+                                self.progress.emit(min(100.0, bytes_copied / total_bytes * 100.0))
+                        if self._total_lines > 0:
+                            count = self._total_lines
+                        elif bytes_copied > 0 and last_byte != b"\n":
+                            count += 1
+                    else:
+                        last_progress_lines = 0
+                        for line_no, raw in enumerate(src):
+                            if line_no in edits:
+                                new_text = edits[line_no]
+                                if new_text is not None:
+                                    out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                    count += 1
+                            else:
+                                out.write(raw)
+                                count += 1
+
+                            if self._total_lines and (line_no - last_progress_lines) > 5000:
+                                if cancel_set():
+                                    break
+                                self.progress.emit(line_no / self._total_lines * 100.0)
+                                last_progress_lines = line_no
                 elif self._filter_results is not None:
                     total_hits = len(self._filter_results)
                     if total_hits > 0:
