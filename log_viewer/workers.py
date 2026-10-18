@@ -470,20 +470,38 @@ class IncrementalFilterWorker(QObject):
 
             start_offset = self._indexer.offset_of_line(self._start_line)
             if start_offset is not None and not self._indexer.is_compressed:
+                chunk_size = 16 * 1024 * 1024
+                current_line = self._start_line
+                carry = b""
                 with open(str(self._indexer.path), "rb") as f:
                     f.seek(start_offset)
-                    chunk = f.read()
-                if not self._cancel_event.is_set():
-                    hits = strategy.match_chunk(chunk, self._start_line)
-                    results_array.extend(hits)
+                    while not self._cancel_event.is_set():
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+                        data = carry + chunk if carry else chunk
+                        last_nl = data.rfind(b"\n")
+                        if last_nl != -1:
+                            complete_data = data[: last_nl + 1]
+                            carry = data[last_nl + 1 :]
+                        else:
+                            carry = data
+                            continue
+
+                        hits = strategy.match_chunk(complete_data, current_line)
+                        results_array.extend(hits)
+                        current_line += complete_data.count(b"\n")
+
+                    if not self._cancel_event.is_set() and carry:
+                        hits = strategy.match_chunk(carry, current_line)
+                        results_array.extend(hits)
             else:
-                lines = self._indexer.read_lines(self._start_line, self._end_line - self._start_line)
+                raw_lines = self._indexer.read_raw_lines(self._start_line, self._end_line - self._start_line)
                 cancel_set = self._cancel_event.is_set
-                for line_no, text in lines:
+                for line_no, raw in raw_lines:
                     if cancel_set():
                         return
-                    text_bytes = text.encode(self._encoding, errors="replace")
-                    if strategy.match(text_bytes):
+                    if strategy.match(raw):
                         results_array.append(line_no)
         except BaseException:
             pass

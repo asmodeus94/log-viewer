@@ -713,6 +713,24 @@ class LineIndexer:
                 self._cursor_pos = (start_line + len(out), f.tell())
         return out
 
+    def read_raw_lines(self, start_line: int, count: int) -> list[tuple[int, bytes]]:
+        """Zwraca liste krotek (numer_linii, surowe_bajty) bez dekodowania do str."""
+        if start_line < 0:
+            start_line = 0
+        if start_line >= self.line_count or count <= 0:
+            return []
+
+        out: list[tuple[int, bytes]] = []
+        with self._file_lock:
+            f = self._get_file()
+            if not self._seek_to_line(f, start_line):
+                return []
+            for i, raw in enumerate(itertools.islice(f, count)):
+                out.append((start_line + i, raw.rstrip(b"\r\n")))
+            if out:
+                self._cursor_pos = (start_line + len(out), f.tell())
+        return out
+
     def line_at_byte_offset(self, byte_offset: int) -> tuple[int, int]:
         """Zwraca (numer_linii, byte_offset_początku_linii) dla wskazanego byte_offset.
 

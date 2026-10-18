@@ -981,3 +981,35 @@ class TestLineIndexerSeekFastPath:
         assert idx._cursor_pos is None
 
         idx.close()
+
+
+class TestLineIndexerReadRawLines:
+    def test_read_raw_lines_matches_read_lines(self, temp_log_file):
+        path = temp_log_file(num_lines=50)
+        idx = LineIndexer(path)
+
+        raw_res = idx.read_raw_lines(10, 5)
+        str_res = idx.read_lines(10, 5)
+
+        assert len(raw_res) == 5
+        assert len(str_res) == 5
+
+        for (l_raw, b_data), (l_str, s_data) in zip(raw_res, str_res, strict=True):
+            assert l_raw == l_str
+            assert isinstance(b_data, bytes)
+            assert b_data.decode("utf-8") == s_data
+            assert not b_data.endswith(b"\n")
+            assert not b_data.endswith(b"\r")
+
+        idx.close()
+
+    def test_read_raw_lines_out_of_bounds(self, temp_log_file):
+        path = temp_log_file(num_lines=20)
+        idx = LineIndexer(path)
+
+        assert idx.read_raw_lines(-5, 5) == idx.read_raw_lines(0, 5)
+        assert idx.read_raw_lines(100, 5) == []
+        assert idx.read_raw_lines(5, 0) == []
+        assert idx.read_raw_lines(5, -1) == []
+
+        idx.close()
