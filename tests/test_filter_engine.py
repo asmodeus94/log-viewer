@@ -688,3 +688,33 @@ class TestFilterEngineSearchInFilter:
         # W liniach 10..19: linie o indeksie % 4 == 2 to ERROR: 10, 14, 18
         assert set(results) == {10, 14, 18}
         idx.close()
+
+    def test_should_use_filtered_search_adaptive(self, temp_log_file):
+        """Weryfikacja adaptacyjnej decyzji _should_use_filtered_search."""
+        path = temp_log_file(num_lines=100000)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        # 1. Pusty filtr -> False
+        empty_bs = Bitset(100000)
+        assert not engine._should_use_filtered_search(empty_bs)
+
+        # 2. Mały filtr (<= 2000 linii) -> Zawsze True (fast-path)
+        small_bs = Bitset(100000)
+        small_bs.update_indices(range(0, 100000, 100))  # 1000 linii
+        assert len(small_bs) == 1000
+        assert engine._should_use_filtered_search(small_bs)
+
+        # 3. Średni filtr skupiony (np. 10 000 linii w przedziale 10 000 linii) -> True
+        clustered_bs = Bitset(100000)
+        clustered_bs.update_indices(range(20000, 30000))
+        assert len(clustered_bs) == 10000
+        assert engine._should_use_filtered_search(clustered_bs)
+
+        # 4. Bardzo duży filtr (> 50 000 linii) -> False (skanowanie chunków jest szybsze)
+        large_bs = Bitset(100000)
+        large_bs.update_indices(range(0, 60000))
+        assert len(large_bs) == 60000
+        assert not engine._should_use_filtered_search(large_bs)
+
+        idx.close()

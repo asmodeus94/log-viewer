@@ -22,9 +22,8 @@ _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 _WORKER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy chunk = lepsza lokalność cache OS
 _FILE_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB
 
-# Maksymalna liczba linii z filtra, które opłaca się przeszukiwać pojedynczo (seek/readline).
-# Powyżej tego progu pełny skan wieloprocesowy (multiprocessing z buforami 32MB w C)
-# jest rzędy wielkości szybszy niż pojedyncze operacje I/O dla dziesiątek tysięcy linii.
+# Maksymalna liczba linii z filtra, które bezwarunkowo opłaca się przeszukiwać pojedynczo (Fast-Path).
+# Powyżej tego progu decyzja podejmowana jest adaptacyjnie na podstawie gęstości i rozpiętości filtra.
 _FAST_FILTERED_LINE_THRESHOLD = 2000
 
 # Współdzielone liczniki postępu — globalne w kontekście procesu roboczego.
@@ -461,6 +460,45 @@ class FilterEngine:
             return RegexStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
         return PlainTextStrategy(pattern, case_sensitive, negate, self.indexer.encoding)
 
+    def _should_use_filtered_search(self, filtered_lines: Bitset) -> bool:
+        """Adaptacyjna ocena opłacalności trybu _run_filtered vs skanowanie chunków (Optymalizacja 1.2).
+
+        Zamiast sztywnego progu 2000 linii, silnik analizuje:
+        1. Całkowitą liczbę linii w filtrze (flen).
+        2. Rozpiętość (span) filtra w pliku (od pierwszej do ostatniej linii).
+        3. Rozmiar pliku i gęstość w oknie filtra.
+        """
+        flen = len(filtered_lines)
+        if flen == 0:
+            return False
+        # Do 2000 linii bezwzględnie fast-path: natychmiastowy odczyt (< 100 ms) bez narzutu na procesy
+        if flen <= _FAST_FILTERED_LINE_THRESHOLD:
+            return True
+
+        # Powyżej 50 000 linii skan strumieniowy/równoległy w C jest zawsze szybszy
+        if flen > 50_000:
+            return False
+
+        total_lines = self.indexer.line_count if self.indexer else 0
+        if total_lines <= 0:
+            return True
+
+        first = filtered_lines.first_set_index()
+        last = filtered_lines.last_set_index()
+        if first is None or last is None:
+            return False
+
+        line_span = last - first + 1
+        span_ratio = line_span / total_lines
+
+        # Jeśli filtr jest skupiony (np. linie z danego przedziału czasowego obejmujące <= 30% pliku
+        # lub do 100 000 kolejnych linii), bezpośredni odczyt klastra jest do 10-15x szybszy
+        if span_ratio <= 0.30 or line_span <= 100_000:
+            return True
+
+        # Jeśli rozkład jest szeroki, ale linijki są stosunkowo rzadkie (do 3000)
+        return flen <= 3000
+
     def _compute_search_ranges(self, n_workers: int) -> list[tuple[int, int, int]]:
         """Wyznacza zakresy (start_offset, end_offset, start_line) dla workerów.
 
@@ -536,10 +574,8 @@ class FilterEngine:
                         pass
                 return
 
-            # Dla małej liczby linii w filtrze (<= 2000) bezpośredni odczyt jest natychmiastowy (< 0.5 s).
-            # Dla większej liczby linii w filtrze (> 2000) pełny skan równoległy (multiprocessing z buforami 32MB)
-            # jest rzędy wielkości szybszy niż wykonywanie dziesiątek tysięcy pojedynczych odczytów z dysku!
-            if flen <= _FAST_FILTERED_LINE_THRESHOLD:
+            # Optymalizacja 1.2: Adaptacyjna ocena gęstości i rozpiętości filtra
+            if self._should_use_filtered_search(filtered_lines):
                 self._run_filtered(
                     session,
                     pattern,

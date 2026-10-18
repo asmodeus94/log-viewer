@@ -235,6 +235,24 @@ class Bitset(Sequence[int]):
         end_mask = 0xFFFFFFFFFFFFFFFF if end_bit == 63 else (1 << (end_bit + 1)) - 1
         return bool(words[end_word] & end_mask)
 
+    def first_set_index(self) -> int | None:
+        """Zwraca indeks pierwszego ustawionego bitu w O(słowa) bez budowania cache bisekcji."""
+        for i, w in enumerate(self._words):
+            if w:
+                tz = (w & -w).bit_length() - 1
+                return i * 64 + tz
+        return None
+
+    def last_set_index(self) -> int | None:
+        """Zwraca indeks ostatniego ustawionego bitu w O(słowa) od końca bez budowania cache bisekcji."""
+        words = self._words
+        for i in range(len(words) - 1, -1, -1):
+            w = words[i]
+            if w:
+                highest_bit = w.bit_length() - 1
+                return i * 64 + highest_bit
+        return None
+
     def bisect_left(self, index: int) -> int:
         if index <= 0:
             return 0
@@ -528,7 +546,7 @@ class Bitset(Sequence[int]):
         new_bs._words = new_words
 
         if self._size > 0 and num_words > 0:
-            last_valid_bit = (self._size - 1) % 64
+            last_valid_bit = (min_size - 1) % 64 if (min_size := self._size) else 0
             mask = (1 << (last_valid_bit + 1)) - 1
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF

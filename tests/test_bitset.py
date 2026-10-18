@@ -466,3 +466,17 @@ def test_bitset_any_in_range():
     # 6. Zakres ujemny i wykraczający poza rozmiar (clamping)
     assert bs2.any_in_range(-50, 64 * 10 + 50)
     assert not bs.any_in_range(-50, 0)
+
+
+def test_bitset_first_last_set_index():
+    bs = Bitset(1000)
+    assert bs.first_set_index() is None
+    assert bs.last_set_index() is None
+
+    bs.update_indices([100])
+    assert bs.first_set_index() == 100
+    assert bs.last_set_index() == 100
+
+    bs.update_indices([5, 500, 999])
+    assert bs.first_set_index() == 5
+    assert bs.last_set_index() == 999
