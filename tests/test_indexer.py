@@ -743,6 +743,28 @@ class TestIndexerWorkerChunk:
         assert entries == []
         assert last_off == 500
 
+    def test_collect_chunk_index_entries_with_preallocated_bytearray(self):
+        from log_viewer.indexer import _collect_chunk_index_entries
+
+        ba = bytearray(256)
+        data = b"line 1\nline 2\nline 3\n"
+        ba[: len(data)] = data
+        ba[len(data) :] = b"\n\n\n\n\n\n" * 10  # dane resztkowe (stale) poza chunk_len
+
+        entries = []
+        last_off, nl_cnt = _collect_chunk_index_entries(
+            chunk=ba,
+            base_offset=0,
+            base_line=0,
+            last_indexed_offset=0,
+            interval=10,
+            entries=entries,
+            chunk_len=len(data),
+        )
+        assert nl_cnt == 3
+        assert len(entries) == 2
+        assert last_off == 21
+
 
 class TestLineIndexerContextManager:
     def test_context_manager_opens_and_closes(self, temp_log_file):
