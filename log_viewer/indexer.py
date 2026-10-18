@@ -27,9 +27,8 @@ from .helpers import (
 )
 
 
-@dataclass
+@dataclass(slots=True)
 class IndexEntry:
-    __slots__ = ("offset", "line")
     offset: int  # byte offset początku tej linii (0-indexed)
     line: int  # numer linii (0-indexed)
 
@@ -56,7 +55,7 @@ def _collect_chunk_index_entries(
     last_indexed_offset: int,
     interval: int,
     entries: list[Any],
-    create_entry: Callable[[int, int], Any] | None = None,
+    create_entry: Callable[[int, int], Any] | type[IndexEntry] | None = None,
 ) -> tuple[int, int]:
     """Wyszukuje granice indeksowania w chunku i dodaje nowe wpisy do entries.
 
@@ -104,7 +103,7 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
     try:
         line_count = 0
         index_entries: list[tuple[int, int]] = []
-        last_idx = start  # ostatni offset gdzie zapisaliśmy index entry
+        last_idx = max(0, start - interval)  # ostatni offset gdzie zapisaliśmy index entry
         local_line = 0
         bytes_processed = 0  # ile bajtów z [start, end) przetworzono
 
@@ -176,7 +175,7 @@ class LineIndexer:
         self._progress_cb = progress_cb
         self._cancel_event = cancel_event  # None = nie można anulować
         self._file_cache: typing.IO[bytes] | None = None
-        self._file_lock = threading.Lock()
+        self._file_lock = threading.RLock()
         self._last_indexed_offset = 0
         self._cursor_pos: tuple[int, int] | None = None  # (line_number, byte_offset)
         self._build()
