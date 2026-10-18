@@ -169,6 +169,7 @@ class Bitset(Sequence[int]):
 
     @overload
     def __getitem__(self, index: int) -> int: ...
+    # noinspection PyMethodOverriding
     @overload
     def __getitem__(self, index: slice) -> array.array[int]: ...
 
