@@ -584,8 +584,11 @@ class LineIndexer:
         """Szybkie pomijanie `needed` linii w otwartym pliku bez alokowania zbędnych obiektów."""
         if needed <= 0:
             return True
-        if needed <= 16:
-            return all(bool(f.readline()) for _ in range(needed))
+        if needed <= 128:
+            try:
+                return sum(1 for _ in itertools.islice(f, needed)) == needed
+            except (OSError, ValueError):
+                return False
 
         chunk_size = 64 * 1024
         while needed > 0:

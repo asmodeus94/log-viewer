@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import array
 import bisect
+import itertools
 import multiprocessing
 import multiprocessing.sharedctypes
 import re
@@ -617,6 +618,28 @@ class FilterEngine:
             session, pattern, use_regex, case_sensitive, negate, on_progress, on_done, search_in_filter, filtered_lines
         )
 
+    @staticmethod
+    def _get_clusters(
+        targets: Bitset | Sequence[int],
+        max_gap: int = 32,
+        max_span: int = 256,
+    ) -> Iterator[list[int]]:
+        """Grupuje linie w klastry."""
+        cluster: list[int] = []
+        first_t = -1
+        for t in targets:
+            if first_t == -1:
+                cluster = [t]
+                first_t = t
+            elif (t - cluster[-1] <= max_gap) and (t - first_t + 1 <= max_span):
+                cluster.append(t)
+            else:
+                yield cluster
+                cluster = [t]
+                first_t = t
+        if cluster:
+            yield cluster
+
     def _run_filtered(
         self,
         session: int,
@@ -662,51 +685,79 @@ class FilterEngine:
         processed_count = 0
 
         try:
-            with open_maybe_compressed(str(self.path), "rb") as f:
+            with open_maybe_compressed(str(self.path), "rb", buffering=256 * 1024) as f:
                 cur_line = 0
                 offsets = self.indexer.offsets
                 lines = self.indexer.lines
                 is_compressed = self.indexer.is_compressed
 
-                for target_line in filtered_lines:
-                    if processed_count % 100 == 0 and (self._cancel.is_set() or not self._is_current_session(session)):
+                for cluster in self._get_clusters(filtered_lines):
+                    if self._cancel.is_set() or not self._is_current_session(session):
                         return
 
-                    # Pozycjonowanie w pliku do target_line
-                    if cur_line != target_line:
-                        if cur_line < target_line:
+                    start_target = cluster[0]
+                    end_target = cluster[-1]
+                    span = end_target - start_target + 1
+
+                    # Pozycjonowanie w pliku do start_target
+                    if cur_line != start_target:
+                        if cur_line < start_target:
                             if not is_compressed and len(lines) > 1:
-                                idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+                                idx = max(0, bisect.bisect_right(lines, start_target) - 1)
                                 start_line = lines[idx]
                                 start_offset = offsets[idx]
                                 if start_line > cur_line:
                                     f.seek(start_offset)
                                     cur_line = start_line
 
-                            needed = target_line - cur_line
+                            needed = start_target - cur_line
                             if needed > 0:
                                 if not self.indexer.advance_lines(f, needed):
                                     break
-                                cur_line = target_line
+                                cur_line = start_target
                         else:
-                            idx = max(0, bisect.bisect_right(lines, target_line) - 1)
+                            idx = max(0, bisect.bisect_right(lines, start_target) - 1)
                             start_line = lines[idx]
                             start_offset = offsets[idx]
                             f.seek(start_offset)
-                            needed = target_line - start_line
+                            needed = start_target - start_line
                             if not self.indexer.advance_lines(f, needed):
                                 break
-                            cur_line = target_line
+                            cur_line = start_target
 
-                    raw_line = f.readline()
-                    if not raw_line:
-                        break
-                    cur_line = target_line + 1
-                    processed_count += 1
-
-                    if strategy.match(raw_line):
-                        batch_hits.append(target_line)
-                        total_hits += 1
+                    # Odczyt klastra linii z buforowaniem
+                    if span == 1:
+                        raw_line = f.readline()
+                        if not raw_line:
+                            break
+                        cur_line = start_target + 1
+                        processed_count += 1
+                        if strategy.match(raw_line):
+                            batch_hits.append(start_target)
+                            total_hits += 1
+                    elif span == len(cluster):
+                        # Wszystkie linie w klastrze wystepuja ciagle jedna po drugiej
+                        for target_line, raw_line in zip(cluster, itertools.islice(f, span), strict=False):
+                            processed_count += 1
+                            if strategy.match(raw_line):
+                                batch_hits.append(target_line)
+                                total_hits += 1
+                        cur_line = start_target + span
+                    else:
+                        # Linie w klastrze maja niewielkie odstepy (<= max_gap)
+                        lines_chunk = list(itertools.islice(f, span))
+                        if not lines_chunk:
+                            break
+                        cur_line = start_target + len(lines_chunk)
+                        chunk_len = len(lines_chunk)
+                        for target_line in cluster:
+                            offset = target_line - start_target
+                            if offset < chunk_len:
+                                raw_line = lines_chunk[offset]
+                                processed_count += 1
+                                if strategy.match(raw_line):
+                                    batch_hits.append(target_line)
+                                    total_hits += 1
 
                     now = time.time()
                     if now - last_progress_time >= 0.1 or len(batch_hits) >= 2000:

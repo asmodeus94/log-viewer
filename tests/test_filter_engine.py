@@ -718,3 +718,38 @@ class TestFilterEngineSearchInFilter:
         assert not engine._should_use_filtered_search(large_bs)
 
         idx.close()
+
+    def test_get_clusters(self):
+        """Weryfikacja grupowania linii w klastry."""
+        assert list(FilterEngine._get_clusters([10, 11, 12, 13], 32, 256)) == [[10, 11, 12, 13]]
+        assert list(FilterEngine._get_clusters([10, 15, 25, 40], 16, 256)) == [[10, 15, 25, 40]]
+        assert list(FilterEngine._get_clusters([10, 100, 250], 16, 256)) == [[10], [100], [250]]
+        c = list(FilterEngine._get_clusters(list(range(0, 300)), 32, 256))
+        assert len(c) == 2 and c[0] == list(range(0, 256)) and c[1] == list(range(256, 300))
+        assert list(FilterEngine._get_clusters([])) == []
+
+    def test_search_in_filtered_clustered_execution(self, temp_log_file):
+        """Weryfikacja klastrowanego odczytu w _run_filtered."""
+        path = temp_log_file(num_lines=2000)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+        targets = [10, 11, 12, 13, 14, 50, 52, 54, 56, 500, 1200, 1201]
+        filtered = Bitset(2000)
+        filtered.update_indices(targets)
+        results = []
+        done = threading.Event()
+        engine.start(
+            "ERROR",
+            False,
+            True,
+            False,
+            lambda *a: None,
+            lambda r, e: (results.extend(r), done.set()),
+            search_in_filter=True,
+            filtered_lines=filtered,
+        )
+        done.wait(5.0)
+        assert done.is_set()
+        expected = [t for t in targets if t % 4 == 2]
+        assert sorted(results) == expected
+        idx.close()

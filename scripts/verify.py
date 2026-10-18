@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,14 @@ def get_python_executable(repo_root: Path) -> str:
     if venv_py.exists():
         return str(venv_py)
     return sys.executable
+
+
+def cleanup_benchmarks(repo_root: Path) -> None:
+    """Usuwa ewentualne pozostałości po pytest-benchmark."""
+    for pattern in (".benchmarks", ".benchmark"):
+        for p in repo_root.rglob(pattern):
+            if p.is_dir() and ".venv" not in p.parts:
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def run_command(cmd: list[str], cwd: Path, description: str) -> tuple[int, str]:
@@ -192,8 +201,9 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
 
 def step_tests(repo_root: Path, py_exe: str) -> bool:
     """Krok 4: Testy jednostkowe (pytest)."""
-    cmd = [py_exe, "-m", "pytest", "tests/"]
+    cmd = [py_exe, "-m", "pytest", "tests/", "--benchmark-disable"]
     code, _ = run_command(cmd, repo_root, "Step 4: Unit and GUI tests (pytest)")
+    cleanup_benchmarks(repo_root)
     return code == 0
 
 
@@ -201,6 +211,7 @@ def step_benchmark(repo_root: Path, py_exe: str) -> bool:
     """Krok benchmarku: testy wydajnościowe (pytest-benchmark)."""
     cmd = [py_exe, "-m", "pytest", "tests/test_benchmarks.py", "--benchmark-enable"]
     code, _ = run_command(cmd, repo_root, "Benchmark Step: Performance tests (pytest-benchmark)")
+    cleanup_benchmarks(repo_root)
     return code == 0
 
 
@@ -244,6 +255,8 @@ def main() -> int:
     print(f"Working directory: {repo_root}")
     print(f"Interpreter:       {py_exe}\n")
 
+    cleanup_benchmarks(repo_root)
+
     if args.fix:
         if not step_format_and_fix(repo_root, py_exe):
             print(f"\n{RED}{BOLD}[ERROR] Auto-fix failed.{RESET}")
@@ -282,9 +295,11 @@ def main() -> int:
 
         if not success:
             print(f"\n{RED}{BOLD}[QUALITY GATE ERROR] Step '{step}' failed.{RESET}")
+            cleanup_benchmarks(repo_root)
             return 1
         print(f"{GREEN}[OK] Step '{step}' passed successfully.{RESET}\n")
 
+    cleanup_benchmarks(repo_root)
     print(f"{GREEN}{BOLD}=== SUCCESS: All quality checks passed successfully! ==={RESET}")
     return 0
 
