@@ -44,16 +44,31 @@ class Bitset(Sequence[int]):
         return self._size, self._words, self._total_count
 
     def merge_chunk_words(self, base_word: int, words: Sequence[int] | array.array[int]) -> None:
-        """Scalanie zakresu słów bitowych z workera (używane przy wyszukiwaniu/filtrowaniu równoległym)."""
+        """Scalanie zakresu slow bitowych z workera (uzywane przy wyszukiwaniu/filtrowaniu rownoleglym)."""
         if not words:
             return
-        needed = base_word + len(words)
+        n_words = len(words)
+        needed = base_word + n_words
         if needed > self._num_words:
             self.resize(needed * 64)
 
         global_words = self._words
-        for i, w in enumerate(words):
-            global_words[base_word + i] |= w
+        end = base_word + n_words
+
+        if n_words <= 16:
+            for i in range(n_words):
+                global_words[base_word + i] |= words[i]
+        else:
+            is_zero = not any(itertools.islice(global_words, base_word, end))
+            if is_zero:
+                if isinstance(words, array.array) and words.typecode == "Q":
+                    global_words[base_word:end] = words
+                else:
+                    global_words[base_word:end] = array.array("Q", words)
+            else:
+                for i in range(n_words):
+                    global_words[base_word + i] |= words[i]
+
         self._counts = None
         self._total_count = -1
 
@@ -95,9 +110,24 @@ class Bitset(Sequence[int]):
         return self._words
 
     def or_words(self, words: Sequence[int]) -> None:
-        """Łączy alternatywą bitową (OR) słowa bitsetu z przekazaną sekwencją."""
-        for i in range(min(len(words), self._num_words)):
-            self._words[i] |= words[i]
+        """Laczy alternatywa bitowa (OR) slowa bitsetu z przekazana sekwencja."""
+        count = min(len(words), self._num_words)
+        if count <= 0:
+            return
+        global_words = self._words
+        if count <= 16:
+            for i in range(count):
+                global_words[i] |= words[i]
+        else:
+            is_zero = not any(itertools.islice(global_words, 0, count))
+            if is_zero:
+                if isinstance(words, array.array) and words.typecode == "Q":
+                    global_words[:count] = words[:count]
+                else:
+                    global_words[:count] = array.array("Q", itertools.islice(words, 0, count))
+            else:
+                for i in range(count):
+                    global_words[i] |= words[i]
         self._counts = None
         self._total_count = -1
 

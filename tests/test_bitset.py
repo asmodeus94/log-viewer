@@ -341,3 +341,45 @@ def test_bitset_logarithmic_expand_context():
     exp_incr = Bitset(250)
     bs_full.expand_context_incremental(exp_incr, from_line=0, context_after=45)
     assert list(exp_direct) == list(exp_incr)
+
+
+def test_bitset_merge_chunk_words_and_or_words_optimized():
+    # 1. merge_chunk_words do pustego zakresu (> 16 slow, array.array)
+    bs1 = Bitset(64 * 40)
+    arr_words = array.array("Q", [i * 2 + 1 for i in range(30)])
+    bs1.merge_chunk_words(5, arr_words)
+    assert bs1._words[5:35] == arr_words
+    assert all(w == 0 for w in bs1._words[:5])
+    assert all(w == 0 for w in bs1._words[35:])
+
+    # 2. merge_chunk_words z lista intow
+    bs2 = Bitset(64 * 40)
+    list_words = [100 + i for i in range(25)]
+    bs2.merge_chunk_words(10, list_words)
+    assert list(bs2._words[10:35]) == list_words
+
+    # 3. merge_chunk_words do niepustego zakresu (|=)
+    bs3 = Bitset(64 * 40)
+    bs3.update_indices([64 * 12 + 1])  # ustawia bit w slowie 12
+    old_val = bs3._words[12]
+    new_chunk = array.array("Q", [1 << 50] * 30)
+    bs3.merge_chunk_words(10, new_chunk)
+    assert bs3._words[12] == old_val | (1 << 50)
+    assert bs3._words[10] == 1 << 50
+
+    # 4. or_words do pustego bitsetu (> 16 slow)
+    bs4 = Bitset(64 * 30)
+    or_arr = array.array("Q", [1 << (i % 64) for i in range(25)])
+    bs4.or_words(or_arr)
+    assert bs4._words[:25] == or_arr
+
+    # 5. or_words do niepustego bitsetu (> 16 slow, |=)
+    bs5 = Bitset(64 * 30)
+    bs5.update_indices([0, 64 * 5 + 3])
+    bs5.or_words(or_arr)
+    assert bs5._words[0] == 1 | or_arr[0]
+    assert bs5._words[5] == (1 << 3) | or_arr[5]
+
+    # 6. Puste slowa (brak zmian)
+    bs5.merge_chunk_words(0, [])
+    bs5.or_words([])
