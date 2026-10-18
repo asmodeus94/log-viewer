@@ -294,6 +294,35 @@ class TestLineIndexerFileDescriptorCache:
 
         idx.close()
 
+    def test_update_from_reuses_fd(self, tmp_path):
+        """update_from nie niszczy otwartego deskryptora i pozwala na dalsze ponowne uzycie w read_lines."""
+        p = tmp_path / "growing_fd.log"
+        p.write_bytes(b"line 0\nline 1\n")
+        idx = LineIndexer(p)
+
+        idx.read_lines(0, 2)
+        cached_f = idx._file_cache
+        assert cached_f is not None
+
+        with open(p, "ab") as f:
+            f.write(b"line 2\nline 3\n")
+        new_size = p.stat().st_size
+
+        new_lines = idx.update_from(new_size)
+        assert new_lines == 2
+        assert idx._file_cache is cached_f
+        assert not cached_f.closed
+
+        tail = idx.read_tail(2)
+        assert len(tail) == 2
+        assert tail[0][1] == "line 2"
+        assert tail[1][1] == "line 3"
+        assert idx._file_cache is cached_f
+
+        idx.close()
+        assert cached_f.closed
+        assert idx._file_cache is None
+
     def test_close_releases_fd(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)

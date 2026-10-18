@@ -522,17 +522,21 @@ class LineIndexer:
             return 0
         if self.is_compressed:
             return 0
-        old_size = self.size
-        bytes_to_read = new_size - old_size
-        line_num = self.line_count
-        last_indexed_offset = self._last_indexed_offset
-        bytes_read = 0
-        total_new_nls = 0
-        last_byte = b""
-        had_trailing_nl = self.has_trailing_newline
-        base_line = line_num if had_trailing_nl else max(0, line_num - 1)
 
-        with open(str(self.path), "rb") as f:
+        with self._file_lock:
+            old_size = self.size
+            if new_size <= old_size:
+                return 0
+            bytes_to_read = new_size - old_size
+            line_num = self.line_count
+            last_indexed_offset = self._last_indexed_offset
+            bytes_read = 0
+            total_new_nls = 0
+            last_byte = b""
+            had_trailing_nl = self.has_trailing_newline
+            base_line = line_num if had_trailing_nl else max(0, line_num - 1)
+
+            f = self._get_file()
             f.seek(old_size)
             buf = bytearray(INDEX_CHUNK_BYTES)
             readinto_fn: Callable[[Any], int] | None = getattr(f, "readinto", None)
@@ -558,28 +562,22 @@ class LineIndexer:
                 bytes_read += chunk_len
                 if progress_cb and bytes_to_read > 0:
                     progress_cb(min(100.0, bytes_read / bytes_to_read * 100.0))
-        with self._file_lock:
-            if self._file_cache is not None:
-                try:
-                    self._file_cache.close()
-                except OSError:
-                    pass
-                self._file_cache = None
+
             self._cursor_pos = None
 
-        if had_trailing_nl:
-            new_lines = total_new_nls + (1 if bytes_read > 0 and last_byte != b"\n" else 0)
-        else:
-            if total_new_nls == 0:
-                new_lines = 0
+            if had_trailing_nl:
+                new_lines = total_new_nls + (1 if bytes_read > 0 and last_byte != b"\n" else 0)
             else:
-                new_lines = (total_new_nls - 1) + (1 if last_byte != b"\n" else 0)
+                if total_new_nls == 0:
+                    new_lines = 0
+                else:
+                    new_lines = (total_new_nls - 1) + (1 if last_byte != b"\n" else 0)
 
-        self.has_trailing_newline = (bytes_read == 0 and had_trailing_nl) or (last_byte == b"\n")
-        self.line_count = line_num + new_lines
-        self._last_indexed_offset = last_indexed_offset
-        self.size = old_size + bytes_read
-        return new_lines
+            self.has_trailing_newline = (bytes_read == 0 and had_trailing_nl) or (last_byte == b"\n")
+            self.line_count = line_num + new_lines
+            self._last_indexed_offset = last_indexed_offset
+            self.size = old_size + bytes_read
+            return new_lines
 
     @staticmethod
     def _advance_lines(f: typing.IO[bytes], needed: int) -> bool:
