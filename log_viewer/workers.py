@@ -115,13 +115,13 @@ class FilterWorker(QObject):
 
             if self._context_after > 0:
                 self.progress.emit(100.0, len(results), "context", None)
+                filter_all_lines = results.expand_context(self._context_after)
+                res_tuple = results.to_raw()
+                all_tuple = filter_all_lines.to_raw()
             else:
                 self.progress.emit(100.0, len(results), "filtering", None)
-
-            filter_all_lines = results.expand_context(self._context_after)
-
-            res_tuple = results.to_raw()
-            all_tuple = filter_all_lines.to_raw()
+                res_tuple = results.to_raw()
+                all_tuple = res_tuple
 
             self.finished.emit(res_tuple, set(), all_tuple, {}, set(), error)
 
