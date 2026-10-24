@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import array
 import re
 from typing import Any
 
@@ -78,7 +77,7 @@ class FilterController(QObject):
 
         self.tab.filter_engine = FilterEngine(file_path, indexer)
         self.tab.filter_active = True
-        self.tab.filter_results = array.array("Q")
+        self.tab.filter_results = Bitset(0)
 
         self.tab.filter_thread = QThread()
         self.tab.filter_worker = FilterWorker(
@@ -148,34 +147,23 @@ class FilterController(QObject):
 
         self.tab.set_status(self.tab.fmt("st_filtered", hits=len(results), total=self.tab.indexer.line_count))
 
+    def _reset_filter_cache(self) -> None:
+        self.tab.filter_hit_text_map = {}
+        self.tab.filter_hit_lines = set()
+        self.tab.filter_all_lines = None
+
     def _update_filter_cache(self) -> None:
         if not self.tab.filter_active or not self.tab.filter_results:
-            if self.tab.filter_hit_text_map is not None:
-                self.tab.filter_hit_text_map.clear()
-            else:
-                self.tab.filter_hit_text_map = {}
-            if self.tab.filter_hit_lines is not None:
-                self.tab.filter_hit_lines.clear()
-            else:
-                self.tab.filter_hit_lines = set()
-            self.tab.filter_all_lines = array.array("Q")
+            self._reset_filter_cache()
 
     def cmd_clear_filter(self, silent: bool = False) -> None:
         was_active = self.tab.filter_active
         if self.tab.filter_engine and self.tab.filter_engine.is_running():
             self.tab.filter_engine.cancel()
         self.tab.filter_active = False
-        self.tab.filter_results = []
+        self.tab.filter_results = Bitset(0)
         self.tab.filter_context_lines = set()
-        if self.tab.filter_hit_text_map is not None:
-            self.tab.filter_hit_text_map.clear()
-        else:
-            self.tab.filter_hit_text_map = {}
-        if self.tab.filter_hit_lines is not None:
-            self.tab.filter_hit_lines.clear()
-        else:
-            self.tab.filter_hit_lines = set()
-        self.tab.filter_all_lines = array.array("Q")
+        self._reset_filter_cache()
         self.tab.filter_context_after = 0
         self.tab.filter_pattern = ""
         self.tab.filter_use_regex = False
