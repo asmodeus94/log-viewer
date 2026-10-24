@@ -1266,7 +1266,7 @@ class LogTab(QWidget):
     def _refresh_status(self) -> None:
         self.refresh_status()
 
-    def close(self) -> None:
+    def close(self) -> bool:
         """Zamyka indexer, anuluje wątki. Wywoływane przy zamykaniu zakładki."""
         # --- Wyłącz follow mode aby przerwać cykl QTimer.singleShot ---
         self.follow_active = False
@@ -1332,6 +1332,7 @@ class LogTab(QWidget):
             self.text.clear()
         except RuntimeError:
             pass
+        return bool(super().close())
 
 
 def _cleanup_running_tasks() -> None:
