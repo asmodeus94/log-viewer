@@ -953,3 +953,131 @@ class TestFilterEngineSearchInFilter:
         expected = [t for t in targets if t % 4 == 2]
         assert sorted(results) == expected
         idx.close()
+
+
+class TestFilterWorkerSearchInFilter:
+    """Testy optymalizacji 3.1: maskowanie search_in_filter i zliczanie trafień w tle w FilterWorker."""
+
+    def test_filter_worker_search_in_filter_masks_progress(self, temp_log_file):
+        import array
+        import sys
+
+        from log_viewer.workers import FilterWorker
+        from PySide6 import QtWidgets
+
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+
+        path = temp_log_file(num_lines=100)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        # Filtr zawiera tylko linie 2, 6, 10
+        filtered = Bitset(100)
+        filtered.update_indices([2, 6, 10])
+
+        worker = FilterWorker(
+            engine,
+            pattern="ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            context_after=0,
+            search_in_filter=True,
+            filtered_lines=filtered,
+        )
+
+        progress_events = []
+        worker.progress.connect(lambda pct, hits, state, partial: progress_events.append((pct, hits, state, partial)))
+
+        # Symulacja wywołań on_progress z silnika:
+        captured_callbacks = {}
+
+        def mock_start(pattern, use_regex, case_sensitive, negate, on_progress, on_done, **kwargs):
+            captured_callbacks["on_progress"] = on_progress
+            captured_callbacks["on_done"] = on_done
+
+        engine.start = mock_start
+        worker.run()
+
+        cb = captured_callbacks["on_progress"]
+
+        # 1. Chunk z wieloma trafieniami (np. wszystkie 64 bity w słowie 0 ustawione)
+        raw_words = array.array("Q", [0xFFFFFFFFFFFFFFFF])
+        cb(50.0, 64, "filtering", (0, raw_words))
+
+        assert len(progress_events) == 1
+        pct, hits, state, partial = progress_events[0]
+        assert pct == 50.0
+        assert hits == 3  # tylko 3 bity pasują do filtra: 2, 6, 10
+        assert partial is not None
+        base_w, masked_w = partial
+        assert base_w == 0
+        assert [i for i in range(64) if masked_w[0] & (1 << i)] == [2, 6, 10]
+
+        # 2. Chunk, którego żadne trafienia nie pasują do filtra (np. słowo 1: linie 64..127)
+        raw_words_2 = array.array("Q", [0xFFFFFFFFFFFFFFFF])
+        cb(75.0, 128, "filtering", (1, raw_words_2))
+
+        assert len(progress_events) == 2
+        pct2, hits2, state2, partial2 = progress_events[1]
+        assert pct2 == 75.0
+        assert hits2 == 3  # licznik trafień nie wzrósł
+        assert partial2 is None  # pusty wynik odfiltrowany – brak przesyłania do GUI
+
+        # 3. Postęp bez wyników cząstkowych (partial_results=None, np. heartbeat timeout)
+        cb(85.0, 150, "filtering", None)
+        assert len(progress_events) == 3
+        pct3, hits3, state3, partial3 = progress_events[2]
+        assert pct3 == 85.0
+        assert hits3 == 3  # emituje przefiltrowane trafienia (3), a nie surowe 150
+        assert partial3 is None
+
+        idx.close()
+
+    def test_filter_worker_search_in_filter_disabled_passthrough(self, temp_log_file):
+        import array
+        import sys
+
+        from log_viewer.workers import FilterWorker
+        from PySide6 import QtWidgets
+
+        app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+
+        path = temp_log_file(num_lines=100)
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        worker = FilterWorker(
+            engine,
+            pattern="ERROR",
+            use_regex=False,
+            case_sensitive=True,
+            negate=False,
+            context_after=0,
+            search_in_filter=False,
+            filtered_lines=None,
+        )
+
+        progress_events = []
+        worker.progress.connect(lambda pct, hits, state, partial: progress_events.append((pct, hits, state, partial)))
+
+        captured_callbacks = {}
+
+        def mock_start(pattern, use_regex, case_sensitive, negate, on_progress, on_done, **kwargs):
+            captured_callbacks["on_progress"] = on_progress
+            captured_callbacks["on_done"] = on_done
+
+        engine.start = mock_start
+        worker.run()
+
+        cb = captured_callbacks["on_progress"]
+        raw_words = array.array("Q", [0x0F])
+        cb(50.0, 4, "filtering", (0, raw_words))
+
+        assert len(progress_events) == 1
+        pct, hits, state, partial = progress_events[0]
+        assert pct == 50.0
+        assert hits == 4
+        assert partial == (0, raw_words)
+
+        idx.close()

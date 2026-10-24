@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import array
 import re
 import time
 from collections.abc import Sequence
@@ -165,39 +164,17 @@ class SearchController(QObject):
             ):
                 self.tab.search_results_all.expand_size(self.tab.indexer.line_count)
 
+            # Wyniki cząstkowe są już zamaskowane przez FilterWorker w tle (Optymalizacja 3.1)
             if isinstance(partial_results, tuple) and len(partial_results) == 2:
                 base_word, words = partial_results
-                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
-                    filtered_words = self.tab.filter_all_lines.words
-                    masked_words = array.array("Q", words)
-                    for i in range(len(masked_words)):
-                        w_idx = base_word + i
-                        if w_idx < len(filtered_words):
-                            masked_words[i] &= filtered_words[w_idx]
-                        else:
-                            masked_words[i] = 0
-                    self.tab.search_results_all.merge_chunk_words(base_word, masked_words)
-                    self._search_hits_count += sum(map(int.bit_count, masked_words))
-                else:
-                    self.tab.search_results_all.merge_chunk_words(base_word, words)
-                    self._search_hits_count += sum(map(int.bit_count, words))
+                self.tab.search_results_all.merge_chunk_words(base_word, words)
+                self._search_hits_count += sum(map(int.bit_count, words))
             elif isinstance(partial_results, Bitset):
-                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
-                    res_and = partial_results & self.tab.filter_all_lines
-                    self.tab.search_results_all.or_words(res_and.words)
-                    self._search_hits_count += len(res_and)
-                else:
-                    self.tab.search_results_all.or_words(partial_results.words)
-                    self._search_hits_count += len(partial_results)
+                self.tab.search_results_all.or_words(partial_results.words)
+                self._search_hits_count += len(partial_results)
             elif isinstance(partial_results, list):
-                if self.tab.last_search_in_filter and self.tab.filter_active and self.tab.filter_all_lines is not None:
-                    filtered_set = self.tab.filter_all_lines
-                    matched = [x for x in partial_results if x in filtered_set]
-                    self.tab.search_results_all.update_indices(matched)
-                    self._search_hits_count += len(matched)
-                else:
-                    self.tab.search_results_all.update_indices(partial_results)
-                    self._search_hits_count += len(partial_results)
+                self.tab.search_results_all.update_indices(partial_results)
+                self._search_hits_count += len(partial_results)
 
             if self.tab.search_results_all is not None:
                 self.tab.search_results_all.set_cached_total_count(self._search_hits_count)
@@ -208,11 +185,7 @@ class SearchController(QObject):
                 self.tab.search_model.set_results(self.tab.search_results_all, indexer=self.tab.indexer)
                 self._last_search_model_update = now
 
-        current_hits = (
-            self._search_hits_count
-            if (self.tab.last_search_in_filter and self.tab.filter_active and self.tab.search_results_all is not None)
-            else hits
-        )
+        current_hits = hits
         self.tab.set_status(self.tab.fmt("st_searching_progress", pct=f"{pct:.1f}", hits=current_hits))
         self.tab.search_results_label.setText(f"{self.tab.t('lbl_search_results_searching')} ({current_hits:,})")
 

@@ -96,6 +96,7 @@ class FilterWorker(QObject):
         self._context_after = context_after
         self._search_in_filter = search_in_filter
         self._filtered_lines = filtered_lines
+        self._filtered_hits_count = 0
 
     @Slot()
     def run(self) -> None:
@@ -106,8 +107,52 @@ class FilterWorker(QObject):
         except OSError:
             pass
 
+        self._filtered_hits_count = 0
+
         def on_progress(pct: float, hits: int, state: str = "filtering", partial_results: object = None) -> None:
-            self.progress.emit(pct, hits, state, partial_results)
+            if state == "context":
+                self.progress.emit(pct, hits, state, None)
+                return
+
+            res_to_emit = partial_results
+            hits_to_emit = hits
+
+            # Optymalizacja 3.1: Maskowanie search_in_filter i zliczanie trafień w tle w workerze zamiast na wątku GUI
+            if self._search_in_filter and self._filtered_lines is not None:
+                if isinstance(partial_results, tuple) and len(partial_results) == 2:
+                    base_word, words = partial_results
+                    filtered_words = self._filtered_lines.words
+                    flen = len(filtered_words)
+                    masked_words = array.array("Q", words)
+                    local_count = 0
+                    for i in range(len(masked_words)):
+                        w_idx = base_word + i
+                        if w_idx < flen:
+                            masked_words[i] &= filtered_words[w_idx]
+                        else:
+                            masked_words[i] = 0
+                        local_count += masked_words[i].bit_count()
+
+                    self._filtered_hits_count += local_count
+                    hits_to_emit = self._filtered_hits_count
+                    res_to_emit = (base_word, masked_words) if local_count > 0 else None
+                elif isinstance(partial_results, Bitset):
+                    res_and = partial_results & self._filtered_lines
+                    local_count = len(res_and)
+                    self._filtered_hits_count += local_count
+                    hits_to_emit = self._filtered_hits_count
+                    res_to_emit = res_and if local_count > 0 else None
+                elif isinstance(partial_results, list):
+                    filtered_set = self._filtered_lines
+                    matched = [x for x in partial_results if x in filtered_set]
+                    local_count = len(matched)
+                    self._filtered_hits_count += local_count
+                    hits_to_emit = self._filtered_hits_count
+                    res_to_emit = matched if local_count > 0 else None
+                else:
+                    hits_to_emit = self._filtered_hits_count
+
+            self.progress.emit(pct, hits_to_emit, state, res_to_emit)
 
         def on_done(results: Any, error: str | None) -> None:
             if error or not results or len(results) == 0:
