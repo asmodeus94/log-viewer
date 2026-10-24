@@ -4,7 +4,7 @@ import array
 import re
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QThread, Slot
+from PySide6.QtCore import QObject, QThread, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from log_viewer.bitset import Bitset
@@ -84,15 +84,12 @@ class FilterController(QObject):
         self.tab.filter_worker = FilterWorker(
             self.tab.filter_engine, pattern, use_regex, case, negate, context_after=self.tab.filter_context_after
         )
-        self.tab.filter_worker.moveToThread(self.tab.filter_thread)
-        self.tab.filter_thread.started.connect(self.tab.filter_worker.run)
-        self.tab.register_thread_worker(self.tab.filter_thread, self.tab.filter_worker)
-        self.tab.filter_worker.progress.connect(self._on_filter_progress, Qt.ConnectionType.QueuedConnection)
-        self.tab.filter_worker.finished.connect(self._on_filter_done, Qt.ConnectionType.QueuedConnection)
-        self.tab.filter_worker.finished.connect(self.tab.filter_thread.quit, Qt.ConnectionType.QueuedConnection)
-        self.tab.filter_worker.finished.connect(self.tab.filter_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        self.tab.filter_thread.finished.connect(self.tab.filter_thread.deleteLater, Qt.ConnectionType.QueuedConnection)
-        self.tab.filter_thread.start()
+        self.tab.start_filter_worker_thread(
+            self.tab.filter_thread,
+            self.tab.filter_worker,
+            self._on_filter_progress,
+            self._on_filter_done,
+        )
         self.tab.set_status(self.tab.fmt("st_filtering", pct=0.0, hits=0))
 
     @Slot(float, int, str, object)

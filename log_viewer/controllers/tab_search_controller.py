@@ -5,7 +5,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Slot
 from PySide6.QtWidgets import QMessageBox
 
 from log_viewer.bitset import Bitset
@@ -25,17 +25,22 @@ class SearchController(QObject):
         self.tab.main_window.search_entry.setFocus()
         self.tab.main_window.search_entry.selectAll()
 
-    def _compile_search(self) -> str | None:
+    def _get_search_options(self) -> tuple[str, bool, bool, bool, bool]:
+        """Zwraca bieżące parametry wyszukiwania z kontrolek UI: (pattern, use_regex, case, negate, search_in_filter)."""
         pattern: str = self.tab.main_window.search_entry.text().strip()
-        if not pattern:
-            return None
-        use_regex = self.tab.main_window.search_regex_cb.isChecked()
-        case = self.tab.main_window.search_case_cb.isChecked()
-        negate = self.tab.main_window.search_negate_cb.isChecked()
-        search_in_filter = (
+        use_regex: bool = self.tab.main_window.search_regex_cb.isChecked()
+        case: bool = self.tab.main_window.search_case_cb.isChecked()
+        negate: bool = self.tab.main_window.search_negate_cb.isChecked()
+        search_in_filter: bool = (
             getattr(self.tab.main_window, "search_in_filter_cb", None) is not None
             and self.tab.main_window.search_in_filter_cb.isChecked()
         )
+        return pattern, use_regex, case, negate, search_in_filter
+
+    def _compile_search(self) -> str | None:
+        pattern, use_regex, case, negate, search_in_filter = self._get_search_options()
+        if not pattern:
+            return None
 
         if use_regex:
             try:
@@ -49,21 +54,14 @@ class SearchController(QObject):
         else:
             self.tab.search_compiled = None
         self.tab.search_pattern = pattern
+        self.tab.last_search_regex = use_regex
         self.tab.last_search_case = case
         self.tab.last_search_negate = negate
         self.tab.last_search_in_filter = search_in_filter
         return pattern
 
     def _search_pattern_changed(self) -> bool:
-        pattern = self.tab.main_window.search_entry.text().strip()
-        use_regex = self.tab.main_window.search_regex_cb.isChecked()
-        case = self.tab.main_window.search_case_cb.isChecked()
-        negate = self.tab.main_window.search_negate_cb.isChecked()
-        search_in_filter = (
-            getattr(self.tab.main_window, "search_in_filter_cb", None) is not None
-            and self.tab.main_window.search_in_filter_cb.isChecked()
-        )
-
+        pattern, use_regex, case, negate, search_in_filter = self._get_search_options()
         return (
             pattern != self.tab.search_pattern
             or use_regex != self.tab.last_search_regex
@@ -71,6 +69,20 @@ class SearchController(QObject):
             or negate != self.tab.last_search_negate
             or search_in_filter != getattr(self.tab, "last_search_in_filter", False)
         )
+
+    def _cancel_active_search(self) -> None:
+        """Anuluje działający silnik wyszukiwania oraz czyści i zamyka wątek w tle."""
+        if self.tab.search_engine and self.tab.search_engine.is_running():
+            self.tab.search_engine.cancel()
+        if self.tab.search_thread is not None:
+            try:
+                if self.tab.search_thread.isRunning():
+                    self.tab.search_thread.quit()
+                    self.tab.search_thread.wait(2000)
+            except RuntimeError:
+                pass
+        self.tab.search_thread = None
+        self.tab.search_worker = None
 
     def _start_background_search(self, start_from_end: bool = False) -> None:
         self._search_start_from_end = start_from_end
@@ -82,28 +94,8 @@ class SearchController(QObject):
         if pattern is None:
             return
 
-        self.tab.search_pattern = pattern
-        self.tab.last_search_regex = self.tab.main_window.search_regex_cb.isChecked()
-        self.tab.last_search_case = self.tab.main_window.search_case_cb.isChecked()
-        self.tab.last_search_negate = self.tab.main_window.search_negate_cb.isChecked()
-        self.tab.last_search_in_filter = (
-            getattr(self.tab.main_window, "search_in_filter_cb", None) is not None
-            and self.tab.main_window.search_in_filter_cb.isChecked()
-        )
-
         # Anuluj poprzednie wyszukiwanie
-        if self.tab.search_engine and self.tab.search_engine.is_running():
-            self.tab.search_engine.cancel()
-        # Sprawdź czy stary thread żyje — deleteLater może go już zwolnić
-        if self.tab.search_thread is not None:
-            try:
-                if self.tab.search_thread.isRunning():
-                    self.tab.search_thread.quit()
-                    self.tab.search_thread.wait(2000)
-            except RuntimeError:
-                pass
-        self.tab.search_thread = None
-        self.tab.search_worker = None
+        self._cancel_active_search()
 
         self.tab.search_engine = FilterEngine(file_path, indexer)
 
@@ -128,15 +120,12 @@ class SearchController(QObject):
             search_in_filter=self.tab.last_search_in_filter and self.tab.filter_active,
             filtered_lines=self.tab.filter_all_lines if self.tab.filter_active else None,
         )
-        self.tab.search_worker.moveToThread(self.tab.search_thread)
-        self.tab.search_thread.started.connect(self.tab.search_worker.run)
-        self.tab.register_thread_worker(self.tab.search_thread, self.tab.search_worker)
-        self.tab.search_worker.progress.connect(self._on_search_progress, Qt.ConnectionType.QueuedConnection)
-        self.tab.search_worker.finished.connect(self._on_search_finished, Qt.ConnectionType.QueuedConnection)
-        self.tab.search_worker.finished.connect(self.tab.search_thread.quit, Qt.ConnectionType.QueuedConnection)
-        self.tab.search_worker.finished.connect(self.tab.search_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        self.tab.search_thread.finished.connect(self.tab.search_thread.deleteLater, Qt.ConnectionType.QueuedConnection)
-        self.tab.search_thread.start()
+        self.tab.start_filter_worker_thread(
+            self.tab.search_thread,
+            self.tab.search_worker,
+            self._on_search_progress,
+            self._on_search_finished,
+        )
 
     @Slot(float, int, str, object)
     def _on_search_progress(
@@ -276,17 +265,7 @@ class SearchController(QObject):
             self.tab.navigate_to_search_result(len(self.tab.search_results_all) - 1)
 
     def cmd_clear_search(self) -> None:
-        if self.tab.search_engine and self.tab.search_engine.is_running():
-            self.tab.search_engine.cancel()
-        if self.tab.search_thread is not None:
-            try:
-                if self.tab.search_thread.isRunning():
-                    self.tab.search_thread.quit()
-                    self.tab.search_thread.wait(2000)
-            except RuntimeError:
-                pass
-        self.tab.search_thread = None
-        self.tab.search_worker = None
+        self._cancel_active_search()
 
         self.tab.search_pattern = ""
         self.tab.search_results = []
@@ -308,5 +287,6 @@ class SearchController(QObject):
     compile_search = _compile_search
     search_pattern_changed = _search_pattern_changed
     start_background_search = _start_background_search
+    cancel_active_search = _cancel_active_search
     on_search_progress = _on_search_progress
     on_search_finished = _on_search_finished
