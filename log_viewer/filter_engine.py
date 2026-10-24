@@ -23,6 +23,15 @@ _PARALLEL_SEARCH_THRESHOLD = 50 * 1024 * 1024  # 50 MB
 _WORKER_READ_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB — optymalne dopasowanie do L3 cache CPU i eliminacja alokacji 32 MB
 _FILE_READ_CHUNK_SIZE = 4 * 1024 * 1024  # 4 MB
 
+# Dynamiczny podział pliku na zadania dla puli procesów (Optymalizacja 2.2 — Work-Stealing).
+# Plik dzielony jest na wiele mniejszych zadań (docelowo ~32 MB), które wolne procesy pobierają
+# z kolejki `imap_unordered` (chunksize=1). Eliminuje to efekt marudera (straggler) i zapewnia
+# równomierny, płynny strumień postępu i wyników cząstkowych do GUI.
+_SEARCH_TASK_TARGET_BYTES = 32 * 1024 * 1024  # 32 MB
+# Minimalna liczba zadań przypadających na jeden proces roboczy — gwarantuje równomierne
+# rozłożenie pracy również dla plików 50–200 MB, gdzie podział po 32 MB dałby za mało zadań.
+_SEARCH_TASKS_PER_WORKER = 4
+
 # Maksymalna liczba linii z filtra, które bezwarunkowo opłaca się przeszukiwać pojedynczo (Fast-Path).
 # Powyżej tego progu decyzja podejmowana jest adaptacyjnie na podstawie gęstości i rozpiętości filtra.
 _FAST_FILTERED_LINE_THRESHOLD = 2000
@@ -518,23 +527,42 @@ class FilterEngine:
         return flen <= 3000
 
     def _compute_search_ranges(self, n_workers: int) -> list[tuple[int, int, int]]:
-        """Wyznacza zakresy (start_offset, end_offset, start_line) dla workerów.
+        """Wyznacza zakresy zadań (start_offset, end_offset, start_line) dla puli procesów.
+
+        Optymalizacja 2.2 (Work-Stealing): zamiast sztywnego podziału na `n_workers` części
+        plik dzielony jest na wiele mniejszych zadań o docelowym rozmiarze
+        `_SEARCH_TASK_TARGET_BYTES`, przy czym liczba zadań wynosi co najmniej
+        `n_workers * _SEARCH_TASKS_PER_WORKER`. Granice zadań są dobierane metodą bisekcji
+        po offsetach rzadkiego indeksu tak, aby zadania miały możliwie równy rozmiar w bajtach.
 
         Korzysta z istniejącego rzadkiego indeksu LineIndexer — zero dodatkowego I/O.
-        Każdy zakres zaczyna i kończy się na granicy linii (gwarantowane przez indeks).
+        Każdy zakres zaczyna i kończy się na granicy linii (gwarantowane przez indeks),
+        a zakresy są ciągłe i pokrywają cały plik. Liczba zadań jest ograniczona
+        rozdzielczością indeksu (jeden wpis ~ co 1 MB).
         """
         offsets = self.indexer.offsets
         lines = self.indexer.lines
         n_entries = len(offsets)
         file_size = self.indexer.size
 
-        if n_entries < 2:
+        if n_entries < 2 or file_size <= 0:
             # Za mało wpisów w indeksie — cały plik jako jeden zakres
             return [(0, file_size, 0)]
 
-        # Wybierz co K-ty wpis jako punkt podziału, maksymalnie n_workers zakresów
-        step = max(1, (n_entries - 1) // n_workers)
-        split_indices = list(range(0, n_entries, step))[:n_workers]
+        # Liczba zadań: docelowo ~32 MB na zadanie, ale nie mniej niż N zadań na proces
+        # i nie więcej niż pozwala rozdzielczość indeksu.
+        min_tasks = max(1, n_workers) * _SEARCH_TASKS_PER_WORKER
+        size_tasks = -(-file_size // _SEARCH_TASK_TARGET_BYTES)  # dzielenie z zaokrągleniem w górę
+        n_tasks = min(max(min_tasks, size_tasks), n_entries)
+
+        # Punkty podziału: najbliższy wpis indeksu na lub za idealną granicą k * size / n_tasks
+        split_indices: list[int] = [0]
+        for k in range(1, n_tasks):
+            idx = bisect.bisect_left(offsets, (file_size * k) // n_tasks)
+            if idx >= n_entries:
+                break
+            if idx > split_indices[-1]:
+                split_indices.append(idx)
 
         ranges: list[tuple[int, int, int]] = []
         for i, idx in enumerate(split_indices):
@@ -831,8 +859,10 @@ class FilterEngine:
     ) -> None:
         """Równoległe przeszukiwanie pliku z użyciem multiprocessing.Pool.
 
-        Plik dzielony jest na N zakresów wzdłuż granic linii (z istniejącego indeksu).
-        Każdy rdzeń CPU dostaje swój zakres i zwraca pasujące numery linii.
+        Plik dzielony jest na wiele zadań (~32 MB, min. 4 na proces) wzdłuż granic linii
+        (z istniejącego indeksu). Wolne procesy dynamicznie pobierają kolejne zadania
+        (Work-Stealing, Optymalizacja 2.2), dzięki czemu żaden rdzeń nie czeka bezczynnie
+        na maruderów, a postęp i wyniki cząstkowe spływają do GUI równomiernie.
 
         Używa imap_unordered zamiast map_async, dzięki czemu wyniki każdego
         chunku są odbierane natychmiast po jego zakończeniu — licznik trafień

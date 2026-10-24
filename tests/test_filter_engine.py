@@ -546,6 +546,117 @@ class TestParallelSearch:
         assert ranges[-1][1] == idx.size, "Last range must reach end of file"
         idx.close()
 
+    @staticmethod
+    def _assert_ranges_consistent(path: str, idx: LineIndexer, ranges: list[tuple[int, int, int]]) -> None:
+        """Weryfikuje ciągłość zakresów, pokrycie całego pliku i poprawność numerów linii startowych."""
+        assert ranges[0][0] == 0, "Pierwszy zakres musi zaczynać się od offsetu 0"
+        assert ranges[-1][1] == idx.size, "Ostatni zakres musi sięgać końca pliku"
+        with open(path, "rb") as f:
+            data = f.read()
+        for i, (start, end, start_line) in enumerate(ranges):
+            assert start < end, f"Zakres [{i}] jest pusty: {start}..{end}"
+            if i + 1 < len(ranges):
+                assert end == ranges[i + 1][0], f"Luka lub nakładanie między zakresami {i} i {i + 1}"
+            # Każdy zakres zaczyna się na granicy linii, a start_line odpowiada liczbie \n przed offsetem
+            assert start == 0 or data[start - 1 : start] == b"\n", f"Zakres [{i}] nie zaczyna się na granicy linii"
+            assert data.count(b"\n", 0, start) == start_line, f"Błędny numer linii startowej w zakresie [{i}]"
+
+    def test_compute_search_ranges_min_tasks_per_worker(self, temp_log_file):
+        """Punkt 2.2: dla małych plików liczba zadań wynosi n_workers * _SEARCH_TASKS_PER_WORKER."""
+        from log_viewer.filter_engine import _SEARCH_TASKS_PER_WORKER
+
+        path = temp_log_file(num_lines=20_000)
+        idx = LineIndexer(path, index_interval_bytes=16 * 1024)
+        try:
+            engine = FilterEngine(path, idx)
+            n_workers = 4
+            ranges = engine._compute_search_ranges(n_workers=n_workers)
+
+            assert len(ranges) == n_workers * _SEARCH_TASKS_PER_WORKER
+            self._assert_ranges_consistent(path, idx, ranges)
+
+            # Zadania mają zbliżony rozmiar (tolerancja: rozdzielczość indeksu)
+            ideal = idx.size / len(ranges)
+            for start, end, _line in ranges:
+                assert abs((end - start) - ideal) <= 2 * 16 * 1024 + 1024
+        finally:
+            idx.close()
+
+    def test_compute_search_ranges_target_task_size(self, temp_log_file, monkeypatch):
+        """Punkt 2.2: dla dużych plików liczba zadań wynika z docelowego rozmiaru zadania."""
+        import log_viewer.filter_engine as fe
+
+        monkeypatch.setattr(fe, "_SEARCH_TASK_TARGET_BYTES", 64 * 1024)
+        path = temp_log_file(num_lines=20_000)
+        idx = LineIndexer(path, index_interval_bytes=8 * 1024)
+        try:
+            engine = FilterEngine(path, idx)
+            ranges = engine._compute_search_ranges(n_workers=2)
+
+            expected = -(-idx.size // (64 * 1024))
+            assert expected > 2 * fe._SEARCH_TASKS_PER_WORKER
+            assert len(ranges) == expected
+            self._assert_ranges_consistent(path, idx, ranges)
+            assert max(end - start for start, end, _ in ranges) <= 64 * 1024 + 2 * 8 * 1024
+        finally:
+            idx.close()
+
+    def test_compute_search_ranges_limited_by_index_resolution(self, temp_log_file):
+        """Punkt 2.2: liczba zadań nie przekracza liczby wpisów rzadkiego indeksu."""
+        path = temp_log_file(num_lines=20_000)
+        idx = LineIndexer(path, index_interval_bytes=512 * 1024)
+        try:
+            engine = FilterEngine(path, idx)
+            ranges = engine._compute_search_ranges(n_workers=16)
+
+            assert 1 <= len(ranges) <= len(idx.offsets)
+            self._assert_ranges_consistent(path, idx, ranges)
+        finally:
+            idx.close()
+
+    def test_run_parallel_work_stealing_results(self, temp_log_file, monkeypatch):
+        """Punkt 2.2: wiele małych zadań daje identyczny wynik i strumieniuje wyniki cząstkowe."""
+        import log_viewer.filter_engine as fe
+
+        monkeypatch.setattr(fe, "_SEARCH_TASK_TARGET_BYTES", 128 * 1024)
+        num_lines = 20_000
+        path = temp_log_file(num_lines=num_lines)
+        idx = LineIndexer(path, index_interval_bytes=16 * 1024)
+        try:
+            engine = FilterEngine(path, idx)
+            n_tasks = len(engine._compute_search_ranges(max(2, fe.multiprocessing.cpu_count())))
+            assert n_tasks > 4
+
+            partial_packets: list[tuple[int, object]] = []
+            done_results: list[tuple[Bitset, str | None]] = []
+
+            def on_progress(pct: float, hits: int, state: str = "", partial: object = None) -> None:
+                if partial is not None:
+                    partial_packets.append((hits, partial))
+
+            def on_done(result: Bitset, err: str | None) -> None:
+                done_results.append((result, err))
+
+            # 1. Pełne wyszukiwanie
+            engine._run_parallel(0, "ERROR", False, True, False, on_progress, on_done)
+            assert len(done_results) == 1
+            result, err = done_results[0]
+            assert err is None
+            assert list(result) == list(range(2, num_lines, 4))
+            # Każde zadanie z trafieniami dostarcza osobny pakiet wyników cząstkowych
+            assert len(partial_packets) == n_tasks
+
+            # 2. Wyszukiwanie w odfiltrowanych wynikach z drobnoziarnistym pomijaniem zadań
+            done_results.clear()
+            filtered = Bitset(num_lines)
+            filtered.update_indices(range(1000, 3000))
+            engine._run_parallel(0, "ERROR", False, True, False, on_progress, on_done, True, filtered)
+            result, err = done_results[0]
+            assert err is None
+            assert list(result) == [i for i in range(1000, 3000) if i % 4 == 2]
+        finally:
+            idx.close()
+
     def test_filter_worker_chunk_direct_words(self, temp_log_file):
         """Weryfikacja bezposredniego kodowania slow bitsetu w _filter_worker_chunk (Punkt 2.1)."""
         from log_viewer.filter_engine import _filter_worker_chunk
