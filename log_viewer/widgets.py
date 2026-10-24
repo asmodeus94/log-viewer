@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
 
@@ -411,6 +412,8 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = 0
         self._batch_size = 1000
         self._indexer: Any = None
+        self._line_cache: OrderedDict[int, str] = OrderedDict()
+        self._max_cache_size: int = 1024
 
         self._color_error = QColor(THEME_DARK["error"])
         self._color_warn = QColor(THEME_DARK["warn"])
@@ -420,6 +423,7 @@ class SearchResultsModel(QAbstractListModel):
     def set_results(self, results: Sequence[int | tuple[int, str]] | Bitset | None, indexer: Any = None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
+        self._line_cache.clear()
         if results is None:
             self._all_results = []
         elif isinstance(results, (Bitset, list)):
@@ -497,30 +501,44 @@ class SearchResultsModel(QAbstractListModel):
             line_no, text = item
         else:
             line_no = item
-            if hasattr(self, "_indexer") and self._indexer:
-                lines = self._indexer.read_lines(line_no, 1)
-                text = lines[0][1] if lines else ""
-            else:
-                text = ""
+            text = None
 
-        if role == Qt.ItemDataRole.DisplayRole:
-            display = text[:200]
-            if len(text) > 200:
-                display += "..."
-            formatted_line = f"{line_no + 1:>8,}"
-            return f"  {formatted_line}:  {display}"
         if role == Qt.ItemDataRole.UserRole:
             return line_no
-        if role == Qt.ItemDataRole.ForegroundRole:
+        if role != Qt.ItemDataRole.DisplayRole:
             return None
-        return None
+
+        if text is None:
+            if line_no in self._line_cache:
+                text = self._line_cache[line_no]
+                self._line_cache.move_to_end(line_no)
+            else:
+                if hasattr(self, "_indexer") and self._indexer:
+                    lines = self._indexer.read_lines(line_no, 1)
+                    text = lines[0][1] if lines else ""
+                else:
+                    text = ""
+                self._line_cache[line_no] = text
+                if len(self._line_cache) > self._max_cache_size:
+                    self._line_cache.popitem(last=False)
+
+        display = text[:200]
+        if len(text) > 200:
+            display += "..."
+        formatted_line = f"{line_no + 1:>8,}"
+        return f"  {formatted_line}:  {display}"
 
     def clear(self) -> None:
         self.beginResetModel()
         self._all_results = []
         self._visible_count = 0
         self._indexer = None
+        self._line_cache.clear()
         self.endResetModel()
+
+    def clear_cache(self) -> None:
+        """Czyści pamięć podręczną pobranych linii tekstu."""
+        self._line_cache.clear()
 
     def get_line_no(self, row: int) -> int | None:
         """Zwraca numer linii pliku dla danego wiersza wyników."""

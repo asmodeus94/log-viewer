@@ -189,6 +189,129 @@ class TestSearchResultsModel:
         assert model.find_row_by_line_no(3) == 1
         assert model.find_row_by_line_no(2) == -1
 
+    def test_user_role_does_not_read_file(self):
+        class MockIndexer:
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, start, count):
+                self.calls += 1
+                return [(start, f"Line {start}")]
+
+        indexer = MockIndexer()
+        model = SearchResultsModel()
+        model.set_results([10, 20, 30], indexer=indexer)
+        # Query UserRole
+        line_no = model.data(model.index(1, 0), QtCore.Qt.ItemDataRole.UserRole)
+        assert line_no == 20
+        assert indexer.calls == 0
+
+    def test_non_display_role_does_not_read_file(self):
+        class MockIndexer:
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, start, count):
+                self.calls += 1
+                return [(start, f"Line {start}")]
+
+        indexer = MockIndexer()
+        model = SearchResultsModel()
+        model.set_results([10, 20, 30], indexer=indexer)
+        res = model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.ForegroundRole)
+        assert res is None
+        res_tip = model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.ToolTipRole)
+        assert res_tip is None
+        assert indexer.calls == 0
+
+    def test_lru_cache_hit_avoids_repeated_reads(self):
+        class MockIndexer:
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, start, count):
+                self.calls += 1
+                return [(start, f"Content for line {start}")]
+
+        indexer = MockIndexer()
+        model = SearchResultsModel()
+        model.set_results([5, 15, 25], indexer=indexer)
+
+        # First read
+        data1 = model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert "Content for line 5" in data1
+        assert indexer.calls == 1
+
+        # Second read (cache hit)
+        data2 = model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert "Content for line 5" in data2
+        assert indexer.calls == 1
+
+    def test_cache_invalidation_on_set_results_and_clear(self):
+        class MockIndexer:
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, start, count):
+                self.calls += 1
+                return [(start, f"Content {start} (call {self.calls})")]
+
+        indexer = MockIndexer()
+        model = SearchResultsModel()
+        model.set_results([42], indexer=indexer)
+
+        model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 1
+
+        # Clear cache explicitly
+        model.clear_cache()
+        assert len(model._line_cache) == 0
+        model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 2
+
+        # Invalidate via set_results
+        model.set_results([42], indexer=indexer)
+        assert len(model._line_cache) == 0
+        model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 3
+
+        # Invalidate via clear
+        model.clear()
+        assert len(model._line_cache) == 0
+
+    def test_lru_cache_eviction(self):
+        class MockIndexer:
+            def __init__(self):
+                self.calls = 0
+
+            def read_lines(self, start, count):
+                self.calls += 1
+                return [(start, f"Line {start}")]
+
+        indexer = MockIndexer()
+        model = SearchResultsModel()
+        model._max_cache_size = 2
+        model.set_results([100, 200, 300], indexer=indexer)
+
+        # Read 100, then 200 (cache: [100, 200])
+        model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        model.data(model.index(1, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 2
+
+        # Read 300 (evicts 100, cache: [200, 300])
+        model.data(model.index(2, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 3
+        assert 100 not in model._line_cache
+
+        # Read 200 (hit, moves 200 to end: [300, 200])
+        model.data(model.index(1, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 3
+
+        # Read 100 (miss, re-reads, evicts 300: [200, 100])
+        model.data(model.index(0, 0), QtCore.Qt.ItemDataRole.DisplayRole)
+        assert indexer.calls == 4
+        assert 300 not in model._line_cache
+
 
 class TestSearchFlow:
     def test_search_finds_results(self, app_instance):
