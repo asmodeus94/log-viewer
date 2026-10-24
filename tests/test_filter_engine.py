@@ -378,6 +378,59 @@ class TestRegexOnBytes:
         assert lines1 == lines2
         idx.close()
 
+    def test_regex_fast_line_skip_multiple_matches_per_line(self):
+        """Punkt 2.3: linie z wieloma dopasowaniami wzorca zwracają linię dokładnie raz."""
+        from log_viewer.filter_engine import RegexStrategy
+
+        # Chunk z wieloma dopasowaniami na tej samej linii
+        chunk = (
+            b"item alpha: val=10 code=20 id=30 tag=40\n"
+            b"item beta: no numbers here\n"
+            b"item gamma: a=1 b=2 c=3 d=4 e=5 f=6 g=7 h=8 i=9 j=10\n"
+            b"item delta: end\n"
+        )
+        strategy = RegexStrategy(r"\d+", case_sensitive=True, negate=False, encoding="utf-8")
+        hits = strategy.match_chunk(chunk, start_line=100)
+        assert hits == [100, 102]
+
+        # Wzorzec wielokrotnych nawiasów
+        strategy_brackets = RegexStrategy(r"\[.*?\]", case_sensitive=True, negate=False, encoding="utf-8")
+        chunk_brackets = b"2026-10-25 [PID=1] [THREAD=2] [MODULE=A] ok\nplain line\n[ONLY_ONE]\n"
+        assert strategy_brackets.match_chunk(chunk_brackets, start_line=0) == [0, 2]
+
+    def test_regex_fast_line_skip_consecutive_empty_lines(self):
+        """Punkt 2.3: obsługa pustych linii i wzorców granicznych ^ oraz $."""
+        from log_viewer.filter_engine import RegexStrategy
+
+        chunk = b"first line\n\nthird line\n\nfifth\n"
+        strat_start = RegexStrategy(r"^", case_sensitive=True, negate=False, encoding="utf-8")
+        assert strat_start.match_chunk(chunk, start_line=0) == [0, 1, 2, 3, 4]
+
+        strat_end = RegexStrategy(r"$", case_sensitive=True, negate=False, encoding="utf-8")
+        assert strat_end.match_chunk(chunk, start_line=0) == [0, 1, 2, 3, 4]
+
+        strat_digits = RegexStrategy(r"\d+", case_sensitive=True, negate=False, encoding="utf-8")
+        assert strat_digits.match_chunk(chunk, start_line=0) == []
+
+    def test_regex_fast_line_skip_no_trailing_newline(self):
+        """Punkt 2.3: poprawny skok i zliczanie, gdy chunk nie kończy się znakiem nowej linii."""
+        from log_viewer.filter_engine import RegexStrategy
+
+        chunk = b"first line with 10 20\nsecond line with 30 40"
+        strategy = RegexStrategy(r"\d+", case_sensitive=True, negate=False, encoding="utf-8")
+        assert strategy.match_chunk(chunk, start_line=50) == [50, 51]
+
+    def test_regex_fast_line_skip_str_fallback(self):
+        """Punkt 2.3: weryfikacja optymalizacji na ścieżce fallbacku str (_match_chunk_str)."""
+        from log_viewer.filter_engine import RegexStrategy
+
+        chunk = b"2026-10-25 [PID=10] [ERR=20] test 1\nno matches\n2026-10-25 [PID=30] [ERR=40] test 2\n"
+        strategy = RegexStrategy(r"\d+", case_sensitive=True, negate=False, encoding="utf-8")
+        # Wymuszenie fallbacku na _match_chunk_str przez wyzerowanie matcher_bytes
+        strategy.matcher_bytes = None
+        hits = strategy.match_chunk(chunk, start_line=0)
+        assert hits == [0, 2]
+
 
 class TestParallelSearch:
     """Testy trybu równoległego (multiprocessing) FilterEngine."""

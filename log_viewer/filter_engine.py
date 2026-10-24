@@ -320,42 +320,80 @@ class RegexStrategy(FilterStrategy):
         return self._match_chunk_str(chunk, start_line)
 
     def _match_chunk_bytes(self, chunk: bytes, start_line: int) -> list[int]:
+        """Dopasowywanie regex bezpośrednio na bajtach z szybkim skokiem do nowej linii (Optymalizacja 2.3)."""
         assert self.matcher_bytes is not None
         hits: list[int] = []
+        pos = 0
         last_nl_pos = -1
         lines_counted = start_line
+        chunk_len = len(chunk)
+        chunk_ends_nl = not chunk or chunk.endswith(b"\n")
+        search = self.matcher_bytes.search
+        count = chunk.count
+        find = chunk.find
+        append = hits.append
 
-        for match in self.matcher_bytes.finditer(chunk):
+        while True:
+            match = search(chunk, pos)
+            if match is None:
+                break
+
             hit_pos = match.start()
-            if hit_pos > last_nl_pos:
-                nl_count = chunk.count(b"\n", last_nl_pos + 1, hit_pos)
-                lines_counted += nl_count
+            if hit_pos == chunk_len and chunk_ends_nl:
+                break
 
-                if not hits or hits[-1] != lines_counted:
-                    hits.append(lines_counted)
-                last_nl_pos = hit_pos
+            nl_count = count(b"\n", last_nl_pos + 1, hit_pos)
+            lines_counted += nl_count
+            append(lines_counted)
+
+            next_nl = find(b"\n", hit_pos)
+            if next_nl == -1:
+                break
+
+            last_nl_pos = next_nl
+            lines_counted += 1
+            pos = next_nl + 1
 
         return hits
 
     def _match_chunk_str(self, chunk: bytes, start_line: int) -> list[int]:
+        """Fallback dopasowywania regex na str z szybkim skokiem do nowej linii (Optymalizacja 2.3)."""
         try:
             target = chunk.decode(self.encoding, errors="replace")
         except (UnicodeError, LookupError, ValueError, TypeError):
             target = repr(chunk)
 
         hits: list[int] = []
+        pos = 0
         last_nl_pos = -1
         lines_counted = start_line
+        target_len = len(target)
+        target_ends_nl = not target or target.endswith("\n")
+        search = self.matcher_str.search
+        count = target.count
+        find = target.find
+        append = hits.append
 
-        for match in self.matcher_str.finditer(target):
+        while True:
+            match = search(target, pos)
+            if match is None:
+                break
+
             hit_pos = match.start()
-            if hit_pos > last_nl_pos:
-                nl_count = target.count("\n", last_nl_pos + 1, hit_pos)
-                lines_counted += nl_count
+            if hit_pos == target_len and target_ends_nl:
+                break
 
-                if not hits or hits[-1] != lines_counted:
-                    hits.append(lines_counted)
-                last_nl_pos = hit_pos
+            nl_count = count("\n", last_nl_pos + 1, hit_pos)
+            lines_counted += nl_count
+            append(lines_counted)
+
+            next_nl = find("\n", hit_pos)
+            if next_nl == -1:
+                break
+
+            last_nl_pos = next_nl
+            lines_counted += 1
+            pos = next_nl + 1
 
         return hits
 
