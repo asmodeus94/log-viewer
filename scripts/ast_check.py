@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/ast_check.py — Szybka analiza AST (duplikaty kodu oraz nadpisywane zmienne lokalne)."""
+"""scripts/ast_check.py — Szybka analiza AST (duplikaty kodu, nadpisywane zmienne lokalne oraz konwencje testów)."""
 
 from __future__ import annotations
 
@@ -276,11 +276,64 @@ def check_dead_stores(files: list[Path], repo_root: Path) -> list[str]:
     return issues
 
 
+def check_test_conventions(tests_dir: Path, repo_root: Path) -> list[str]:
+    """Weryfikuje konwencje w plikach testowych.
+
+    W tym: obecność komentarza wyciszającego '# noinspection PyPackageRequirements'
+    przed importami biblioteki pytest, zapobiegając fałszywym ostrzeżeniom inspekcji IDE.
+    """
+    issues: list[str] = []
+    if not tests_dir.is_dir():
+        return issues
+
+    for py_file in sorted(tests_dir.rglob("*.py")):
+        rel = py_file.relative_to(repo_root).as_posix()
+        try:
+            content = py_file.read_text(encoding="utf-8")
+        except OSError as e:
+            issues.append(f"[FileReadError] {rel}: {e}")
+            continue
+
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Wykrywanie import pytest lub from pytest import ...
+            if (
+                stripped == "import pytest"
+                or stripped.startswith("import pytest ")
+                or stripped.startswith("from pytest import")
+            ):
+                # Sprawdź poprzedzające niepuste linie pod kątem wyciszenia
+                has_noinspect = False
+                prev_idx = i - 1
+                while prev_idx >= 0:
+                    prev_line = lines[prev_idx].strip()
+                    if not prev_line:
+                        prev_idx -= 1
+                        continue
+                    if "noinspection PyPackageRequirements" in prev_line:
+                        has_noinspect = True
+                    break
+
+                if not has_noinspect:
+                    issues.append(
+                        f"[PyPackageRequirements] {rel}:{i + 1}: 'import pytest' should be preceded by "
+                        f"'# noinspection PyPackageRequirements' to prevent IDE inspection warnings"
+                    )
+
+    return issues
+
+
 def run_ast_checks(repo_root: Path) -> list[str]:
-    """Uruchamia wszystkie kontrole AST na kodzie źródłowym log_viewer oraz scripts."""
+    """Uruchamia wszystkie kontrole AST i konwencji na kodzie źródłowym i testach."""
     files: list[Path] = []
     for folder in ("log_viewer", "scripts"):
         target_dir = repo_root / folder
         if target_dir.is_dir():
             files.extend(p for p in sorted(target_dir.rglob("*.py")) if not p.name.startswith("ui_"))
-    return check_duplicated_code(files, repo_root) + check_dead_stores(files, repo_root)
+
+    return (
+        check_duplicated_code(files, repo_root)
+        + check_dead_stores(files, repo_root)
+        + check_test_conventions(repo_root / "tests", repo_root)
+    )

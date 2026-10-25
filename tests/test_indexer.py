@@ -1,12 +1,32 @@
 """Testy indexer.py — LineIndexer, parallel/single indexing, read_lines."""
 
+import bz2
 import gzip
+import multiprocessing
 import os
+import threading
 import time
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
+import log_viewer.indexer as indexer_mod
+
+# noinspection PyPackageRequirements
 import pytest
-from log_viewer.indexer import IndexEntry, LineIndexer, _indexer_worker_chunk, open_maybe_compressed
+from log_viewer.indexer import IndexEntry, LineIndexer, open_maybe_compressed
+
+
+# noinspection PyProtectedMember
+def _worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, list[tuple[int, int]], int]:
+    fn = indexer_mod._indexer_worker_chunk
+    return fn(args)
+
+
+# noinspection PyProtectedMember
+def _collect_entries(**kwargs: Any) -> tuple[int, int]:
+    fn = indexer_mod._collect_chunk_index_entries
+    return fn(**kwargs)
 
 
 class TestLineIndexerBasic:
@@ -49,55 +69,35 @@ class TestLineIndexerBasic:
         assert tail[-1][0] == 999
         idx.close()
 
-    def test_empty_file(self):
-        import tempfile
-
-        path = tempfile.mktemp(suffix=".log")
-        with open(path, "wb"):
-            pass
-        try:
-            idx = LineIndexer(path)
-            assert idx.line_count == 0
-            assert idx.read_lines(0, 10) == []
-            idx.close()
-        finally:
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+    def test_empty_file(self, tmp_path: Path):
+        path = tmp_path / "empty.log"
+        path.write_bytes(b"")
+        idx = LineIndexer(path)
+        assert idx.line_count == 0
+        assert idx.read_lines(0, 10) == []
+        idx.close()
 
 
 class TestLineIndexerCompression:
-    def test_gz(self):
-        import tempfile
+    def test_gz(self, tmp_path: Path):
+        path = tmp_path / "test.log.gz"
+        n_lines = 1000
+        with gzip.open(path, "wb") as f:
+            for i in range(n_lines):
+                f.write(f"line {i} [INFO] hello\n".encode())
+        progress_vals: list[float] = []
+        with LineIndexer(path, progress_cb=progress_vals.append) as idx:
+            assert idx.line_count == n_lines
+            assert idx.is_compressed is True
+            assert idx.size > os.path.getsize(path)
+            lines = idx.read_lines(100, 2)
+            assert len(lines) == 2
+            line_no, _ = idx.line_at_byte_offset(idx.size - 5)
+            assert line_no == n_lines - 1
+            if progress_vals:
+                assert all(pv <= 100.0 for pv in progress_vals)
 
-        path = tempfile.mktemp(suffix=".log.gz")
-        try:
-            n_lines = 1000
-            with gzip.open(path, "wb") as f:
-                for i in range(n_lines):
-                    f.write(f"line {i} [INFO] hello\n".encode())
-            progress_vals = []
-            with LineIndexer(path, progress_cb=progress_vals.append) as idx:
-                assert idx.line_count == n_lines
-                assert idx.is_compressed is True
-                assert idx.size > os.path.getsize(path)
-                lines = idx.read_lines(100, 2)
-                assert len(lines) == 2
-                line_no, _ = idx.line_at_byte_offset(idx.size - 5)
-                assert line_no == n_lines - 1
-                if progress_vals:
-                    assert all(pv <= 100.0 for pv in progress_vals)
-        finally:
-            if os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except PermissionError:
-                    pass
-
-    def test_bz2(self, tmp_path):
-        import bz2
-
+    def test_bz2(self, tmp_path: Path):
         path = tmp_path / "test.log.bz2"
         with bz2.open(path, "wb") as f:
             for i in range(50):
@@ -110,9 +110,9 @@ class TestLineIndexerCompression:
             assert len(lines) == 2
             assert "bz2 line 10" in lines[0][1]
 
-    def test_empty_gz(self, tmp_path):
+    def test_empty_gz(self, tmp_path: Path):
         path = tmp_path / "empty.log.gz"
-        with gzip.open(path, "wb") as f:
+        with gzip.open(path, "wb"):
             pass
         with LineIndexer(path) as idx:
             assert idx.line_count == 0
@@ -185,8 +185,6 @@ class TestLineIndexerParallel:
 
     def test_single_thread_cancellation(self, temp_log_file):
         """Single-thread indexing przerywa natychmiast gdy cancel_event jest ustawiony."""
-        import threading
-
         path = temp_log_file(num_lines=5000)
         cancel = threading.Event()
         cancel.set()
@@ -202,29 +200,20 @@ class TestLineIndexerParallel:
         assert idx.line_count == 1000
         idx.close()
 
-    def test_compressed_uses_single(self):
+    def test_compressed_uses_single(self, tmp_path: Path):
         """Skompresowane pliki używają single-thread."""
-        import tempfile
-
-        path = tempfile.mktemp(suffix=".log.gz")
-        try:
-            with gzip.open(path, "wb") as f:
-                for i in range(1000):
-                    f.write(f"line {i}\n".encode())
-            idx = LineIndexer(path)
-            assert idx.line_count == 1000
-            assert idx.is_compressed is True
-            idx.close()
-        finally:
-            if os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except PermissionError:
-                    pass
+        path = tmp_path / "compressed_single.log.gz"
+        with gzip.open(path, "wb") as f:
+            for i in range(1000):
+                f.write(f"line {i}\n".encode())
+        idx = LineIndexer(path)
+        assert idx.line_count == 1000
+        assert idx.is_compressed is True
+        idx.close()
 
 
 class TestLineIndexerUpdateFrom:
-    def test_update_from_concurrent_growth_consistency(self, tmp_path):
+    def test_update_from_concurrent_growth_consistency(self, tmp_path: Path):
         p = tmp_path / "growing.log"
         p.write_bytes(b"line 0\nline 1\n")
         idx = LineIndexer(p)
@@ -254,7 +243,6 @@ class TestLineIndexerUpdateFrom:
     def test_incremental_update(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
         idx = LineIndexer(path)
-        original_size = idx.size
         original_count = idx.line_count
 
         # Dopisz 100 linii
@@ -294,7 +282,7 @@ class TestLineIndexerFileDescriptorCache:
 
         idx.close()
 
-    def test_update_from_reuses_fd(self, tmp_path):
+    def test_update_from_reuses_fd(self, tmp_path: Path):
         """update_from nie niszczy otwartego deskryptora i pozwala na dalsze ponowne uzycie w read_lines."""
         p = tmp_path / "growing_fd.log"
         p.write_bytes(b"line 0\nline 1\n")
@@ -342,8 +330,8 @@ class TestChunkedWorker:
         chunk_size = size // 2
         r1 = (0, chunk_size, str(path), 1024 * 1024, 0)
         r2 = (chunk_size, size, str(path), 1024 * 1024, 1)
-        result1 = _indexer_worker_chunk(r1)
-        result2 = _indexer_worker_chunk(r2)
+        result1 = _worker_chunk(r1)
+        result2 = _worker_chunk(r2)
         total = result1[0] + result2[0]
         assert total == 10000
 
@@ -356,43 +344,33 @@ class TestChunkedWorker:
         ranges = [
             (i * chunk_size, (i + 1) * chunk_size if i < 3 else size, str(path), 1024 * 1024, i) for i in range(4)
         ]
-        results = [_indexer_worker_chunk(r) for r in ranges]
+        results = [_worker_chunk(r) for r in ranges]
         total = sum(r[0] for r in results)
         assert total == 50000
 
-    def test_worker_handles_large_lines(self):
+    def test_worker_handles_large_lines(self, tmp_path: Path):
         """Worker radzi sobie z bardzo długimi liniami (>4MB chunk)."""
-        import tempfile
-
-        path = tempfile.mktemp(suffix=".log")
-        try:
-            with open(path, "wb") as f:
-                # Jedna bardzo długa linia (8 MB)
-                f.write(b"X" * (8 * 1024 * 1024) + b"\n")
-                f.write(b"short line\n")
-            size = os.path.getsize(path)
-            result = _indexer_worker_chunk((0, size, str(path), 1024 * 1024, 0))
-            assert result[0] == 2  # 2 linie
-        finally:
-            try:
-                os.unlink(path)
-            except PermissionError:
-                pass
+        path = tmp_path / "large_line.log"
+        with open(path, "wb") as f:
+            # Jedna bardzo długa linia (8 MB)
+            f.write(b"X" * (8 * 1024 * 1024) + b"\n")
+            f.write(b"short line\n")
+        size = os.path.getsize(path)
+        result = _worker_chunk((0, size, str(path), 1024 * 1024, 0))
+        assert result[0] == 2  # 2 linie
 
     def test_worker_memory_efficient(self, temp_log_file):
         """Worker nie ładuje całego zakresu do pamięci — czyta w chunkach 4MB."""
         path = temp_log_file(num_lines=10000)
         size = os.path.getsize(path)
         # Worker dla całego pliku
-        result = _indexer_worker_chunk((0, size, str(path), 1024 * 1024, 0))
+        result = _worker_chunk((0, size, str(path), 1024 * 1024, 0))
         assert result[0] == 10000
-        # Jeśli worker ładuje wszystko do RAM, przy 10000 liniach ~500KB to OK
-        # ale test weryfikuje że działa bez crash dla dużych plików
 
     def test_indexer_worker_logs_error(self, capsys):
         """_indexer_worker_chunk loguje błędy."""
         # Wywołaj z nieistniejącym plikiem
-        result = _indexer_worker_chunk((0, 100, "/nonexistent/file.log", 1024 * 1024, 0))
+        result = _worker_chunk((0, 100, "/nonexistent/file.log", 1024 * 1024, 0))
         assert result == (0, [], 0)
         captured = capsys.readouterr()
         assert "Warning" in captured.err or "failed" in captured.err.lower()
@@ -403,17 +381,12 @@ class TestFreezeSupport:
 
     def test_freeze_support_importable(self):
         """multiprocessing.freeze_support jest dostępne i można je wywołać."""
-        import multiprocessing
-
-        # freeze_support() powinno być no-op gdy nie jest frozen exe
         multiprocessing.freeze_support()
-        # Nie powinno crashować
 
     def test_multiprocessing_pool_works(self, temp_log_file):
         """multiprocessing.Pool działa poprawnie (wymaga freeze_support na Windows)."""
         path = temp_log_file(num_lines=50000)
         idx = LineIndexer(path)
-        # Jeśli plik > 100MB, użyje parallel. Sprawdź że nie crashuje.
         assert idx.line_count == 50000
         idx.close()
 
@@ -514,7 +487,7 @@ class TestReadSpecificLines:
 class TestLineIndexerNoTrailingNewline:
     """Testy dla plików bez końcowego znaku nowej linii (np. 1-liniowe pliki)."""
 
-    def test_single_line_without_newline(self, tmp_path):
+    def test_single_line_without_newline(self, tmp_path: Path):
         path = tmp_path / "single_line.txt"
         path.write_bytes(b"sad a asd as")
 
@@ -526,7 +499,7 @@ class TestLineIndexerNoTrailingNewline:
         assert idx.read_tail(10) == [(0, "sad a asd as")]
         idx.close()
 
-    def test_multiple_lines_without_trailing_newline(self, tmp_path):
+    def test_multiple_lines_without_trailing_newline(self, tmp_path: Path):
         path = tmp_path / "multi_no_nl.txt"
         path.write_bytes(b"line 0\nline 1\nline 2")
 
@@ -539,7 +512,7 @@ class TestLineIndexerNoTrailingNewline:
         assert idx.read_lines(2, 1) == [(2, "line 2")]
         idx.close()
 
-    def test_incremental_update_without_trailing_newline(self, tmp_path):
+    def test_incremental_update_without_trailing_newline(self, tmp_path: Path):
         path = tmp_path / "follow_no_nl.txt"
         path.write_bytes(b"first")
 
@@ -578,12 +551,7 @@ class TestLineIndexerNoTrailingNewline:
 class TestLineIndexerByteOffset:
     """Testy dla zoptymalizowanej metody line_at_byte_offset."""
 
-    def test_byte_offset_various_positions(self, tmp_path):
-        # 3 linie:
-        # "line 0\n" -> 7 bajtów (offset 0..6, \n na 6)
-        # "line 1\n" -> 7 bajtów (offset 7..13, \n na 13)
-        # "line 2\n" -> 7 bajtów (offset 14..20, \n na 20)
-        # size = 21, line_count = 3
+    def test_byte_offset_various_positions(self, tmp_path: Path):
         path = tmp_path / "offset_test.log"
         path.write_bytes(b"line 0\nline 1\nline 2\n")
 
@@ -591,36 +559,24 @@ class TestLineIndexerByteOffset:
         assert idx.size == 21
         assert idx.line_count == 3
 
-        # Początek linii 0
         assert idx.line_at_byte_offset(0) == (0, 0)
-        # Środek linii 0
         assert idx.line_at_byte_offset(3) == (0, 0)
-        # Znak \n linii 0
         assert idx.line_at_byte_offset(6) == (0, 0)
 
-        # Początek linii 1
         assert idx.line_at_byte_offset(7) == (1, 7)
-        # Środek linii 1
         assert idx.line_at_byte_offset(10) == (1, 7)
-        # Znak \n linii 1
         assert idx.line_at_byte_offset(13) == (1, 7)
 
-        # Początek linii 2
         assert idx.line_at_byte_offset(14) == (2, 14)
-        # Znak \n linii 2
         assert idx.line_at_byte_offset(20) == (2, 14)
 
-        # Dokładnie koniec pliku (size)
         assert idx.line_at_byte_offset(21) == (2, 21)
-        # Poza plikiem
         assert idx.line_at_byte_offset(999) == (2, 21)
-        # Ujemny offset
         assert idx.line_at_byte_offset(-10) == (0, 0)
 
         idx.close()
 
-    def test_byte_offset_no_trailing_newline(self, tmp_path):
-        # "line 0\nline 1" -> 13 bajtów (offset 0..6: line 0, 7..12: line 1)
+    def test_byte_offset_no_trailing_newline(self, tmp_path: Path):
         path = tmp_path / "offset_no_nl.log"
         path.write_bytes(b"line 0\nline 1")
 
@@ -637,7 +593,7 @@ class TestLineIndexerByteOffset:
 
         idx.close()
 
-    def test_byte_offset_multiple_sparse_index_entries(self, tmp_path):
+    def test_byte_offset_multiple_sparse_index_entries(self, tmp_path: Path):
         path = tmp_path / "sparse_offsets.log"
         lines = [f"2026-07-04 line {i:04d} payload text\n".encode() for i in range(200)]
         path.write_bytes(b"".join(lines))
@@ -661,7 +617,7 @@ class TestLineIndexerByteOffset:
 class TestConsumeChunkIndexEntries:
     """Testy dla bezalokacyjnej metody _consume_chunk_index_entries."""
 
-    def test_consume_multiple_entries_in_one_chunk(self, tmp_path):
+    def test_consume_multiple_entries_in_one_chunk(self, tmp_path: Path):
         path = tmp_path / "multi_entries_chunk.log"
         lines = [f"line {i:02d} with padding data here\n".encode() for i in range(20)]
         path.write_bytes(b"".join(lines))
@@ -675,7 +631,7 @@ class TestConsumeChunkIndexEntries:
                 assert entry.offset == idx.size and entry.line == idx.line_count
         idx.close()
 
-    def test_consume_zero_copy_equivalence(self, tmp_path):
+    def test_consume_zero_copy_equivalence(self, tmp_path: Path):
         path = tmp_path / "zero_copy_equiv.log"
         lines = [f"2026-07-04 {i:05d} [INFO] sample log entry message\n".encode() for i in range(1000)]
         path.write_bytes(b"".join(lines))
@@ -695,9 +651,7 @@ class TestConsumeChunkIndexEntries:
 class TestIndexerWorkerChunk:
     """Testy dla funkcji roboczej multiprocessing _indexer_worker_chunk i _collect_chunk_index_entries."""
 
-    def test_worker_chunk_direct(self, tmp_path):
-        from log_viewer.indexer import _indexer_worker_chunk
-
+    def test_worker_chunk_direct(self, tmp_path: Path):
         path = tmp_path / "worker_direct.log"
         raw_lines = [f"line {i:04d} data\n".encode() for i in range(100)]
         path.write_bytes(b"".join(raw_lines))
@@ -705,8 +659,8 @@ class TestIndexerWorkerChunk:
 
         # Podziel na 2 równe połówki
         half = size // 2
-        res1 = _indexer_worker_chunk((0, half, str(path), 128, 0))
-        res2 = _indexer_worker_chunk((half, size, str(path), 128, 1))
+        res1 = _worker_chunk((0, half, str(path), 128, 0))
+        res2 = _worker_chunk((half, size, str(path), 128, 1))
 
         assert res1[2] == 0
         assert res2[2] == 1
@@ -714,17 +668,13 @@ class TestIndexerWorkerChunk:
         assert total_lines == 100
 
     def test_worker_chunk_invalid_file(self):
-        from log_viewer.indexer import _indexer_worker_chunk
-
-        res = _indexer_worker_chunk((0, 1000, "nonexistent_file_path_123.log", 128, 99))
+        res = _worker_chunk((0, 1000, "nonexistent_file_path_123.log", 128, 99))
         assert res == (0, [], 99)
 
     def test_collect_chunk_index_entries_direct(self):
-        from log_viewer.indexer import _collect_chunk_index_entries
-
         data = b"line 1\nline 2\nline 3\nline 4\nline 5\n"
-        entries = []
-        last_off, nl_cnt = _collect_chunk_index_entries(
+        entries: list[tuple[int, int]] = []
+        _last_off, nl_cnt = _collect_entries(
             chunk=data,
             base_offset=0,
             base_line=0,
@@ -739,11 +689,9 @@ class TestIndexerWorkerChunk:
             assert 0 <= line_no <= 5
 
     def test_collect_chunk_index_entries_no_newlines(self):
-        from log_viewer.indexer import _collect_chunk_index_entries
-
         data = b"no newlines here at all"
-        entries = []
-        last_off, nl_cnt = _collect_chunk_index_entries(
+        entries: list[tuple[int, int]] = []
+        last_off, nl_cnt = _collect_entries(
             chunk=data,
             base_offset=0,
             base_line=0,
@@ -756,11 +704,9 @@ class TestIndexerWorkerChunk:
         assert last_off == 0
 
     def test_collect_chunk_index_entries_zero_entries_with_newlines(self):
-        from log_viewer.indexer import _collect_chunk_index_entries
-
         data = b"line 1\nline 2\nline 3\n"
-        entries = []
-        last_off, nl_cnt = _collect_chunk_index_entries(
+        entries: list[tuple[int, int]] = []
+        last_off, nl_cnt = _collect_entries(
             chunk=data,
             base_offset=500,
             base_line=42,
@@ -773,15 +719,13 @@ class TestIndexerWorkerChunk:
         assert last_off == 500
 
     def test_collect_chunk_index_entries_with_preallocated_bytearray(self):
-        from log_viewer.indexer import _collect_chunk_index_entries
-
         ba = bytearray(256)
         data = b"line 1\nline 2\nline 3\n"
         ba[: len(data)] = data
         ba[len(data) :] = b"\n\n\n\n\n\n" * 10  # dane resztkowe (stale) poza chunk_len
 
-        entries = []
-        last_off, nl_cnt = _collect_chunk_index_entries(
+        entries: list[tuple[int, int]] = []
+        last_off, nl_cnt = _collect_entries(
             chunk=ba,
             base_offset=0,
             base_line=0,
@@ -833,32 +777,40 @@ class TestLineIndexerCursorTracking:
         # 2. Odczyt linii 10..15 ustawia kursor na linii 15
         lines = idx.read_lines(10, 5)
         assert len(lines) == 5
-        assert idx._cursor_pos is not None
-        assert idx._cursor_pos[0] == 15
+        chunk = idx._cursor_pos
+        assert chunk is not None
+        assert chunk[0] == 15
 
         # 3. Sekwencyjny odczyt linii 15..20 wznawia z kursora (bez f.seek wstecz)
         lines2 = idx.read_lines(15, 5)
         assert len(lines2) == 5
         assert lines2[0][0] == 15
-        assert idx._cursor_pos[0] == 20
+        chunk = idx._cursor_pos
+        assert chunk is not None
+        assert chunk[0] == 20
 
         # 4. Skok w tył (do linii 5) cofa pozycję i prawidłowo pobiera dane
         lines_back = idx.read_lines(5, 3)
         assert len(lines_back) == 3
         assert lines_back[0][0] == 5
-        assert idx._cursor_pos[0] == 8
+        chunk = idx._cursor_pos
+        assert chunk is not None
+        assert chunk[0] == 8
 
         # 4b. Daleki skok w przod (indeks blizej niz kursor)
         lines_far = idx.read_lines(1500, 2)
         assert len(lines_far) == 2
         assert lines_far[0][0] == 1500
-        assert idx._cursor_pos[0] == 1502
+        chunk = idx._cursor_pos
+        assert chunk is not None
+        assert chunk[0] == 1502
 
         # 5. offset_of_line aktualizuje kursor
         off = idx.offset_of_line(50)
         assert off is not None
-        assert idx._cursor_pos is not None
-        assert idx._cursor_pos[0] == 50
+        chunk = idx._cursor_pos
+        assert chunk is not None
+        assert chunk[0] == 50
 
         # 6. Zamknięcie resetuje kursor
         idx.close()
@@ -868,22 +820,20 @@ class TestLineIndexerCursorTracking:
 class TestParallelIndexGapless:
     """Testy weryfikujące determinizm i eliminację luk na granicach chunków w _build_parallel."""
 
-    def test_worker_chunk_respects_absolute_intervals(self, tmp_path):
-        from log_viewer.indexer import _indexer_worker_chunk
-
+    def test_worker_chunk_respects_absolute_intervals(self, tmp_path: Path):
         path = tmp_path / "worker_boundary.log"
         lines = [f"line {i:04d} payload01\n".encode() for i in range(100)]
         path.write_bytes(b"".join(lines))
 
         interval = 128
-        res = _indexer_worker_chunk((150, 1000, str(path), interval, 1))
+        res = _worker_chunk((150, 1000, str(path), interval, 1))
         _line_cnt, entries, _chunk_id = res
 
         assert len(entries) > 0
         first_off, _first_line = entries[0]
         assert first_off >= 256
 
-    def test_parallel_vs_single_thread_equivalence(self, tmp_path):
+    def test_parallel_vs_single_thread_equivalence(self, tmp_path: Path):
         path = tmp_path / "equivalence.log"
         raw_lines = [
             f"2026-10-18 12:00:00 [{i:05d}] test payload message with variable length padding {i % 17 * 'x'}\n".encode()

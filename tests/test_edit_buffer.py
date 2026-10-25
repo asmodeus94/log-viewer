@@ -4,10 +4,32 @@ import gzip
 import os
 import stat
 import time
+from pathlib import Path
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.edit_buffer import EditBuffer
 from log_viewer.exceptions import CompressedSaveError, FileChangedError
+
+
+def _assert_save_preserves_mode(path: str, mode_val: int) -> None:
+    os.chmod(path, mode_val)
+    original_mode = stat.S_IMODE(os.stat(path).st_mode)
+    buf = EditBuffer()
+    buf.set(5, "EDITED")
+    buf.save_to_file(path)
+    new_mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert new_mode == original_mode
+
+
+def _save_after_append_expecting_change(path: str) -> None:
+    original_size = os.path.getsize(path)
+    buf = EditBuffer()
+    buf.set(5, "EDITED")
+    with open(path, "ab") as f:
+        f.write(b"appended\n")
+    with pytest.raises(FileChangedError):
+        buf.save_to_file(path, expected_size=original_size)
 
 
 class TestEditBuffer:
@@ -59,45 +81,27 @@ class TestEditBufferSave:
 
     def test_save_preserves_permissions(self, temp_log_file):
         path = temp_log_file(num_lines=100)
-        os.chmod(path, 0o640)
-        original_mode = stat.S_IMODE(os.stat(path).st_mode)
-        buf = EditBuffer()
-        buf.set(5, "EDITED")
-        buf.save_to_file(path)
-        new_mode = stat.S_IMODE(os.stat(path).st_mode)
-        assert new_mode == original_mode
+        _assert_save_preserves_mode(path, 0o640)
 
     def test_save_preserves_exec_bit(self, temp_log_file):
         path = temp_log_file(num_lines=100)
-        os.chmod(path, 0o755)
-        original_mode = stat.S_IMODE(os.stat(path).st_mode)
-        buf = EditBuffer()
-        buf.set(5, "EDITED")
-        buf.save_to_file(path)
-        new_mode = stat.S_IMODE(os.stat(path).st_mode)
-        assert new_mode == original_mode
+        _assert_save_preserves_mode(path, 0o755)
 
     def test_backup_file_permissions_secure(self, temp_log_file):
         """Weryfikuje, że w najgorszym wypadku (np. przy awarii save lub przerywaniu) backup
         został otwarty w sposób bezpieczny. Sprawdzamy to nadając źródłu konkretne restrykcyjne prawa."""
         path = temp_log_file(num_lines=10)
-        # Nadajemy źródłu prawa 0o600. Z racji, że save_to_file wywołuje copystat
-        # przenosząc metadane ze źródła, oczekujemy, że ostateczny backup również nie będzie
-        # miał szerszych uprawnień. Jednak najważniejsze jest to, że fix chroni przed domyślnymi
-        # uprawnieniami (z umaska) przed wykonaniem copystat.
         os.chmod(path, 0o600)
 
         buf = EditBuffer()
         buf.set(1, "EDITED")
         backup = buf.save_to_file(path)
 
-        # Pobierz rzeczywiste uprawnienia pliku backup (tylko bity rw-rw-rw-)
         mode = stat.S_IMODE(os.stat(backup).st_mode)
 
-        # Na Linux/Mac OS ostateczny plik nie powinien mieć uprawnień odczytu dla grupy/innych.
         if os.name != "nt":
-            assert not (mode & stat.S_IRWXG)  # brak uprawnień dla grupy
-            assert not (mode & stat.S_IRWXO)  # brak uprawnień dla innych
+            assert not (mode & stat.S_IRWXG)
+            assert not (mode & stat.S_IRWXO)
 
         try:
             os.unlink(backup)
@@ -120,13 +124,7 @@ class TestEditBufferSave:
 class TestEditBufferFileChanged:
     def test_blocks_on_size_change(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
-        original_size = os.path.getsize(path)
-        buf = EditBuffer()
-        buf.set(5, "EDITED")
-        with open(path, "ab") as f:
-            f.write(b"appended\n")
-        with pytest.raises(FileChangedError):
-            buf.save_to_file(path, expected_size=original_size)
+        _save_after_append_expecting_change(path)
 
     def test_blocks_on_mtime_change(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
@@ -142,13 +140,7 @@ class TestEditBufferFileChanged:
 
     def test_no_backup_on_blocked_save(self, temp_log_file):
         path = temp_log_file(num_lines=1000)
-        original_size = os.path.getsize(path)
-        buf = EditBuffer()
-        buf.set(5, "EDITED")
-        with open(path, "ab") as f:
-            f.write(b"appended\n")
-        with pytest.raises(FileChangedError):
-            buf.save_to_file(path, expected_size=original_size)
+        _save_after_append_expecting_change(path)
         assert not os.path.exists(path + ".bak")
 
     def test_allows_when_unchanged(self, temp_log_file):
@@ -170,7 +162,6 @@ class TestEditBufferFileChanged:
         buf.set(5, "EDITED")
         with open(path, "ab") as f:
             f.write(b"appended\n")
-        # Bez expected_size/mtime — zapis powinien zadziałać
         backup = buf.save_to_file(path)
         assert os.path.exists(backup)
         try:
@@ -186,7 +177,6 @@ class TestEditBufferFileChanged:
         original_mtime = os.stat(path).st_mtime
         buf = EditBuffer()
         buf.set(5, "EDITED")
-        # Zmień mtime o 0.5s — powinno być wykryte (brak tolerancji)
         new_mtime = original_mtime + 0.5
         os.utime(path, (new_mtime, new_mtime))
         with pytest.raises(FileChangedError):
@@ -196,10 +186,8 @@ class TestEditBufferFileChanged:
         """Po naprawie #1 (Gemini Pro) — save_to_file używa podanego kodowania."""
         path = temp_log_file(num_lines=1000)
         buf = EditBuffer()
-        # Edytuj linię z polskimi znakami
         buf.set(5, "zażółć gęślą jaźń")
         backup = buf.save_to_file(path, encoding="utf-8")
-        # Sprawdź że polskie znaki są poprawnie zapisane w UTF-8
         with open(path, "rb") as f:
             lines = f.readlines()
         assert "zażółć gęślą jaźń".encode() in lines[5]
@@ -212,10 +200,8 @@ class TestEditBufferFileChanged:
         """Save z encoding=latin-1 zapisuje znaki Latin-1."""
         path = temp_log_file(num_lines=1000)
         buf = EditBuffer()
-        # Użyj znaków które istnieją w Latin-1 (é, ü, ñ)
         buf.set(5, "café résumé niño")
         backup = buf.save_to_file(path, encoding="latin-1")
-        # Sprawdź zapis w Latin-1
         with open(path, "rb") as f:
             lines = f.readlines()
         assert "café résumé niño".encode("latin-1") in lines[5]
@@ -226,23 +212,14 @@ class TestEditBufferFileChanged:
 
 
 class TestEditBufferCompressed:
-    def test_blocks_compressed_save(self):
-        import tempfile
-
-        path = tempfile.mktemp(suffix=".gz")
-        try:
-            with gzip.open(path, "wb") as f:
-                f.write(b"line 1\nline 2\n")
-            buf = EditBuffer()
-            buf.set(0, "EDITED")
-            with pytest.raises(CompressedSaveError):
-                buf.save_to_file(path)
-        finally:
-            if os.path.exists(path):
-                try:
-                    os.unlink(path)
-                except PermissionError:
-                    pass
+    def test_blocks_compressed_save(self, tmp_path: Path):
+        path = str(tmp_path / "compressed.gz")
+        with gzip.open(path, "wb") as f:
+            f.write(b"line 1\nline 2\n")
+        buf = EditBuffer()
+        buf.set(0, "EDITED")
+        with pytest.raises(CompressedSaveError):
+            buf.save_to_file(path)
 
 
 class TestMtimeNsTolerance:
@@ -270,7 +247,6 @@ class TestMtimeNsTolerance:
         original_mtime_ns = os.stat(path).st_mtime_ns
         buf = EditBuffer()
         buf.set(5, "EDITED")
-        # Zmień mtime o 2 sekundy (na pewno >1ms)
         new_mtime = time.time() + 2.0
         os.utime(path, (new_mtime, new_mtime))
         with pytest.raises(FileChangedError):
@@ -283,7 +259,6 @@ class TestMtimeNsTolerance:
         original_mtime_ns = os.stat(path).st_mtime_ns
         buf = EditBuffer()
         buf.set(5, "EDITED")
-        # Symuluj drift 500_000 ns (0.5ms) — w tolerancji
         fake_mtime_ns = original_mtime_ns + 500_000
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=fake_mtime_ns)
         assert os.path.exists(backup)
@@ -299,7 +274,6 @@ class TestMtimeNsTolerance:
         original_mtime_ns = os.stat(path).st_mtime_ns
         buf = EditBuffer()
         buf.set(5, "EDITED")
-        # Symuluj drift 2_000_000 ns (2ms) — poza tolerancją
         fake_mtime_ns = original_mtime_ns + 2_000_000
         with pytest.raises(FileChangedError):
             buf.save_to_file(path, expected_size=original_size, expected_mtime=fake_mtime_ns)
@@ -308,10 +282,9 @@ class TestMtimeNsTolerance:
         """Kompatybilność wsteczna — expected_mtime jako float (stare wersje)."""
         path = temp_log_file(num_lines=1000)
         original_size = os.path.getsize(path)
-        original_mtime_float = os.stat(path).st_mtime  # float, nie ns
+        original_mtime_float = os.stat(path).st_mtime
         buf = EditBuffer()
         buf.set(5, "EDITED")
-        # float → konwersja na ns w edit_buffer.py
         backup = buf.save_to_file(path, expected_size=original_size, expected_mtime=original_mtime_float)
         assert os.path.exists(backup)
         try:

@@ -7,9 +7,8 @@ from PySide6.QtWidgets import QApplication
 
 def test_highlight_and_scroll_does_not_select_text():
     os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
+    if QApplication.instance() is None:
+        QApplication(sys.argv)
 
     from log_viewer.log_tab import LogTab
 

@@ -1,5 +1,6 @@
 """Testy exceptions.py — FileChangedError, CompressedSaveError."""
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.exceptions import CompressedSaveError, FileChangedError
 

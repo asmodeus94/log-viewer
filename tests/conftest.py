@@ -2,12 +2,13 @@
 
 import os
 import sys
-import tempfile
+from pathlib import Path
 
+# noinspection PyPackageRequirements
 import pytest
 
 # Dodaj katalog nadrzędny do path by móc importować pakiet log_viewer
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Konfiguracja platformy Qt — w środowiskach testowych/headless (zwłaszcza macOS i CI)
 # wymuszamy offscreen, aby uniknąć problemów z brakiem aktywnego serwera okien (Cocoa/X11)
@@ -18,12 +19,15 @@ os.environ["QT_LOGGING_RULES"] = "qt.qpa.fonts.warning=false"
 
 
 @pytest.fixture
-def temp_log_file():
+def temp_log_file(tmp_path: Path):
     """Tworzy tymczasowy plik logu. Zwraca ścieżkę. Czyści po teście."""
-    paths = []
+    paths: list[str] = []
+    counter = 0
 
-    def _create(num_lines=1000, line_len=120, suffix=".log", content=None):
-        path = tempfile.mktemp(suffix=suffix)
+    def _create(num_lines: int = 1000, line_len: int = 120, suffix: str = ".log", content: bytes | None = None) -> str:
+        nonlocal counter
+        counter += 1
+        path = str(tmp_path / f"temp_log_{counter}{suffix}")
         paths.append(path)
         if content:
             with open(path, "wb") as f:
@@ -49,9 +53,9 @@ def temp_log_file():
 
 
 @pytest.fixture
-def temp_config_path():
+def temp_config_path(tmp_path: Path):
     """Zwraca ścieżkę do tymczasowego pliku konfiguracyjnego."""
-    path = tempfile.mktemp(suffix=".json")
+    path = str(tmp_path / "temp_config.json")
     yield path
     if os.path.exists(path):
         try:

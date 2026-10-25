@@ -27,6 +27,7 @@ import random
 import tempfile
 from typing import Any
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.bitset import Bitset, bisect_left_custom
 from log_viewer.edit_buffer import EditBuffer

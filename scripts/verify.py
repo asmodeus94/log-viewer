@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""
-scripts/verify.py — Centralna bramka jakości kodu (Quality Gate).
+"""scripts/verify.py — Centralna bramka jakości kodu (Quality Gate).
 
 Sprawdza kod pod kątem:
 1. Kompilacji plików interfejsu .ui (compile_ui.py)
 2. Formatowania i analizy statycznej linterem (ruff format & ruff check)
-3. Zgodności typów (mypy)
-4. Analizy AST pod kątem duplikacji kodu i nadpisywanych zmiennych (ast_check.py)
-5. Poprawności działania testów jednostkowych (pytest)
-6. Opcjonalnej walidacji raportów SARIF (--sarif)
+3. Zgodności typów (mypy: core, scripts oraz tests)
+4. Analizy AST pod kątem duplikacji kodu, nadpisywanych zmiennych i konwencji testów (ast_check.py)
+5. Automatycznej walidacji raportów SARIF (*.sarif, *.sarif.json)
+6. Poprawności działania testów jednostkowych (pytest)
 7. Opcjonalnych testów wydajnościowych / benchmarków (--benchmark)
 
 Użycie:
@@ -17,7 +16,7 @@ Użycie:
     python scripts/verify.py --quick        # Szybka weryfikacja (UI + Lint + MyPy + AST Inspect, bez pytest)
     python scripts/verify.py --benchmark    # Uruchomienie benchmarków wydajnościowych (pytest-benchmark)
     python scripts/verify.py --step ui      # Tylko wybrany krok: ui, lint, mypy, inspect, sarif, test, benchmark
-    python scripts/verify.py --sarif        # Walidacja raportów SARIF w repozytorium
+    python scripts/verify.py --sarif        # Ręczna walidacja raportów SARIF w repozytorium
 """
 
 from __future__ import annotations
@@ -133,28 +132,119 @@ def step_lint(repo_root: Path, py_exe: str) -> bool:
 
 
 def step_typecheck(repo_root: Path, py_exe: str) -> bool:
-    """Krok 3: Analiza typów statycznych (mypy)."""
-    targets = ["log_viewer", "scripts"]
-    cmd = [py_exe, "-m", "mypy"] + targets
-    code, _ = run_command(cmd, repo_root, "Step 3: Static type check (mypy)")
-    return code == 0
+    """Krok 3: Analiza typów statycznych (mypy dla log_viewer, scripts oraz tests)."""
+    # 3a: Kod główny i skrypty weryfikacyjne
+    targets_core = ["log_viewer", "scripts"]
+    cmd_core = [py_exe, "-m", "mypy"] + targets_core
+    code_core, _ = run_command(cmd_core, repo_root, "Step 3a: Static type check - core & scripts (mypy)")
+    if code_core != 0:
+        return False
+
+    # 3b: Pakiet testów (z włączonym check_untyped_defs i wyłączonym wymogiem sygnatur typów funkcji)
+    cmd_tests = [
+        py_exe,
+        "-m",
+        "mypy",
+        "tests",
+        "--check-untyped-defs",
+        "--disable-error-code",
+        "no-untyped-def",
+        "--disable-error-code",
+        "unreachable",
+        "--disable-error-code",
+        "unused-ignore",
+        "--disable-error-code",
+        "assignment",
+    ]
+    code_tests, _ = run_command(cmd_tests, repo_root, "Step 3b: Static type check - test suite (mypy)")
+    return code_tests == 0
 
 
 def step_inspect(repo_root: Path) -> bool:
-    """Krok 4: Analiza AST (DuplicatedCode oraz nadpisywane przypisania PyUnusedLocal)."""
-    print(f"{CYAN}{BOLD}--> Step 4: AST Code Quality Inspection (DuplicatedCode & Dead Stores){RESET}")
+    """Krok 4: Analiza AST (DuplicatedCode, nadpisywane przypisania PyUnusedLocal oraz konwencje testów)."""
+    print(
+        f"{CYAN}{BOLD}--> Step 4: AST Code Quality Inspection (DuplicatedCode, Dead Stores & Test Conventions){RESET}"
+    )
     issues = run_ast_checks(repo_root)
     if issues:
         for issue in issues:
             print(f"    {YELLOW}{issue}{RESET}")
         print(f"\n{RED}{BOLD}AST inspection failed: found {len(issues)} issue(s).{RESET}")
         return False
-    print(f"    {GREEN}All AST quality checks passed (0 duplicate blocks, 0 dead stores).{RESET}")
+    print(
+        f"    {GREEN}All AST quality checks passed (0 duplicate blocks, 0 dead stores, 0 convention violations).{RESET}"
+    )
     return True
 
 
+def _resolve_sarif_file_path(uri: str, repo_root: Path) -> Path | None:
+    """Rozwiązuje ścieżkę pliku z formatu SARIF (URI / ścieżka względna) na obiekt Path."""
+    clean = uri.replace("\\", "/")
+    if "file:/" in clean:
+        idx = clean.find("file:/")
+        path_str = clean[idx + 6 :]
+        if path_str.startswith("//"):
+            path_str = path_str[2:]
+        if path_str.startswith("/") and len(path_str) > 2 and path_str[2] == ":":
+            path_str = path_str[1:]
+        p = Path(path_str)
+    else:
+        p = repo_root / uri
+
+    if p.is_file():
+        return p
+
+    # Sprawdzenie relatywnie do repo_root
+    try:
+        cand = repo_root / Path(clean).name
+        if cand.is_file():
+            return cand
+    except Exception:
+        pass
+
+    filename = Path(clean).name
+    matches = list(repo_root.rglob(filename))
+    if matches and matches[0].is_file():
+        return matches[0]
+
+    return None
+
+
+def _is_sarif_issue_active(file_path: Path, start_line: int | None, snippet: str | None) -> bool:
+    """Sprawdza, czy problem z raportu SARIF nadal występuje w kodzie źródłowym.
+
+    Jeśli fragment kodu (snippet) nie występuje już w pliku w okolicach linii
+    lub w ogóle w pliku, problem uznaje się za rozwiązany (stale SARIF report).
+    """
+    if not snippet or not snippet.strip():
+        # Brak fragmentu w raporcie — uznajemy zgłoszenie za aktywne
+        return True
+
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return True
+
+    needle = snippet.strip()
+
+    # Jeśli linia jest znana, sprawdź najpierw w oknie ±5 linii
+    if start_line is not None and 1 <= start_line <= len(lines):
+        start_idx = max(0, start_line - 6)
+        end_idx = min(len(lines), start_line + 5)
+        for i in range(start_idx, end_idx):
+            if needle in lines[i]:
+                return True
+
+    # Jeśli nie ma w oknie, sprawdź czy występuje w całym pliku
+    return any(needle in line for line in lines)
+
+
 def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
-    """Krok weryfikacji raportów SARIF (np. z inspekcji IDE / Qodana)."""
+    """Krok weryfikacji raportów SARIF (np. z inspekcji IDE / Qodana).
+
+    Automatycznie weryfikuje, czy zaraportowane fragmenty kodu nadal występują w plikach
+    źródłowych, odróżniając aktywne problemy od już naprawionych.
+    """
     print(f"{CYAN}{BOLD}--> Step: SARIF Reports Validation{RESET}")
 
     sarif_files: list[Path] = []
@@ -177,7 +267,9 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
         print(f"    {GREEN}No SARIF report files found to validate.{RESET}")
         return True
 
-    total_issues = 0
+    active_issues = 0
+    resolved_count = 0
+
     for sarif_file in sarif_files:
         rel_name = sarif_file.relative_to(repo_root) if sarif_file.is_relative_to(repo_root) else sarif_file.name
         print(f"    Scanning {YELLOW}{rel_name}{RESET}...")
@@ -186,7 +278,7 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
                 data = json.load(sarif_fh)
         except (OSError, ValueError) as e:
             print(f"    {RED}Error reading SARIF file {rel_name}: {e}{RESET}")
-            total_issues += 1
+            active_issues += 1
             continue
 
         runs = data.get("runs", [])
@@ -202,22 +294,43 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
                     msg = res.get("message", {}).get("text", "No message")
                     locations = res.get("locations", [])
                     loc_str = ""
+                    snippet_text: str | None = None
+                    start_line: int | None = None
+                    file_path: Path | None = None
+
                     if locations:
                         phys = locations[0].get("physicalLocation", {})
                         art = phys.get("artifactLocation", {}).get("uri", "")
                         region = phys.get("region", {})
-                        line_no = region.get("startLine", "")
-                        loc_str = f" in {art}" + (f":{line_no}" if line_no else "")
+                        start_line = region.get("startLine")
+                        snippet_dict = region.get("snippet", {})
+                        if isinstance(snippet_dict, dict):
+                            snippet_text = snippet_dict.get("text")
+                        loc_str = f" in {art}" + (f":{start_line}" if start_line else "")
+                        if art:
+                            file_path = _resolve_sarif_file_path(art, repo_root)
+
+                    # Sprawdź czy problem jest wciąż aktywny w kodzie
+                    is_active = True
+                    if file_path is not None and file_path.is_file():
+                        is_active = _is_sarif_issue_active(file_path, start_line, snippet_text)
+
+                    if not is_active:
+                        resolved_count += 1
+                        continue
 
                     color = RED if level == "error" else YELLOW
                     print(f"    {color}[{tool_name} / {rule_id}] ({level}){loc_str}: {msg}{RESET}")
-                    total_issues += 1
+                    active_issues += 1
 
-    if total_issues > 0:
-        print(f"\n{RED}{BOLD}SARIF validation failed: found {total_issues} issue(s).{RESET}")
+    if resolved_count > 0:
+        print(f"    {GREEN}({resolved_count} previously reported issue(s) confirmed as resolved in code){RESET}")
+
+    if active_issues > 0:
+        print(f"\n{RED}{BOLD}SARIF validation failed: found {active_issues} active issue(s).{RESET}")
         return False
 
-    print(f"    {GREEN}All scanned SARIF reports are clean (0 issues).{RESET}")
+    print(f"    {GREEN}All scanned SARIF reports are clean (0 active issues).{RESET}")
     return True
 
 
@@ -285,16 +398,21 @@ def main() -> int:
             return 1
         print(f"{GREEN}Auto-fix and formatting completed successfully.{RESET}\n")
 
+    has_sarif_files = any(
+        f.is_file() and (f.name.endswith(".sarif") or f.name.endswith(".sarif.json"))
+        for f in repo_root.glob("*.sarif*")
+    )
+
     steps_to_run = []
     if args.step:
         steps_to_run.append(args.step)
     elif args.quick:
         steps_to_run = ["ui", "lint", "mypy", "inspect"]
-        if args.sarif:
+        if args.sarif or has_sarif_files:
             steps_to_run.append("sarif")
     else:
         steps_to_run = ["ui", "lint", "mypy", "inspect"]
-        if args.sarif:
+        if args.sarif or has_sarif_files:
             steps_to_run.append("sarif")
         steps_to_run.append("test")
         if args.benchmark:

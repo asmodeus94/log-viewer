@@ -2,11 +2,15 @@
 
 import os
 import threading
-import time
 
+from log_viewer.bitset import Bitset
 from log_viewer.edit_buffer import EditBuffer
 from log_viewer.filter_engine import FilterEngine
 from log_viewer.indexer import LineIndexer
+
+
+def _nop_progress(_pct: float, _hits: int) -> None:
+    pass
 
 
 class TestIntegrationFlow:
@@ -19,13 +23,15 @@ class TestIntegrationFlow:
 
         # 1. Wyszukaj
         engine = FilterEngine(path, idx)
-        results = []
+        results: list[int] = []
         done = threading.Event()
-        engine.start("ERROR", False, True, False, lambda p, h: None, lambda r, e: (results.extend(r), done.set()))
-        for _ in range(100):
-            if done.is_set():
-                break
-            time.sleep(0.05)
+
+        def on_done(r: Bitset, _e: str | None) -> None:
+            results.extend(r)
+            done.set()
+
+        engine.start("ERROR", False, True, False, _nop_progress, on_done)
+        done.wait(timeout=5.0)
         assert len(results) == 250
 
         # 2. Edytuj linię
