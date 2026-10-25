@@ -360,8 +360,6 @@ class ExportWorker(QObject):
 
             cancel_set = self._cancel_event.is_set
             edits = self._edit_buffer.edits
-            line_no = 0
-            last_progress_lines = 0
 
             with open_maybe_compressed(self._src_path, "rb") as src, open_maybe_compressed(self._dst_path, "wb") as out:
                 if not self._filter_active:

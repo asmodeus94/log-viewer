@@ -51,6 +51,37 @@ def _filter_init_worker(
     _shared_filter_hits = hits_val
 
 
+def _append_worker_hits(hits: list[int], words: array.array[int], base_word: int) -> int:
+    """Aktualizuje bufor słów bitowych i współdzielony licznik trafień w procesie roboczym."""
+    first_h = hits[0]
+    last_h = hits[-1]
+    needed_end = last_h >> 6
+    if base_word == -1:
+        base_word = first_h >> 6
+        words.extend([0] * (needed_end - base_word + 1))
+    elif needed_end >= base_word + len(words):
+        words.extend([0] * (needed_end - (base_word + len(words)) + 1))
+
+    bw = base_word
+    for h in hits:
+        words[(h >> 6) - bw] |= 1 << (h & 63)
+
+    if _shared_filter_hits is not None:
+        with _shared_filter_hits.get_lock():
+            _shared_filter_hits.value += len(hits)
+    return base_word
+
+
+def _hits_to_word_range(hits: list[int]) -> tuple[int, array.array[int]]:
+    """Konwertuje posortowaną listę indeksów linii na krotkę (base_word, words)."""
+    base_word = hits[0] >> 6
+    end_word = hits[-1] >> 6
+    words = array.array("Q", [0] * (end_word - base_word + 1))
+    for h in hits:
+        words[(h >> 6) - base_word] |= 1 << (h & 63)
+    return base_word, words
+
+
 def _filter_worker_chunk(
     args: tuple[int, int, int, int, str, str, bool, bool, bool, str],
 ) -> tuple[int, int, array.array[int], int]:
@@ -130,22 +161,7 @@ def _filter_worker_chunk(
                 local_hits = len(local_hits_list)
                 if local_hits > 0:
                     hit_count += local_hits
-                    first_h = local_hits_list[0]
-                    last_h = local_hits_list[-1]
-                    needed_end = last_h // 64
-                    if base_word == -1:
-                        base_word = first_h // 64
-                        words.extend([0] * (needed_end - base_word + 1))
-                    elif needed_end >= base_word + len(words):
-                        words.extend([0] * (needed_end - (base_word + len(words)) + 1))
-
-                    bw = base_word
-                    for h in local_hits_list:
-                        words[(h >> 6) - bw] |= 1 << (h & 63)
-
-                    if _shared_filter_hits is not None:
-                        with _shared_filter_hits.get_lock():
-                            _shared_filter_hits.value += local_hits
+                    base_word = _append_worker_hits(local_hits_list, words, base_word)
 
                 lines_count = complete_data.count(b"\n")
                 if complete_data and not complete_data.endswith(b"\n"):
@@ -157,22 +173,7 @@ def _filter_worker_chunk(
             carry_hits = strategy.match_chunk(carry, line_no)
             if carry_hits:
                 hit_count += len(carry_hits)
-                first_h = carry_hits[0]
-                last_h = carry_hits[-1]
-                needed_end = last_h // 64
-                if base_word == -1:
-                    base_word = first_h // 64
-                    words.extend([0] * (needed_end - base_word + 1))
-                elif needed_end >= base_word + len(words):
-                    words.extend([0] * (needed_end - (base_word + len(words)) + 1))
-
-                bw = base_word
-                for h in carry_hits:
-                    words[(h >> 6) - bw] |= 1 << (h & 63)
-
-                if _shared_filter_hits is not None:
-                    with _shared_filter_hits.get_lock():
-                        _shared_filter_hits.value += len(carry_hits)
+                base_word = _append_worker_hits(carry_hits, words, base_word)
 
     except OSError:
         pass
@@ -519,6 +520,19 @@ class FilterEngine:
         with self._session_lock:
             return session == self._session_id
 
+    def _finish_empty(
+        self,
+        session: int,
+        on_progress: Callable[..., None],
+        on_done: Callable[[Bitset, str | None], None],
+    ) -> None:
+        if self._is_current_session(session) and not self._cancel.is_set():
+            _notify_progress(on_progress, 100.0, 0, "filtering", None)
+            try:
+                on_done(Bitset(self.indexer.line_count if self.indexer else 0), None)
+            except (TypeError, ValueError, RuntimeError, AttributeError):
+                pass
+
     def _create_strategy(self, pattern: str, use_regex: bool, case_sensitive: bool, negate: bool) -> FilterStrategy:
         """Fabryka do tworzenia odpowiedniej strategii wyszukiwania."""
         if use_regex:
@@ -650,12 +664,7 @@ class FilterEngine:
         if search_in_filter and filtered_lines is not None:
             flen = len(filtered_lines)
             if flen == 0:
-                if self._is_current_session(session) and not self._cancel.is_set():
-                    _notify_progress(on_progress, 100.0, 0, "filtering", None)
-                    try:
-                        on_done(Bitset(self.indexer.line_count if self.indexer else 0), None)
-                    except (TypeError, ValueError, RuntimeError, AttributeError):
-                        pass
+                self._finish_empty(session, on_progress, on_done)
                 return
 
             # Optymalizacja 1.2: Adaptacyjna ocena gęstości i rozpiętości filtra
@@ -743,12 +752,7 @@ class FilterEngine:
         total_lines = len(filtered_lines)
 
         if total_lines == 0:
-            if self._is_current_session(session) and not self._cancel.is_set():
-                _notify_progress(on_progress, 100.0, 0, "filtering", None)
-                try:
-                    on_done(Bitset(universe_size), None)
-                except (TypeError, ValueError, RuntimeError, AttributeError):
-                    pass
+            self._finish_empty(session, on_progress, on_done)
             return
 
         try:
@@ -794,10 +798,8 @@ class FilterEngine:
                                     cur_line = start_line
 
                             needed = start_target - cur_line
-                            if needed > 0:
-                                if not self.indexer.advance_lines(f, needed):
-                                    break
-                                cur_line = start_target
+                            if needed > 0 and not self.indexer.advance_lines(f, needed):
+                                break
                         else:
                             idx = max(0, bisect.bisect_right(lines, start_target) - 1)
                             start_line = lines[idx]
@@ -806,7 +808,6 @@ class FilterEngine:
                             needed = start_target - start_line
                             if not self.indexer.advance_lines(f, needed):
                                 break
-                            cur_line = start_target
 
                     # Odczyt klastra linii z buforowaniem
                     if span == 1:
@@ -849,14 +850,8 @@ class FilterEngine:
                         pct = (processed_count / total_lines) * 100.0
                         partial_res = None
                         if batch_hits:
-                            min_idx = batch_hits[0]
-                            max_idx = batch_hits[-1]
-                            base_w = min_idx // 64
-                            end_w = max_idx // 64
-                            words = array.array("Q", [0] * (end_w - base_w + 1))
-                            for h in batch_hits:
-                                words[h // 64 - base_w] |= 1 << (h % 64)
-                            merged_bitset.update_indices(batch_hits)
+                            base_w, words = _hits_to_word_range(batch_hits)
+                            merged_bitset.merge_chunk_words(base_w, words)
                             partial_res = (base_w, words)
                             batch_hits = []
                         _notify_progress(on_progress, min(99.9, pct), total_hits, "filtering", partial_res)
@@ -924,12 +919,7 @@ class FilterEngine:
             active_ranges.append((i, start_off, end_off, start_ln))
 
         if search_in_filter and filtered_lines is not None and not active_ranges:
-            if self._is_current_session(session) and not self._cancel.is_set():
-                _notify_progress(on_progress, 100.0, 0, "filtering", None)
-                try:
-                    on_done(Bitset(self.indexer.line_count if self.indexer else 0), None)
-                except (TypeError, ValueError, RuntimeError, AttributeError):
-                    pass
+            self._finish_empty(session, on_progress, on_done)
             return
 
         pool_workers = min(n_workers, max(1, len(active_ranges)))
@@ -1095,14 +1085,7 @@ class FilterEngine:
                 partial_res = None
 
                 if chunk_hits:
-                    min_idx = chunk_hits[0]
-                    max_idx = chunk_hits[-1]
-                    base_word = min_idx // 64
-                    end_word = max_idx // 64
-                    words = array.array("Q", [0] * (end_word - base_word + 1))
-                    for idx in chunk_hits:
-                        words[idx // 64 - base_word] |= 1 << (idx % 64)
-
+                    base_word, words = _hits_to_word_range(chunk_hits)
                     merged_bitset.merge_chunk_words(base_word, words)
                     total_hits += len(chunk_hits)
                     partial_res = (base_word, words)

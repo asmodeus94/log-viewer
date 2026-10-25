@@ -62,10 +62,11 @@ no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
-disable_error_code = [
-    "name-defined",
-    "override",      # sygnatury przeciążeń C++ w PySide6 (np. QWidget.close, QAbstractItemModel)
-]
+
+[[tool.mypy.overrides]]
+module = "log_viewer.widgets"
+# Sygnatury przeciążeń C++ w PySide6 (np. QAbstractItemModel.rowCount, QWidget.setFocus)
+disable_error_code = ["override"]
 
 [[tool.mypy.overrides]]
 module = "log_viewer.ui.*"
