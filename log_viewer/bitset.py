@@ -192,6 +192,67 @@ class Bitset(Sequence[int]):
             return False
         return bool(self._words[index >> 6] & (1 << (index & 63)))
 
+    def any_in_range(self, start: int, end: int) -> bool:
+        """Sprawdza w czasie O(słowa) bez alokacji i bisekcji czy w przedziale [start, end)
+
+        znajduje się przynajmniej jeden ustawiony bit.
+        Zoptymalizowane pod kątem błyskawicznego pomijania pustych chunków (Chunk Skipping).
+        """
+        if start >= end or start >= self._size:
+            return False
+        if start < 0:
+            start = 0
+        if end > self._size:
+            end = self._size
+        if start >= end:
+            return False
+
+        start_word = start >> 6
+        end_word = (end - 1) >> 6
+
+        words = self._words
+        if start_word == end_word:
+            start_bit = start & 63
+            end_bit = (end - 1) & 63
+            if start_bit == 0 and end_bit == 63:
+                mask = 0xFFFFFFFFFFFFFFFF
+            else:
+                mask = ((1 << (end_bit - start_bit + 1)) - 1) << start_bit
+            return bool(words[start_word] & mask)
+
+        start_bit = start & 63
+        if start_bit == 0:
+            start_mask = 0xFFFFFFFFFFFFFFFF
+        else:
+            start_mask = (0xFFFFFFFFFFFFFFFF << start_bit) & 0xFFFFFFFFFFFFFFFF
+        if words[start_word] & start_mask:
+            return True
+
+        if end_word > start_word + 1 and any(itertools.islice(words, start_word + 1, end_word)):
+            return True
+
+        end_bit = (end - 1) & 63
+        end_mask = 0xFFFFFFFFFFFFFFFF if end_bit == 63 else (1 << (end_bit + 1)) - 1
+        return bool(words[end_word] & end_mask)
+
+    def first_set_index(self) -> int | None:
+        """Zwraca indeks pierwszego ustawionego bitu w O(słowa) bez budowania cache bisekcji."""
+        for i, w in enumerate(self._words):
+            if w:
+                tz = (w & -w).bit_length() - 1
+                return i * 64 + tz
+        return None
+
+    def last_set_index(self) -> int | None:
+        """Zwraca indeks ostatniego ustawionego bitu w O(słowa) od końca bez budowania cache bisekcji."""
+        words = self._words
+        for i in range(len(words) - 1, -1, -1):
+            w = words[i]
+            if w:
+                highest_bit = w.bit_length() - 1
+                return i * 64 + highest_bit
+        return None
+
     def bisect_left(self, index: int) -> int:
         if index <= 0:
             return 0
@@ -279,25 +340,24 @@ class Bitset(Sequence[int]):
 
         raise IndexError("Bitset corrupted state")
 
-    def expand_context(self, context_after: int) -> Bitset:
-        """Zwraca nowy Bitset rozszerzony o podaną liczbę linii w dół (kontekst)."""
-        new_bs = Bitset(self._size)
-        if context_after <= 0:
-            new_bs._words = array.array("Q", self._words)
-            return new_bs
-
-        new_words = new_bs._words
+    def _expand_words_range(
+        self,
+        out_words: array.array[int],
+        start_word: int,
+        horizon: int,
+        context_after: int,
+        clear_zero: bool,
+    ) -> None:
+        """Rozszerza bity kontekstu na przedziale słów [start_word, _num_words) do bufora out_words."""
         words = self._words
         num_words = self._num_words
 
-        horizon = -1
-
-        for i in range(num_words):
+        for i in range(start_word, num_words):
             w = words[i]
             base = i * 64
 
             if horizon >= base + 63:
-                new_words[i] = 0xFFFFFFFFFFFFFFFF
+                out_words[i] = 0xFFFFFFFFFFFFFFFF
                 if w:
                     highest_bit = w.bit_length() - 1
                     reach = base + highest_bit + context_after
@@ -306,15 +366,14 @@ class Bitset(Sequence[int]):
                 continue
 
             if not w and horizon < base:
+                if clear_zero:
+                    out_words[i] = 0
                 continue
 
             new_w = 0
             if horizon >= base:
                 covered_bits = min(horizon - base + 1, 64)
-                if covered_bits == 64:
-                    new_w = 0xFFFFFFFFFFFFFFFF
-                else:
-                    new_w = (1 << covered_bits) - 1
+                new_w = 0xFFFFFFFFFFFFFFFF if covered_bits == 64 else (1 << covered_bits) - 1
 
             if w:
                 if context_after < 64:
@@ -327,35 +386,34 @@ class Bitset(Sequence[int]):
                         rem -= step
                         shift <<= 1
                     new_w |= expanded_w
-
-                    highest_bit = w.bit_length() - 1
-                    reach = base + highest_bit + context_after
-                    if reach > horizon:
-                        horizon = reach
                 else:
                     lowest_bit = (w & -w).bit_length() - 1
-                    mask = (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
-                    new_w |= mask
+                    new_w |= (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
 
-                    highest_bit = w.bit_length() - 1
-                    reach = base + highest_bit + context_after
-                    if reach > horizon:
-                        horizon = reach
-            new_words[i] = new_w
+                highest_bit = w.bit_length() - 1
+                reach = base + highest_bit + context_after
+                if reach > horizon:
+                    horizon = reach
+            out_words[i] = new_w
 
-        # Ostatnie słowo musi być ucięte do size, żeby nie mieć jedynek poza plikiem
-        if self._size > 0:
+        if self._size > 0 and num_words > 0:
             last_valid_bit = (self._size - 1) % 64
-            mask = (1 << (last_valid_bit + 1)) - 1
-            if last_valid_bit == 63:
-                mask = 0xFFFFFFFFFFFFFFFF
-            new_words[num_words - 1] &= mask
+            mask = 0xFFFFFFFFFFFFFFFF if last_valid_bit == 63 else (1 << (last_valid_bit + 1)) - 1
+            out_words[num_words - 1] &= mask
 
+    def expand_context(self, context_after: int) -> Bitset:
+        """Zwraca nowy Bitset rozszerzony o podaną liczbę linii w dół (kontekst)."""
+        new_bs = Bitset(self._size)
+        if context_after <= 0:
+            new_bs._words = array.array("Q", self._words)
+            return new_bs
+
+        self._expand_words_range(new_bs._words, 0, -1, context_after, clear_zero=False)
         return new_bs
 
     def expand_context_incremental(self, target: Bitset, from_line: int, context_after: int) -> None:
-        """
-        Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+        """Inkrementalnie rozszerza kontekst w istniejącym Bitsecie `target` zaczynając od pozycji `from_line`.
+
         Optymalizacja O(nowe_linie) zamiast O(cały_plik) dla trybu Follow przy dopisywaniu logów.
         """
         target.resize(self._size)
@@ -366,9 +424,7 @@ class Bitset(Sequence[int]):
             target._counts = None
             return
 
-        num_words = self._num_words
         words = self._words
-        target_words = target._words
 
         # Wyznacz słowo początkowe, biorąc pod uwagę zasięg poprzednich trafień
         lookback_words = (context_after + 63) // 64
@@ -384,64 +440,7 @@ class Bitset(Sequence[int]):
                 if reach > horizon:
                     horizon = reach
 
-        for i in range(start_word, num_words):
-            w = words[i]
-            base = i * 64
-
-            if horizon >= base + 63:
-                target_words[i] = 0xFFFFFFFFFFFFFFFF
-                if w:
-                    highest_bit = w.bit_length() - 1
-                    reach = base + highest_bit + context_after
-                    if reach > horizon:
-                        horizon = reach
-                continue
-
-            if not w and horizon < base:
-                target_words[i] = 0
-                continue
-
-            new_w = 0
-            if horizon >= base:
-                covered_bits = min(horizon - base + 1, 64)
-                if covered_bits == 64:
-                    new_w = 0xFFFFFFFFFFFFFFFF
-                else:
-                    new_w = (1 << covered_bits) - 1
-
-            if w:
-                if context_after < 64:
-                    expanded_w = w
-                    rem = context_after
-                    shift = 1
-                    while rem > 0:
-                        step = min(shift, rem)
-                        expanded_w |= (expanded_w << step) & 0xFFFFFFFFFFFFFFFF
-                        rem -= step
-                        shift <<= 1
-                    new_w |= expanded_w
-
-                    highest_bit = w.bit_length() - 1
-                    reach = base + highest_bit + context_after
-                    if reach > horizon:
-                        horizon = reach
-                else:
-                    lowest_bit = (w & -w).bit_length() - 1
-                    mask = (0xFFFFFFFFFFFFFFFF << lowest_bit) & 0xFFFFFFFFFFFFFFFF
-                    new_w |= mask
-
-                    highest_bit = w.bit_length() - 1
-                    reach = base + highest_bit + context_after
-                    if reach > horizon:
-                        horizon = reach
-            target_words[i] = new_w
-
-        if self._size > 0:
-            last_valid_bit = (self._size - 1) % 64
-            mask = (1 << (last_valid_bit + 1)) - 1
-            if last_valid_bit == 63:
-                mask = 0xFFFFFFFFFFFFFFFF
-            target_words[num_words - 1] &= mask
+        self._expand_words_range(target._words, start_word, horizon, context_after, clear_zero=True)
 
         target._counts = None
         target._total_count = -1
@@ -485,7 +484,7 @@ class Bitset(Sequence[int]):
         new_bs._words = new_words
 
         if self._size > 0 and num_words > 0:
-            last_valid_bit = (self._size - 1) % 64
+            last_valid_bit = (min_size - 1) % 64 if (min_size := self._size) else 0
             mask = (1 << (last_valid_bit + 1)) - 1
             if last_valid_bit == 63:
                 mask = 0xFFFFFFFFFFFFFFFF

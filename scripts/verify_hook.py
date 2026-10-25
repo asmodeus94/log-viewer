@@ -12,25 +12,10 @@ When an agent attempts to stop or complete its turn, this hook:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import sys
 from pathlib import Path
 
-
-def get_repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
-
-
-def get_python_executable(repo_root: Path) -> str:
-    if os.name == "nt":
-        venv_py = repo_root / ".venv" / "Scripts" / "python.exe"
-    else:
-        venv_py = repo_root / ".venv" / "bin" / "python"
-
-    if venv_py.exists():
-        return str(venv_py)
-    return sys.executable
+from verify import get_python_executable, get_repo_root
 
 
 def has_modified_source_files(repo_root: Path) -> bool:
@@ -55,7 +40,7 @@ def has_modified_source_files(repo_root: Path) -> bool:
                 if file_path.endswith((".py", ".ui", ".toml")):
                     return True
         return False
-    except Exception:
+    except (OSError, ValueError):
         return False
 
 

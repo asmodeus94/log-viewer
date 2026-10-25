@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from PySide6 import QtGui
 from PySide6.QtCore import QObject, Qt
-from PySide6.QtWidgets import QMessageBox, QTreeWidgetItem
+from PySide6.QtWidgets import QMessageBox, QTreeWidget, QTreeWidgetItem
 
 if TYPE_CHECKING:
     from log_viewer.log_tab import LogTab
@@ -54,47 +55,69 @@ class BookmarkController(QObject):
             new_cur = QtGui.QTextCursor(block)
             self.tab.text.setTextCursor(new_cur)
 
-    def refresh_bookmarks_tree(self) -> None:
-        """Odświeża drzewo zakładek w panelu bocznym."""
-        self.tab.bm_tree.clear()
-        sorted_keys: list[int] = sorted(self.tab.bookmarks.keys())
-        for ln in sorted_keys:
+    @staticmethod
+    def _populate_line_tree(tree: QTreeWidget, keys: Iterable[int]) -> None:
+        tree.clear()
+        for ln in sorted(keys):
             item = QTreeWidgetItem([f"{ln + 1:,}"])
             item.setData(0, int(Qt.ItemDataRole.UserRole), ln)
-            self.tab.bm_tree.addTopLevelItem(item)
+            tree.addTopLevelItem(item)
+
+    def _goto_tree_current_item(self, tree: QTreeWidget) -> None:
+        item = tree.currentItem()
+        if not item:
+            return
+        val = item.data(0, int(Qt.ItemDataRole.UserRole))
+        if val is not None:
+            self.tab.goto_file_line(int(val))
+
+    def _delete_selected_from_tree(
+        self,
+        tree: QTreeWidget,
+        remove_line_fn: Callable[[int], bool],
+    ) -> tuple[int, int]:
+        items = tree.selectedItems()
+        if not items:
+            self.tab.set_status(self.tab.t("msg_no_selection"))
+            return 0, -1
+        first_selected_idx: int = tree.indexOfTopLevelItem(items[0])
+        removed = 0
+        for item in items:
+            val = item.data(0, int(Qt.ItemDataRole.UserRole))
+            if val is not None and remove_line_fn(int(val)):
+                removed += 1
+        return removed, first_selected_idx
+
+    @staticmethod
+    def _restore_tree_selection(tree: QTreeWidget, first_selected_idx: int) -> None:
+        count = tree.topLevelItemCount()
+        if count > 0 and first_selected_idx >= 0:
+            next_idx: int = int(min(first_selected_idx, count - 1))
+            top_item = tree.topLevelItem(next_idx)
+            if top_item is not None:
+                tree.setCurrentItem(top_item)
+
+    def refresh_bookmarks_tree(self) -> None:
+        """Odświeża drzewo zakładek w panelu bocznym."""
+        self._populate_line_tree(self.tab.bm_tree, self.tab.bookmarks.keys())
 
     _refresh_bookmarks_tree = refresh_bookmarks_tree
 
     def refresh_edits_tree(self) -> None:
         """Odświeża drzewo edycji w panelu bocznym."""
-        self.tab.ed_tree.clear()
-        sorted_keys: list[int] = sorted(self.tab.edit_buffer.keys())
-        for ln in sorted_keys:
-            item = QTreeWidgetItem([f"{ln + 1:,}"])
-            item.setData(0, int(Qt.ItemDataRole.UserRole), ln)
-            self.tab.ed_tree.addTopLevelItem(item)
+        self._populate_line_tree(self.tab.ed_tree, self.tab.edit_buffer.keys())
 
     _refresh_edits_tree = refresh_edits_tree
 
     def goto_bookmark(self) -> None:
         """Przechodzi do wybranej w drzewie zakładki."""
-        item = self.tab.bm_tree.currentItem()
-        if not item:
-            return
-        val = item.data(0, int(Qt.ItemDataRole.UserRole))
-        if val is not None:
-            self.tab.goto_file_line(int(val))
+        self._goto_tree_current_item(self.tab.bm_tree)
 
     _goto_bookmark = goto_bookmark
 
     def goto_edit(self) -> None:
         """Przechodzi do wybranej w drzewie zmodyfikowanej linii."""
-        item = self.tab.ed_tree.currentItem()
-        if not item:
-            return
-        val = item.data(0, int(Qt.ItemDataRole.UserRole))
-        if val is not None:
-            self.tab.goto_file_line(int(val))
+        self._goto_tree_current_item(self.tab.ed_tree)
 
     _goto_edit = goto_edit
 
@@ -104,30 +127,20 @@ class BookmarkController(QObject):
         Po usunięciu zaznacza następny element w drzewie (jak w IDE —
         zaznaczenie „przesuwa się" na kolejny wpis, zamiast znikać).
         """
-        items = self.tab.bm_tree.selectedItems()
-        if not items:
-            self.tab.set_status(self.tab.t("msg_no_selection"))
-            return
-        first_selected_idx: int = self.tab.bm_tree.indexOfTopLevelItem(items[0])
-        removed = 0
-        for item in items:
-            val = item.data(0, int(Qt.ItemDataRole.UserRole))
-            if val is not None:
-                ln = int(val)
-                if ln in self.tab.bookmarks:
-                    del self.tab.bookmarks[ln]
-                    removed += 1
+
+        def _remove_bm(ln: int) -> bool:
+            if ln in self.tab.bookmarks:
+                del self.tab.bookmarks[ln]
+                return True
+            return False
+
+        removed, first_selected_idx = self._delete_selected_from_tree(self.tab.bm_tree, _remove_bm)
         if removed:
             self.refresh_bookmarks_tree()
             self.tab.viewport_controller.rebuild_extra_selections()
             self.tab.viewport_controller.update_current_line_highlight()
             self.tab.set_status(self.tab.t("msg_bookmarks_removed").format(n=removed))
-            count = self.tab.bm_tree.topLevelItemCount()
-            if count > 0:
-                next_idx: int = int(min(first_selected_idx, count - 1))
-                top_item = self.tab.bm_tree.topLevelItem(next_idx)
-                if top_item is not None:
-                    self.tab.bm_tree.setCurrentItem(top_item)
+            self._restore_tree_selection(self.tab.bm_tree, first_selected_idx)
 
     _delete_selected_bookmarks = delete_selected_bookmarks
 
@@ -136,30 +149,20 @@ class BookmarkController(QObject):
 
         Po usunięciu zaznacza następny element w drzewie (jak w IDE).
         """
-        items = self.tab.ed_tree.selectedItems()
-        if not items:
-            self.tab.set_status(self.tab.t("msg_no_selection"))
-            return
-        first_selected_idx: int = self.tab.ed_tree.indexOfTopLevelItem(items[0])
-        removed = 0
-        for item in items:
-            val = item.data(0, int(Qt.ItemDataRole.UserRole))
-            if val is not None:
-                ln = int(val)
-                if self.tab.edit_buffer.has(ln):
-                    self.tab.edit_buffer.discard(ln)
-                    removed += 1
+
+        def _remove_edit(ln: int) -> bool:
+            if self.tab.edit_buffer.has(ln):
+                self.tab.edit_buffer.discard(ln)
+                return True
+            return False
+
+        removed, first_selected_idx = self._delete_selected_from_tree(self.tab.ed_tree, _remove_edit)
         if removed:
             self.refresh_edits_tree()
             self.tab.reload_current_view()
             self.tab.refresh_status()
             self.tab.set_status(self.tab.t("msg_edits_removed").format(n=removed))
-            count = self.tab.ed_tree.topLevelItemCount()
-            if count > 0:
-                next_idx: int = int(min(first_selected_idx, count - 1))
-                top_item = self.tab.ed_tree.topLevelItem(next_idx)
-                if top_item is not None:
-                    self.tab.ed_tree.setCurrentItem(top_item)
+            self._restore_tree_selection(self.tab.ed_tree, first_selected_idx)
 
     _delete_selected_edits = delete_selected_edits
 

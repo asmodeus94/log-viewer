@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+from collections import OrderedDict
 from collections.abc import Sequence
 from typing import Any
 
@@ -242,15 +243,15 @@ class LogPlainTextEdit(QPlainTextEdit):
         if not selected_text.strip():
             return
 
-        tab = self.parent()
-        while tab and not hasattr(tab, "last_formatter"):
+        tab: Any = self.parent()
+        while tab is not None and not hasattr(tab, "last_formatter"):
             tab = tab.parent()
 
         last_formatter = getattr(tab, "last_formatter", "JSON")
         dialog = FormatDialog(self, selected_text, last_formatter)
         dialog.exec()
 
-        if tab and hasattr(tab, "last_formatter"):
+        if tab is not None and hasattr(tab, "last_formatter"):
             tab.last_formatter = dialog.get_selected_formatter()
 
         dialog.deleteLater()
@@ -411,6 +412,8 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = 0
         self._batch_size = 1000
         self._indexer: Any = None
+        self._line_cache: OrderedDict[int, str] = OrderedDict()
+        self._max_cache_size: int = 1024
 
         self._color_error = QColor(THEME_DARK["error"])
         self._color_warn = QColor(THEME_DARK["warn"])
@@ -420,6 +423,7 @@ class SearchResultsModel(QAbstractListModel):
     def set_results(self, results: Sequence[int | tuple[int, str]] | Bitset | None, indexer: Any = None) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
+        self._line_cache.clear()
         if results is None:
             self._all_results = []
         elif isinstance(results, (Bitset, list)):
@@ -450,16 +454,19 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count += len(results)
         self.endInsertRows()
 
+    # noinspection PyMethodOverriding
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid():
             return 0
         return self._visible_count
 
+    # noinspection PyMethodOverriding
     def canFetchMore(self, parent: QModelIndex = QModelIndex()) -> bool:
         if parent.isValid():
             return False
         return self._visible_count < len(self._all_results)
 
+    # noinspection PyMethodOverriding
     def fetchMore(self, parent: QModelIndex = QModelIndex()) -> None:
         if parent.isValid():
             return
@@ -489,6 +496,7 @@ class SearchResultsModel(QAbstractListModel):
         self._visible_count = new_visible
         self.endInsertRows()
 
+    # noinspection PyMethodOverriding
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid() or index.row() >= self._visible_count:
             return None
@@ -497,30 +505,44 @@ class SearchResultsModel(QAbstractListModel):
             line_no, text = item
         else:
             line_no = item
-            if hasattr(self, "_indexer") and self._indexer:
-                lines = self._indexer.read_lines(line_no, 1)
-                text = lines[0][1] if lines else ""
-            else:
-                text = ""
+            text = None
 
-        if role == Qt.ItemDataRole.DisplayRole:
-            display = text[:200]
-            if len(text) > 200:
-                display += "..."
-            formatted_line = f"{line_no + 1:>8,}"
-            return f"  {formatted_line}:  {display}"
         if role == Qt.ItemDataRole.UserRole:
             return line_no
-        if role == Qt.ItemDataRole.ForegroundRole:
+        if role != Qt.ItemDataRole.DisplayRole:
             return None
-        return None
+
+        if text is None:
+            if line_no in self._line_cache:
+                text = self._line_cache[line_no]
+                self._line_cache.move_to_end(line_no)
+            else:
+                if hasattr(self, "_indexer") and self._indexer:
+                    lines = self._indexer.read_lines(line_no, 1)
+                    text = lines[0][1] if lines else ""
+                else:
+                    text = ""
+                self._line_cache[line_no] = text
+                if len(self._line_cache) > self._max_cache_size:
+                    self._line_cache.popitem(last=False)
+
+        display = text[:200]
+        if len(text) > 200:
+            display += "..."
+        formatted_line = f"{line_no + 1:>8,}"
+        return f"  {formatted_line}:  {display}"
 
     def clear(self) -> None:
         self.beginResetModel()
         self._all_results = []
         self._visible_count = 0
         self._indexer = None
+        self._line_cache.clear()
         self.endResetModel()
+
+    def clear_cache(self) -> None:
+        """Czyści pamięć podręczną pobranych linii tekstu."""
+        self._line_cache.clear()
 
     def get_line_no(self, row: int) -> int | None:
         """Zwraca numer linii pliku dla danego wiersza wyników."""
@@ -768,27 +790,26 @@ class FormatDialog(QDialog):
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
         return self.formatter_combo.currentText()
 
-    def _on_prev_line(self) -> None:
+    def _move_editor_line(
+        self,
+        primary_op: QtGui.QTextCursor.MoveOperation,
+        wrap_op: QtGui.QTextCursor.MoveOperation,
+    ) -> None:
         if not self.editor:
             return
         cursor = self.editor.textCursor()
-        if not cursor.movePosition(QtGui.QTextCursor.MoveOperation.Up):
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        if not cursor.movePosition(primary_op):
+            cursor.movePosition(wrap_op)
         cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
         self.editor.setTextCursor(cursor)
         self.editor.ensureCursorVisible()
         self._load_cursor_text(cursor)
 
+    def _on_prev_line(self) -> None:
+        self._move_editor_line(QtGui.QTextCursor.MoveOperation.Up, QtGui.QTextCursor.MoveOperation.End)
+
     def _on_next_line(self) -> None:
-        if not self.editor:
-            return
-        cursor = self.editor.textCursor()
-        if not cursor.movePosition(QtGui.QTextCursor.MoveOperation.Down):
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.Start)
-        cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-        self.editor.setTextCursor(cursor)
-        self.editor.ensureCursorVisible()
-        self._load_cursor_text(cursor)
+        self._move_editor_line(QtGui.QTextCursor.MoveOperation.Down, QtGui.QTextCursor.MoveOperation.Start)
 
     def _load_cursor_text(self, cursor: QtGui.QTextCursor) -> None:
         selected_text = cursor.selectedText().replace("\u2029", "\n")
@@ -964,6 +985,7 @@ class ExpandingLineEdit(QWidget):
             return self._overlay.toPlainText()
         return self._full_text
 
+    # noinspection PyPep8Naming
     def setText(self, t: str) -> None:
         """Ustawia tekst w kontrolce."""
         self._full_text = t
@@ -983,6 +1005,7 @@ class ExpandingLineEdit(QWidget):
         self.setText("")
         self.collapse()
 
+    # noinspection PyPep8Naming
     def selectAll(self) -> None:
         """Zaznacza cały tekst w aktywnym polu."""
         if self._overlay.isVisible():
@@ -1001,6 +1024,7 @@ class ExpandingLineEdit(QWidget):
         """Sprawdza czy kontrolka lub jej nakładka posiada focus."""
         return self.base_edit.hasFocus() or self._overlay.hasFocus() or super().hasFocus()
 
+    # noinspection PyPep8Naming
     def setPlaceholderText(self, text: str) -> None:
         """Ustawia placeholder text."""
         self.base_edit.setPlaceholderText(text)
@@ -1012,6 +1036,7 @@ class ExpandingLineEdit(QWidget):
         self.base_edit.setToolTip(text)
         self._overlay.setToolTip(text)
 
+    # noinspection PyMethodOverriding
     def setFont(self, font: QFont) -> None:
         """Ustawia czcionkę dla pola bazowego i nakładki."""
         super().setFont(font)

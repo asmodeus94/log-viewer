@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Qt, QThread, Slot
 from PySide6.QtGui import QTextCursor
@@ -115,18 +116,52 @@ class EditController(QObject):
 
     _revert_edit = revert_edit
 
-    def cmd_save_edits(self) -> None:
-        """Rozpoczyna asynchroniczny zapis zmodyfikowanych linii do bieżącego pliku."""
-        save_thread = self.tab.save_thread
+    def _can_start_file_operation(self, thread: QThread | None) -> bool:
         try:
-            if save_thread is not None and save_thread.isRunning():
-                return
+            if thread is not None and thread.isRunning():
+                return False
         except RuntimeError:
             pass
-
         if not self.tab.file_path or not self.tab.indexer:
             QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+            return False
+        return True
+
+    def _start_worker_thread(
+        self,
+        thread: QThread,
+        worker: Any,
+        on_progress: Callable[..., None],
+        on_finished: Callable[..., None],
+        on_error: Callable[..., None],
+        progress_dialog: QProgressDialog | None = None,
+        extra_done_signals: tuple[tuple[Any, Callable[..., None]], ...] = (),
+    ) -> None:
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        self.tab.register_thread_worker(thread, worker)
+
+        worker.progress.connect(on_progress, Qt.ConnectionType.QueuedConnection)
+        if progress_dialog is not None and hasattr(worker, "cancel"):
+            progress_dialog.canceled.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
+
+        worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
+        worker.error.connect(on_error, Qt.ConnectionType.QueuedConnection)
+        for sig, slot in extra_done_signals:
+            sig.connect(slot, Qt.ConnectionType.QueuedConnection)
+
+        for sig in (worker.finished, worker.error, *(s for s, _ in extra_done_signals)):
+            sig.connect(thread.quit, Qt.ConnectionType.QueuedConnection)
+            sig.connect(worker.deleteLater, Qt.ConnectionType.QueuedConnection)
+
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def cmd_save_edits(self) -> None:
+        """Rozpoczyna asynchroniczny zapis zmodyfikowanych linii do bieżącego pliku."""
+        if not self._can_start_file_operation(self.tab.save_thread):
             return
+        assert self.tab.file_path is not None and self.tab.indexer is not None
         if len(self.tab.edit_buffer) == 0:
             QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_edits"))
             return
@@ -168,26 +203,17 @@ class EditController(QObject):
         self.tab.save_thread = save_thread
         self.tab.save_worker = save_worker
 
-        save_worker.moveToThread(save_thread)
-        save_thread.started.connect(save_worker.run)
-        self.tab.register_thread_worker(save_thread, save_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — cross-thread safe.
-        save_worker.progress.connect(save_progress.setValue, Qt.ConnectionType.QueuedConnection)
-        save_worker.finished.connect(self._on_save_done, Qt.ConnectionType.QueuedConnection)
-        save_worker.error.connect(self._on_save_error, Qt.ConnectionType.QueuedConnection)
-        save_worker.file_changed.connect(self._on_save_file_changed, Qt.ConnectionType.QueuedConnection)
-        save_worker.compressed.connect(self._on_save_compressed, Qt.ConnectionType.QueuedConnection)
-        save_worker.finished.connect(save_thread.quit, Qt.ConnectionType.QueuedConnection)
-        save_worker.error.connect(save_thread.quit, Qt.ConnectionType.QueuedConnection)
-        save_worker.file_changed.connect(save_thread.quit, Qt.ConnectionType.QueuedConnection)
-        save_worker.compressed.connect(save_thread.quit, Qt.ConnectionType.QueuedConnection)
-        # deleteLater — zwolnij pamięć C++ po zakończeniu
-        save_worker.finished.connect(save_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_worker.error.connect(save_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_worker.file_changed.connect(save_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_worker.compressed.connect(save_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_thread.finished.connect(save_thread.deleteLater)
-        save_thread.start()
+        self._start_worker_thread(
+            save_thread,
+            save_worker,
+            on_progress=save_progress.setValue,
+            on_finished=self._on_save_done,
+            on_error=self._on_save_error,
+            extra_done_signals=(
+                (save_worker.file_changed, self._on_save_file_changed),
+                (save_worker.compressed, self._on_save_compressed),
+            ),
+        )
 
     @Slot(str)
     def _on_save_done(self, _backup_path: str) -> None:
@@ -310,16 +336,9 @@ class EditController(QObject):
 
     def cmd_save_as(self) -> None:
         """Zapisuje zawartość pliku z uwzględnieniem edycji do nowo wybranego pliku."""
-        save_as_thread = self.tab.save_as_thread
-        try:
-            if save_as_thread is not None and save_as_thread.isRunning():
-                return
-        except RuntimeError:
-            pass
-
-        if not self.tab.file_path or not self.tab.indexer:
-            QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+        if not self._can_start_file_operation(self.tab.save_as_thread):
             return
+        assert self.tab.file_path is not None and self.tab.indexer is not None
         path, _ = QFileDialog.getSaveFileName(
             self.tab.main_window, self.tab.t("mi_save_as"), "", "Log files (*.log);;Text files (*.txt);;All files (*)"
         )
@@ -344,22 +363,14 @@ class EditController(QObject):
         self.tab.save_as_thread = save_as_thread
         self.tab.save_as_worker = save_as_worker
 
-        save_as_worker.moveToThread(save_as_thread)
-        save_as_thread.started.connect(save_as_worker.run)
-        self.tab.register_thread_worker(save_as_thread, save_as_worker)
-
-        save_as_worker.progress.connect(self._update_save_progress, Qt.ConnectionType.QueuedConnection)
-        save_as_progress.canceled.connect(save_as_worker.cancel, Qt.ConnectionType.DirectConnection)
-
-        save_as_worker.finished.connect(self._on_save_as_done, Qt.ConnectionType.QueuedConnection)
-        save_as_worker.error.connect(self._on_save_as_error, Qt.ConnectionType.QueuedConnection)
-
-        save_as_worker.finished.connect(save_as_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_as_worker.error.connect(save_as_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        save_as_worker.finished.connect(save_as_thread.quit, Qt.ConnectionType.QueuedConnection)
-        save_as_worker.error.connect(save_as_thread.quit, Qt.ConnectionType.QueuedConnection)
-        save_as_thread.finished.connect(save_as_thread.deleteLater)
-        save_as_thread.start()
+        self._start_worker_thread(
+            save_as_thread,
+            save_as_worker,
+            on_progress=self._update_save_progress,
+            on_finished=self._on_save_as_done,
+            on_error=self._on_save_as_error,
+            progress_dialog=save_as_progress,
+        )
 
     @Slot(float)
     def _update_export_progress(self, val: float) -> None:
@@ -396,16 +407,9 @@ class EditController(QObject):
 
     def cmd_export(self) -> None:
         """Eksportuje przefiltrowany lub cały plik (wraz z edycjami) do nowego pliku."""
-        export_thread = self.tab.export_thread
-        try:
-            if export_thread is not None and export_thread.isRunning():
-                return
-        except RuntimeError:
-            pass
-
-        if not self.tab.indexer or not self.tab.file_path:
-            QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
+        if not self._can_start_file_operation(self.tab.export_thread):
             return
+        assert self.tab.file_path is not None and self.tab.indexer is not None
         path, _ = QFileDialog.getSaveFileName(
             self.tab.main_window, self.tab.t("dlg_export_title"), "", "Text Files (*.txt);;All Files (*)"
         )
@@ -437,22 +441,14 @@ class EditController(QObject):
         self.tab.export_thread = export_thread
         self.tab.export_worker = export_worker
 
-        export_worker.moveToThread(export_thread)
-        export_thread.started.connect(export_worker.run)
-        self.tab.register_thread_worker(export_thread, export_worker)
-
-        export_worker.progress.connect(self._update_export_progress, Qt.ConnectionType.QueuedConnection)
-        export_progress.canceled.connect(export_worker.cancel, Qt.ConnectionType.DirectConnection)
-
-        export_worker.finished.connect(self._on_export_done, Qt.ConnectionType.QueuedConnection)
-        export_worker.error.connect(self._on_export_error, Qt.ConnectionType.QueuedConnection)
-
-        export_worker.finished.connect(export_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        export_worker.error.connect(export_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        export_worker.finished.connect(export_thread.quit, Qt.ConnectionType.QueuedConnection)
-        export_worker.error.connect(export_thread.quit, Qt.ConnectionType.QueuedConnection)
-        export_thread.finished.connect(export_thread.deleteLater)
-        export_thread.start()
+        self._start_worker_thread(
+            export_thread,
+            export_worker,
+            on_progress=self._update_export_progress,
+            on_finished=self._on_export_done,
+            on_error=self._on_export_error,
+            progress_dialog=export_progress,
+        )
 
     # Publiczne aliasy metod kontrolera
     on_save_done = _on_save_done

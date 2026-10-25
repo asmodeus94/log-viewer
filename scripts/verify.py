@@ -6,27 +6,33 @@ Sprawdza kod pod kątem:
 1. Kompilacji plików interfejsu .ui (compile_ui.py)
 2. Formatowania i analizy statycznej linterem (ruff format & ruff check)
 3. Zgodności typów (mypy)
-4. Poprawności działania testów jednostkowych (pytest)
-5. Opcjonalnej walidacji raportów SARIF (--sarif)
-6. Opcjonalnych testów wydajnościowych / benchmarków (--benchmark)
+4. Analizy AST pod kątem duplikacji kodu i nadpisywanych zmiennych (ast_check.py)
+5. Poprawności działania testów jednostkowych (pytest)
+6. Opcjonalnej walidacji raportów SARIF (--sarif)
+7. Opcjonalnych testów wydajnościowych / benchmarków (--benchmark)
 
 Użycie:
     python scripts/verify.py                # Pełna weryfikacja
     python scripts/verify.py --fix          # Automatyczna naprawa formatowania i importów + weryfikacja
-    python scripts/verify.py --quick        # Szybka weryfikacja (UI + Lint + MyPy, bez pytest)
+    python scripts/verify.py --quick        # Szybka weryfikacja (UI + Lint + MyPy + AST Inspect, bez pytest)
     python scripts/verify.py --benchmark    # Uruchomienie benchmarków wydajnościowych (pytest-benchmark)
-    python scripts/verify.py --step ui      # Tylko wybrany krok: ui, lint, mypy, sarif, test, benchmark
+    python scripts/verify.py --step ui      # Tylko wybrany krok: ui, lint, mypy, inspect, sarif, test, benchmark
     python scripts/verify.py --sarif        # Walidacja raportów SARIF w repozytorium
 """
 
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+from ast_check import run_ast_checks
 
 # Kolory ANSI do czytelnego formatowania w terminalu
 GREEN = "\033[92m"
@@ -38,9 +44,13 @@ RESET = "\033[0m"
 
 
 def enable_windows_ansi() -> None:
-    """Włącza obsługę sekwencji ANSI w konsoli Windows."""
-    if os.name == "nt":
-        os.system("")
+    """Włącza obsługę sekwencji ANSI w konsoli Windows bez uruchamiania podprocesu powłoki."""
+    if os.name == "nt" and hasattr(ctypes, "windll"):
+        kernel32: Any = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_ulong()
+        if kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            kernel32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
 
 
 def get_repo_root() -> Path:
@@ -58,6 +68,14 @@ def get_python_executable(repo_root: Path) -> str:
     if venv_py.exists():
         return str(venv_py)
     return sys.executable
+
+
+def cleanup_benchmarks(repo_root: Path) -> None:
+    """Usuwa ewentualne pozostałości po pytest-benchmark."""
+    for pattern in (".benchmarks", ".benchmark"):
+        for p in repo_root.rglob(pattern):
+            if p.is_dir() and ".venv" not in p.parts:
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def run_command(cmd: list[str], cwd: Path, description: str) -> tuple[int, str]:
@@ -122,6 +140,19 @@ def step_typecheck(repo_root: Path, py_exe: str) -> bool:
     return code == 0
 
 
+def step_inspect(repo_root: Path) -> bool:
+    """Krok 4: Analiza AST (DuplicatedCode oraz nadpisywane przypisania PyUnusedLocal)."""
+    print(f"{CYAN}{BOLD}--> Step 4: AST Code Quality Inspection (DuplicatedCode & Dead Stores){RESET}")
+    issues = run_ast_checks(repo_root)
+    if issues:
+        for issue in issues:
+            print(f"    {YELLOW}{issue}{RESET}")
+        print(f"\n{RED}{BOLD}AST inspection failed: found {len(issues)} issue(s).{RESET}")
+        return False
+    print(f"    {GREEN}All AST quality checks passed (0 duplicate blocks, 0 dead stores).{RESET}")
+    return True
+
+
 def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
     """Krok weryfikacji raportów SARIF (np. z inspekcji IDE / Qodana)."""
     print(f"{CYAN}{BOLD}--> Step: SARIF Reports Validation{RESET}")
@@ -153,7 +184,7 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
         try:
             with open(sarif_file, encoding="utf-8") as sarif_fh:
                 data = json.load(sarif_fh)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             print(f"    {RED}Error reading SARIF file {rel_name}: {e}{RESET}")
             total_issues += 1
             continue
@@ -191,9 +222,10 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
 
 
 def step_tests(repo_root: Path, py_exe: str) -> bool:
-    """Krok 4: Testy jednostkowe (pytest)."""
-    cmd = [py_exe, "-m", "pytest", "tests/"]
-    code, _ = run_command(cmd, repo_root, "Step 4: Unit and GUI tests (pytest)")
+    """Krok 5: Testy jednostkowe (pytest)."""
+    cmd = [py_exe, "-m", "pytest", "tests/", "--benchmark-disable"]
+    code, _ = run_command(cmd, repo_root, "Step 5: Unit and GUI tests (pytest)")
+    cleanup_benchmarks(repo_root)
     return code == 0
 
 
@@ -201,6 +233,7 @@ def step_benchmark(repo_root: Path, py_exe: str) -> bool:
     """Krok benchmarku: testy wydajnościowe (pytest-benchmark)."""
     cmd = [py_exe, "-m", "pytest", "tests/test_benchmarks.py", "--benchmark-enable"]
     code, _ = run_command(cmd, repo_root, "Benchmark Step: Performance tests (pytest-benchmark)")
+    cleanup_benchmarks(repo_root)
     return code == 0
 
 
@@ -215,7 +248,7 @@ def main() -> int:
         help="Automatically format code and fix safe linter errors before verification",
     )
     parser.add_argument(
-        "--quick", "-q", action="store_true", help="Quick verification (UI + Lint + MyPy, skips pytest)"
+        "--quick", "-q", action="store_true", help="Quick verification (UI + Lint + MyPy + Inspect, skips pytest)"
     )
     parser.add_argument(
         "--benchmark",
@@ -225,7 +258,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--step",
-        choices=["ui", "lint", "mypy", "sarif", "test", "benchmark"],
+        choices=["ui", "lint", "mypy", "inspect", "sarif", "test", "benchmark"],
         help="Run only specific verification step",
     )
     parser.add_argument(
@@ -244,6 +277,8 @@ def main() -> int:
     print(f"Working directory: {repo_root}")
     print(f"Interpreter:       {py_exe}\n")
 
+    cleanup_benchmarks(repo_root)
+
     if args.fix:
         if not step_format_and_fix(repo_root, py_exe):
             print(f"\n{RED}{BOLD}[ERROR] Auto-fix failed.{RESET}")
@@ -254,11 +289,11 @@ def main() -> int:
     if args.step:
         steps_to_run.append(args.step)
     elif args.quick:
-        steps_to_run = ["ui", "lint", "mypy"]
+        steps_to_run = ["ui", "lint", "mypy", "inspect"]
         if args.sarif:
             steps_to_run.append("sarif")
     else:
-        steps_to_run = ["ui", "lint", "mypy"]
+        steps_to_run = ["ui", "lint", "mypy", "inspect"]
         if args.sarif:
             steps_to_run.append("sarif")
         steps_to_run.append("test")
@@ -273,6 +308,8 @@ def main() -> int:
             success = step_lint(repo_root, py_exe)
         elif step == "mypy":
             success = step_typecheck(repo_root, py_exe)
+        elif step == "inspect":
+            success = step_inspect(repo_root)
         elif step == "sarif":
             success = step_sarif(repo_root, args.sarif)
         elif step == "test":
@@ -282,9 +319,11 @@ def main() -> int:
 
         if not success:
             print(f"\n{RED}{BOLD}[QUALITY GATE ERROR] Step '{step}' failed.{RESET}")
+            cleanup_benchmarks(repo_root)
             return 1
         print(f"{GREEN}[OK] Step '{step}' passed successfully.{RESET}\n")
 
+    cleanup_benchmarks(repo_root)
     print(f"{GREEN}{BOLD}=== SUCCESS: All quality checks passed successfully! ==={RESET}")
     return 0
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -22,42 +23,68 @@ class UIController(QObject):
     def setup_ui_elements(self) -> None:
         self._setup_ui_elements()
 
+    @staticmethod
+    def _bind_side_tree_actions(
+        tree: QtWidgets.QTreeWidget,
+        delete_btn: QtWidgets.QPushButton,
+        on_goto: Callable[[], None],
+        on_delete: Callable[[], None],
+    ) -> None:
+        tree.itemDoubleClicked.connect(on_goto)
+        delete_btn.clicked.connect(on_delete)
+        for key in (QKeySequence(QKeySequence.StandardKey.Delete), QKeySequence(Qt.Key.Key_Backspace)):
+            shortcut = QtGui.QShortcut(key, tree)
+            shortcut.activated.connect(on_delete)
+
     def _setup_ui_elements(self) -> None:
-        self.tab.splitter = self.tab.ui.splitter
-        self.tab.v_splitter = self.tab.ui.v_splitter
-        self.tab.bm_tree = self.tab.ui.bm_tree
-        self.tab.ed_tree = self.tab.ui.ed_tree
-        self.tab.btn_del_bookmarks = self.tab.ui.btn_del_bookmarks
-        self.tab.btn_del_edits = self.tab.ui.btn_del_edits
-        self.tab.text = self.tab.ui.text
-        self.tab.search_results_view = self.tab.ui.search_results_view
-        self.tab.minimap = self.tab.ui.minimap
-        self.tab.pct_label = self.tab.ui.pct_label
-        self.tab.lbl_bookmarks = self.tab.ui.lbl_bookmarks
-        self.tab.lbl_edits = self.tab.ui.lbl_edits
-        self.tab.search_results_label = self.tab.ui.search_results_label
+        tab = self.tab
+        ui = tab.ui
+        (
+            tab.splitter,
+            tab.v_splitter,
+            tab.bm_tree,
+            tab.ed_tree,
+            tab.btn_del_bookmarks,
+            tab.btn_del_edits,
+            tab.text,
+            tab.search_results_view,
+            tab.minimap,
+            tab.pct_label,
+            tab.lbl_bookmarks,
+            tab.lbl_edits,
+            tab.search_results_label,
+        ) = (
+            ui.splitter,
+            ui.v_splitter,
+            ui.bm_tree,
+            ui.ed_tree,
+            ui.btn_del_bookmarks,
+            ui.btn_del_edits,
+            ui.text,
+            ui.search_results_view,
+            ui.minimap,
+            ui.pct_label,
+            ui.lbl_bookmarks,
+            ui.lbl_edits,
+            ui.search_results_label,
+        )
 
         self.tab.splitter.setSizes([200, 900, 48])
         self.tab.v_splitter.setSizes([500, 150])
 
         # Set up signals
-        self.tab.bm_tree.itemDoubleClicked.connect(self.tab.bookmark_controller.goto_bookmark)
-        self.tab.btn_del_bookmarks.clicked.connect(self.tab.bookmark_controller.delete_selected_bookmarks)
-
-        bm_del_shortcut = QtGui.QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.tab.bm_tree)
-        bm_del_shortcut.activated.connect(self.tab.bookmark_controller.delete_selected_bookmarks)
-
-        bm_bs_shortcut = QtGui.QShortcut(QKeySequence(Qt.Key.Key_Backspace), self.tab.bm_tree)
-        bm_bs_shortcut.activated.connect(self.tab.bookmark_controller.delete_selected_bookmarks)
-
-        self.tab.ed_tree.itemDoubleClicked.connect(self.tab.bookmark_controller.goto_edit)
-        self.tab.btn_del_edits.clicked.connect(self.tab.bookmark_controller.delete_selected_edits)
-
-        ed_del_shortcut = QtGui.QShortcut(QKeySequence(QKeySequence.StandardKey.Delete), self.tab.ed_tree)
-        ed_del_shortcut.activated.connect(self.tab.bookmark_controller.delete_selected_edits)
-
-        ed_bs_shortcut = QtGui.QShortcut(QKeySequence(Qt.Key.Key_Backspace), self.tab.ed_tree)
-        ed_bs_shortcut.activated.connect(self.tab.bookmark_controller.delete_selected_edits)
+        self._bind_side_tree_actions(
+            self.tab.bm_tree,
+            self.tab.btn_del_bookmarks,
+            self.tab.bookmark_controller.goto_bookmark,
+            self.tab.bookmark_controller.delete_selected_bookmarks,
+        )
+        self._bind_side_tree_actions(
+            self.tab.ed_tree,
+            self.tab.btn_del_edits,
+            self.tab.bookmark_controller.goto_edit,
+            self.tab.bookmark_controller.delete_selected_edits,
+        )
 
         self.tab.text.files_dropped.connect(self.tab.main_window.on_files_dropped)
         self.tab.text.verticalScrollBar().valueChanged.connect(self.tab.on_scroll_changed)
@@ -148,26 +175,17 @@ class UIController(QObject):
         if hasattr(self.tab, "minimap"):
             self.tab.minimap.apply_theme(t)
         pal = self.tab.text.palette()
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
+        for role in (
             QtGui.QPalette.ColorRole.Highlight,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Highlight),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
             QtGui.QPalette.ColorRole.HighlightedText,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.HighlightedText),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
             QtGui.QPalette.ColorRole.Base,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Base),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
             QtGui.QPalette.ColorRole.Text,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Text),
-        )
+        ):
+            pal.setColor(
+                QtGui.QPalette.ColorGroup.Inactive,
+                role,
+                pal.color(QtGui.QPalette.ColorGroup.Active, role),
+            )
         self.tab.text.setPalette(pal)
 
         self.update_text_colors()

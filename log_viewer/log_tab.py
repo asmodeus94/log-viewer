@@ -76,9 +76,29 @@ class LogTab(QWidget):
         """Chroni wątek i workera przed Python GC, dopóki nie zakończą pracy."""
         task_ref = (thread, worker)
         _running_tasks.add(task_ref)
+        # noinspection PyUnresolvedReferences
         thread.finished.connect(lambda r=task_ref: _running_tasks.discard(r))
 
     _register_thread_worker = register_thread_worker
+
+    def start_filter_worker_thread(
+        self,
+        thread: QtCore.QThread,
+        worker: FilterWorker,
+        on_progress: Any,
+        on_finished: Any,
+    ) -> None:
+        """Inicjalizuje i uruchamia FilterWorker w podanym QThread ze standardowym cyklem życia."""
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        self.register_thread_worker(thread, worker)
+        worker.progress.connect(on_progress, QtCore.Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(on_finished, QtCore.Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(thread.quit, QtCore.Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(worker.deleteLater, QtCore.Qt.ConnectionType.QueuedConnection)
+        # noinspection PyUnresolvedReferences
+        thread.finished.connect(thread.deleteLater, QtCore.Qt.ConnectionType.QueuedConnection)
+        thread.start()
 
     def __init__(self, main_window: LogViewerWindow, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1246,7 +1266,7 @@ class LogTab(QWidget):
     def _refresh_status(self) -> None:
         self.refresh_status()
 
-    def close(self) -> None:
+    def close(self) -> bool:
         """Zamyka indexer, anuluje wątki. Wywoływane przy zamykaniu zakładki."""
         # --- Wyłącz follow mode aby przerwać cykl QTimer.singleShot ---
         self.follow_active = False
@@ -1312,6 +1332,7 @@ class LogTab(QWidget):
             self.text.clear()
         except RuntimeError:
             pass
+        return bool(super().close())
 
 
 def _cleanup_running_tasks() -> None:

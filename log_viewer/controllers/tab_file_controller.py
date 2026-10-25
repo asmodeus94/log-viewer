@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -117,8 +118,6 @@ class FileController(QObject):
             self.tab.text.setPlainText("")
         self.tab.text.set_line_map([])
 
-        encoding = self.tab.encoding
-
         # QProgressDialog — pokazuje postęp indeksowania z przyciskiem Anuluj dla plików > 50 MB
         try:
             file_size = Path(path).stat().st_size
@@ -143,8 +142,24 @@ class FileController(QObject):
 
         self.tab.index_progress = index_progress
 
+        self._launch_indexer_worker(
+            path,
+            on_finished=self._on_index_done,
+            on_error=self._on_index_error,
+            on_progress=self._on_index_progress,
+            on_cleanup=self._close_index_progress,
+        )
+
+    def _launch_indexer_worker(
+        self,
+        path: str,
+        on_finished: Callable[..., None],
+        on_error: Callable[..., None],
+        on_progress: Callable[[float], None] | None = None,
+        on_cleanup: Callable[[], None] | None = None,
+    ) -> None:
         indexer_thread = QThread()
-        indexer_worker = IndexerWorker(path, encoding, self.tab.index_interval_bytes)
+        indexer_worker = IndexerWorker(path, self.tab.encoding, self.tab.index_interval_bytes)
         self.tab.indexer_thread = indexer_thread
         self.tab.indexer_worker = indexer_worker
 
@@ -152,19 +167,18 @@ class FileController(QObject):
         indexer_thread.started.connect(indexer_worker.run)
         self.tab.register_thread_worker(indexer_thread, indexer_worker)
 
-        # Używamy metod-slotów (nie closure) — Qt QueuedConnection wymaga
-        # picklowalnych odbiorców, a closure nie jest picklowalne cross-thread.
-        indexer_worker.progress.connect(self._on_index_progress, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(self._on_index_done, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(self._on_index_error, Qt.ConnectionType.QueuedConnection)
+        if on_progress is not None:
+            indexer_worker.progress.connect(on_progress, Qt.ConnectionType.QueuedConnection)
+        indexer_worker.finished.connect(on_finished, Qt.ConnectionType.QueuedConnection)
+        indexer_worker.error.connect(on_error, Qt.ConnectionType.QueuedConnection)
         indexer_worker.finished.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
         indexer_worker.error.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
+        if on_cleanup is not None:
+            indexer_worker.finished.connect(on_cleanup, Qt.ConnectionType.QueuedConnection)
+            indexer_worker.error.connect(on_cleanup, Qt.ConnectionType.QueuedConnection)
         indexer_worker.finished.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
         indexer_worker.error.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
         indexer_thread.finished.connect(indexer_thread.deleteLater, Qt.ConnectionType.QueuedConnection)
-        # Cleanup dialogu przy zakończeniu (sukces lub błąd).
-        indexer_worker.finished.connect(self._close_index_progress, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(self._close_index_progress, Qt.ConnectionType.QueuedConnection)
         indexer_thread.start()
 
     @Slot(float)
@@ -208,6 +222,21 @@ class FileController(QObject):
         QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_index_error").format(e=err))
         self.tab.set_status(self.tab.t("st_ready"))
 
+    def _apply_new_indexer(self, idx: LineIndexer) -> str | None:
+        self.tab.indexer = idx
+        self.tab.last_file_size = idx.size
+        file_path = self.tab.file_path
+        if file_path:
+            try:
+                st = Path(file_path).stat()
+                self.tab.file_mtime_at_open = st.st_mtime_ns
+                self.tab.file_size_at_open = st.st_size
+                self.tab.last_file_inode = st.st_ino
+            except OSError:
+                pass
+        self.tab.set_status(self.tab.fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
+        return file_path
+
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
         if getattr(self.tab, "edit_buffer", None) is None:
@@ -231,18 +260,7 @@ class FileController(QObject):
             self.tab.text.clear()
         except RuntimeError:
             pass
-        self.tab.indexer = idx
-        self.tab.last_file_size = idx.size
-        file_path = self.tab.file_path
-        if file_path:
-            try:
-                st = Path(file_path).stat()
-                self.tab.file_mtime_at_open = st.st_mtime_ns
-                self.tab.file_size_at_open = st.st_size
-                self.tab.last_file_inode = st.st_ino
-            except OSError:
-                pass
-        self.tab.set_status(self.tab.fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
+        file_path = self._apply_new_indexer(idx)
         try:
             self.tab.load_window(at_line=0)
         except OSError:
@@ -284,24 +302,12 @@ class FileController(QObject):
                 pass
         self.tab.indexer_thread = None
 
-        indexer_thread = QThread()
-        indexer_worker = IndexerWorker(file_path, self.tab.encoding, self.tab.index_interval_bytes)
-        self.tab.indexer_thread = indexer_thread
-        self.tab.indexer_worker = indexer_worker
-
-        indexer_worker.moveToThread(indexer_thread)
-        indexer_thread.started.connect(indexer_worker.run)
-        self.tab.register_thread_worker(indexer_thread, indexer_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — cross-thread safe
-        indexer_worker.progress.connect(self._on_index_progress, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(self._on_reindex_finished, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(self._on_index_error, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_thread.finished.connect(indexer_thread.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_thread.start()
+        self._launch_indexer_worker(
+            file_path,
+            on_finished=self._on_reindex_finished,
+            on_error=self._on_index_error,
+            on_progress=self._on_index_progress,
+        )
 
     _start_reindex = start_reindex
 
@@ -319,18 +325,7 @@ class FileController(QObject):
                 self.tab.indexer.close()
             except (OSError, RuntimeError):
                 pass
-        self.tab.indexer = idx
-        self.tab.last_file_size = idx.size
-        file_path = self.tab.file_path
-        if file_path:
-            try:
-                st = Path(file_path).stat()
-                self.tab.file_mtime_at_open = st.st_mtime_ns
-                self.tab.file_size_at_open = st.st_size
-                self.tab.last_file_inode = st.st_ino
-            except OSError:
-                pass
-        self.tab.set_status(self.tab.fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
+        self._apply_new_indexer(idx)
         try:
             self.tab.load_window(at_line=saved_line)
         except OSError:
@@ -478,25 +473,12 @@ class FileController(QObject):
         self.tab.follow_reindex_size = current_size
         self.tab.follow_reindex_inode = current_inode
 
-        indexer_thread = QThread()
-        indexer_worker = IndexerWorker(file_path, self.tab.encoding, self.tab.index_interval_bytes)
-        self.tab.indexer_thread = indexer_thread
-        self.tab.indexer_worker = indexer_worker
-
-        indexer_worker.moveToThread(indexer_thread)
-        indexer_thread.started.connect(indexer_worker.run)
-        self.tab.register_thread_worker(indexer_thread, indexer_worker)
-        # QueuedConnection + metoda-slot (nie lambda) — cross-thread safe
-        indexer_worker.finished.connect(self._on_follow_reindex_slot, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(self._on_follow_reindex_failed, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(indexer_thread.quit, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(self._on_follow_reindex_clear_flag, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(self._on_follow_reindex_clear_flag, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.finished.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_worker.error.connect(indexer_worker.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_thread.finished.connect(indexer_thread.deleteLater, Qt.ConnectionType.QueuedConnection)
-        indexer_thread.start()
+        self._launch_indexer_worker(
+            file_path,
+            on_finished=self._on_follow_reindex_slot,
+            on_error=self._on_follow_reindex_failed,
+            on_cleanup=self._on_follow_reindex_clear_flag,
+        )
 
     @Slot(object)
     def _on_follow_reindex_slot(self, idx: LineIndexer) -> None:
@@ -604,10 +586,11 @@ class FileController(QObject):
             filter_results.resize(new_total_lines)
 
             has_new_hits = False
-            inc_res_words = None
-            if isinstance(results_data, (tuple, list)) and len(results_data) > 1 and results_data[1] is not None:
-                inc_res_words = results_data[1]
-                if inc_res_words and any(inc_res_words):
+            inc_res_words: Sequence[int] = ()
+            if isinstance(results_data, (tuple, list)) and len(results_data) > 1:
+                candidate_words = results_data[1]
+                if isinstance(candidate_words, Sequence) and candidate_words and any(candidate_words):
+                    inc_res_words = candidate_words
                     filter_results.or_words(inc_res_words)
                     has_new_hits = True
 
@@ -621,7 +604,7 @@ class FileController(QObject):
                     has_new_filtered_lines = True
             else:
                 filter_all_lines.resize(new_total_lines)
-                if has_new_hits and inc_res_words is not None:
+                if has_new_hits and inc_res_words:
                     filter_all_lines.or_words(inc_res_words)
                     has_new_filtered_lines = True
 

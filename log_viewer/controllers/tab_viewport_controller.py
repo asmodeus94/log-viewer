@@ -264,37 +264,24 @@ class ViewportController(QObject):
         bookmark_set = set(bookmark_widget_lines)
         edited_set = set(edited_widget_lines)
 
+        format_pairs = (
+            (context_set, fmt_context),
+            (filter_hit_set, fmt_highlight),
+            (bookmark_set, fmt_bookmark),
+            (edited_set, fmt_edited),
+        )
+
         doc = self.tab.text.document()
         block = doc.begin()
         i = 0
         while block.isValid():
-            if i in context_set:
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format = fmt_context
-                self._static_extra_sels.append(sel)
-
-            if i in filter_hit_set:
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format = fmt_highlight
-                self._static_extra_sels.append(sel)
-
-            if i in bookmark_set:
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format = fmt_bookmark
-                self._static_extra_sels.append(sel)
-
-            if i in edited_set:
-                sel = QtWidgets.QTextEdit.ExtraSelection()
-                sel.cursor = QtGui.QTextCursor(block)
-                sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
-                sel.format = fmt_edited
-                self._static_extra_sels.append(sel)
+            for line_set, fmt in format_pairs:
+                if i in line_set:
+                    sel = QtWidgets.QTextEdit.ExtraSelection()
+                    sel.cursor = QtGui.QTextCursor(block)
+                    sel.cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
+                    sel.format = fmt
+                    self._static_extra_sels.append(sel)
 
             block = block.next()
             i += 1
@@ -766,36 +753,25 @@ class ViewportController(QObject):
                 pass
 
         if self.tab.filter_active and filter_lines is not None:
-            if is_filtered_index:
-                idx = ln
-            else:
-                idx = bisect_left_custom(filter_lines, ln)
+            idx = ln if is_filtered_index else bisect_left_custom(filter_lines, ln)
             start_idx = max(0, idx - offset)
             self._load_window(at_line=start_idx)
-            current_line_map = self.tab.line_map if self.tab.line_map is not None else []
-            try:
-                target_ln = filter_lines[idx] if idx < len(filter_lines) else -1
-                idx_in_map = bisect.bisect_left(current_line_map, target_ln)
-                if idx_in_map != len(current_line_map) and current_line_map[idx_in_map] == target_ln:
-                    self.tab.text.verticalScrollBar().setValue(idx_in_map)
-                    target_idx_in_map = idx_in_map
-                else:
-                    self.tab.text.verticalScrollBar().setValue(0)
-            except (AttributeError, IndexError, ValueError, TypeError):
-                self.tab.text.verticalScrollBar().setValue(0)
+            target_file_ln = filter_lines[idx] if 0 <= idx < len(filter_lines) else -1
         else:
             start_ln = max(0, ln - offset)
             self._load_window(at_line=start_ln)
-            current_line_map = self.tab.line_map if self.tab.line_map is not None else []
-            try:
-                idx_in_map = bisect.bisect_left(current_line_map, ln)
-                if idx_in_map != len(current_line_map) and current_line_map[idx_in_map] == ln:
-                    self.tab.text.verticalScrollBar().setValue(idx_in_map)
-                    target_idx_in_map = idx_in_map
-                else:
-                    self.tab.text.verticalScrollBar().setValue(0)
-            except (AttributeError, IndexError, ValueError, TypeError):
+            target_file_ln = ln
+
+        current_line_map = self.tab.line_map if self.tab.line_map is not None else []
+        try:
+            idx_in_map = bisect.bisect_left(current_line_map, target_file_ln)
+            if idx_in_map != len(current_line_map) and current_line_map[idx_in_map] == target_file_ln:
+                self.tab.text.verticalScrollBar().setValue(idx_in_map)
+                target_idx_in_map = idx_in_map
+            else:
                 self.tab.text.verticalScrollBar().setValue(0)
+        except (AttributeError, IndexError, ValueError, TypeError):
+            self.tab.text.verticalScrollBar().setValue(0)
 
         block = self.tab.text.document().findBlockByNumber(target_idx_in_map)
         if block.isValid():

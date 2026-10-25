@@ -48,15 +48,16 @@ class IndexView(Sequence[IndexEntry]):
         return len(self._offsets)
 
     @typing.overload
-    def __getitem__(self, idx: int) -> IndexEntry: ...
+    def __getitem__(self, index: int) -> IndexEntry: ...
 
+    # noinspection PyMethodOverriding
     @typing.overload
-    def __getitem__(self, idx: slice) -> list[IndexEntry]: ...
+    def __getitem__(self, index: slice) -> list[IndexEntry]: ...
 
-    def __getitem__(self, idx: int | slice) -> IndexEntry | list[IndexEntry]:
-        if isinstance(idx, slice):
-            return [IndexEntry(self._offsets[i], self._lines[i]) for i in range(*idx.indices(len(self._offsets)))]
-        return IndexEntry(self._offsets[idx], self._lines[idx])
+    def __getitem__(self, index: int | slice) -> IndexEntry | list[IndexEntry]:
+        if isinstance(index, slice):
+            return [IndexEntry(self._offsets[i], self._lines[i]) for i in range(*index.indices(len(self._offsets)))]
+        return IndexEntry(self._offsets[index], self._lines[index])
 
     def __iter__(self) -> Iterator[IndexEntry]:
         for i in range(len(self._offsets)):
@@ -90,6 +91,13 @@ _INDEXER_READ_CHUNK_SIZE = 32 * 1024 * 1024  # 32 MB — większy = lepsza lokal
 _SINGLE_THREAD_READ_CHUNK_SIZE = 8 * 1024 * 1024  # 8 MB — optymalny dla single-thread I/O
 
 
+def _get_readinto(f: Any) -> tuple[bool, Callable[[Any], int]]:
+    """Zwraca krotkę (czy_obsługuje_readinto, funkcja_readinto) dla otwartego strumienia."""
+    if hasattr(f, "readinto"):
+        return True, f.readinto
+    return False, lambda _: 0
+
+
 def _collect_chunk_index_entries(
     chunk: bytes | bytearray,
     base_offset: int,
@@ -107,7 +115,7 @@ def _collect_chunk_index_entries(
     Zwraca krotkę (nowy_last_indexed_offset, total_chunk_newlines).
     Działa całkowicie bez alokacji pamięci pośredniej w pętli (zero-copy w C),
     zliczając znaki nowej linii w jednym przebiegu bez redundancji.
-    Progi indeksowania są wyznaczane jako bezwzględne wielokrotności `interval`.
+    Progi indeksowania są wyznaczane jako bezwzględnych wielokrotności `interval`.
     Obsługuje prealokowane bufory bytearray bez konieczności ich wycinania (chunk_len).
     """
     valid_len = len(chunk) if chunk_len is None else chunk_len
@@ -131,8 +139,9 @@ def _collect_chunk_index_entries(
         running_line += chunk.count(b"\n", last_counted_pos, nl) + 1
         last_counted_pos = nl + 1
 
-        if offsets is not None and lines is not None:
+        if offsets is not None:
             offsets.append(offset)
+        if lines is not None:
             lines.append(running_line)
 
         if entries is not None:
@@ -177,12 +186,12 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
             f.seek(start)
             buf = bytearray(_INDEXER_READ_CHUNK_SIZE)
             mv = memoryview(buf)
-            readinto_fn: Callable[[Any], int] | None = getattr(f, "readinto", None)
+            has_readinto, readinto_fn = _get_readinto(f)
             while bytes_processed < (end - start):
                 to_read = min(_INDEXER_READ_CHUNK_SIZE, (end - start) - bytes_processed)
-                if readinto_fn is not None:
+                if has_readinto:
                     target_buf = mv[:to_read] if to_read < _INDEXER_READ_CHUNK_SIZE else buf
-                    n = readinto_fn(target_buf)
+                    n = int(readinto_fn(target_buf))
                 else:
                     chunk = f.read(to_read)
                     n = len(chunk)
@@ -468,7 +477,7 @@ class LineIndexer:
         chunk_size = INDEX_CHUNK_BYTES if self.is_compressed else _SINGLE_THREAD_READ_CHUNK_SIZE
         buf = bytearray(chunk_size)
         with open_maybe_compressed(str(self.path), "rb") as f:
-            readinto_fn: Callable[[Any], int] | None = getattr(f, "readinto", None)
+            has_readinto, readinto_fn = _get_readinto(f)
             while True:
                 if self._cancel_event is not None and self._cancel_event.is_set():
                     self._offsets = array.array("Q", [0])
@@ -476,8 +485,8 @@ class LineIndexer:
                     self.line_count = 0
                     self._last_indexed_offset = 0
                     return
-                if readinto_fn is not None:
-                    n = readinto_fn(buf)
+                if has_readinto:
+                    n = int(readinto_fn(buf))
                     if not n:
                         break
                     chunk_len = n
@@ -539,10 +548,10 @@ class LineIndexer:
             f = self._get_file()
             f.seek(old_size)
             buf = bytearray(INDEX_CHUNK_BYTES)
-            readinto_fn: Callable[[Any], int] | None = getattr(f, "readinto", None)
+            has_readinto, readinto_fn = _get_readinto(f)
             while True:
-                if readinto_fn is not None:
-                    n = readinto_fn(buf)
+                if has_readinto:
+                    n = int(readinto_fn(buf))
                 else:
                     chunk = f.read(INDEX_CHUNK_BYTES)
                     n = len(chunk)
@@ -584,8 +593,11 @@ class LineIndexer:
         """Szybkie pomijanie `needed` linii w otwartym pliku bez alokowania zbędnych obiektów."""
         if needed <= 0:
             return True
-        if needed <= 16:
-            return all(bool(f.readline()) for _ in range(needed))
+        if needed <= 128:
+            try:
+                return sum(1 for _ in itertools.islice(f, needed)) == needed
+            except (OSError, ValueError):
+                return False
 
         chunk_size = 64 * 1024
         while needed > 0:
