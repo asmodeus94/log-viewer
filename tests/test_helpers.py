@@ -1,8 +1,12 @@
 """Testy helpers.py — fmt_size, truncate_for_display, parse_dnd_files, is_compressed, open_maybe_compressed."""
 
 import gzip
+import io
 import os
+import re
+from typing import Any, cast
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.helpers import (
     MAX_DISPLAY_LINE_LENGTH,
@@ -15,6 +19,44 @@ from log_viewer.helpers import (
     parse_dnd_files,
     truncate_for_display,
 )
+
+_REQUIRED_THEME_KEYS: tuple[str, ...] = (
+    "bg_main",
+    "bg_panel",
+    "bg_statusbar",
+    "bg_input",
+    "bg_selected",
+    "fg_main",
+    "fg_dim",
+    "fg_bright",
+    "border",
+    "border_light",
+    "error",
+    "warn",
+    "info",
+    "debug",
+    "accent",
+    "accent_hover",
+    "highlight",
+    "bookmark",
+    "edited",
+    "truncated",
+    "current_line",
+    "context",
+    "search_active",
+    "minimap_bg",
+    "minimap_error",
+    "minimap_warn",
+    "minimap_info",
+    "minimap_debug",
+    "minimap_viewport",
+)
+
+
+def _bg_lightness(theme: dict[str, str]) -> int:
+    bg = theme["bg_main"].lstrip("#")
+    r, g, b = int(bg[0:2], 16), int(bg[2:4], 16), int(bg[4:6], 16)
+    return (r + g + b) // 3
 
 
 class TestFmtSize:
@@ -64,10 +106,6 @@ class TestTruncateForDisplay:
         assert len(result) == 100  # code points, nie bajty
 
     def test_very_short_max_length(self):
-        # Kiedy max_length jest mniejsze niż długość generowanego sufiksu.
-        # Np. dla text = "A" * 50 i max_length = 10
-        # Sufiks " ... [truncated 40 chars]" ma 25 znaków.
-        # W tym przypadku funkcja powinna zwrócić sam sufiks (mimo że przekracza on max_length).
         text = "A" * 50
         result, was_truncated = truncate_for_display(text, max_length=10)
         assert was_truncated is True
@@ -127,7 +165,8 @@ class TestParseDndFiles:
     def test_empty_input(self):
         assert parse_dnd_files("") == []
         assert parse_dnd_files("   ") == []
-        assert parse_dnd_files(None) == []
+        none_input = cast(Any, None)
+        assert parse_dnd_files(none_input) == []
 
     def test_file_uri_localhost(self):
         assert parse_dnd_files("file://localhost/tmp/test.log") == [os.path.normpath("/tmp/test.log")]
@@ -193,8 +232,6 @@ class TestOpenMaybeCompressed:
         assert b"line" in content
 
     def test_compressed_buffered_reader_wrapper(self, tmp_path):
-        import io
-
         # 1. Gz
         gz_path = str(tmp_path / "test.log.gz")
         with open_maybe_compressed(gz_path, "wb") as f:
@@ -230,74 +267,12 @@ class TestThemeDetection:
 
     def test_theme_dark_has_required_keys(self):
         """THEME_DARK ma wszystkie wymagane klucze."""
-        required = [
-            "bg_main",
-            "bg_panel",
-            "bg_statusbar",
-            "bg_input",
-            "bg_selected",
-            "fg_main",
-            "fg_dim",
-            "fg_bright",
-            "border",
-            "border_light",
-            "error",
-            "warn",
-            "info",
-            "debug",
-            "accent",
-            "accent_hover",
-            "highlight",
-            "bookmark",
-            "edited",
-            "truncated",
-            "current_line",
-            "context",
-            "search_active",
-            "minimap_bg",
-            "minimap_error",
-            "minimap_warn",
-            "minimap_info",
-            "minimap_debug",
-            "minimap_viewport",
-        ]
-        for key in required:
+        for key in _REQUIRED_THEME_KEYS:
             assert key in THEME_DARK, f"Missing key in THEME_DARK: {key}"
 
     def test_theme_light_has_required_keys(self):
         """THEME_LIGHT ma wszystkie wymagane klucze."""
-        required = [
-            "bg_main",
-            "bg_panel",
-            "bg_statusbar",
-            "bg_input",
-            "bg_selected",
-            "fg_main",
-            "fg_dim",
-            "fg_bright",
-            "border",
-            "border_light",
-            "error",
-            "warn",
-            "info",
-            "debug",
-            "accent",
-            "accent_hover",
-            "highlight",
-            "bookmark",
-            "edited",
-            "truncated",
-            "current_line",
-            "context",
-            "search_active",
-            "minimap_bg",
-            "minimap_error",
-            "minimap_warn",
-            "minimap_info",
-            "minimap_debug",
-            "minimap_viewport",
-        ]
-        for key in required:
+        for key in _REQUIRED_THEME_KEYS:
             assert key in THEME_LIGHT, f"Missing key in THEME_LIGHT: {key}"
 
     def test_themes_are_different(self):
@@ -307,23 +282,16 @@ class TestThemeDetection:
 
     def test_dark_bg_is_dark(self):
         """THEME_DARK ma ciemne tło (lightness < 128)."""
-        # Konwersja hex na lightness
-        bg = THEME_DARK["bg_main"].lstrip("#")
-        r, g, b = int(bg[0:2], 16), int(bg[2:4], 16), int(bg[4:6], 16)
-        lightness = (r + g + b) // 3
+        lightness = _bg_lightness(THEME_DARK)
         assert lightness < 128, f"THEME_DARK bg_main should be dark, lightness={lightness}"
 
     def test_light_bg_is_light(self):
         """THEME_LIGHT ma jasne tło (lightness >= 128)."""
-        bg = THEME_LIGHT["bg_main"].lstrip("#")
-        r, g, b = int(bg[0:2], 16), int(bg[2:4], 16), int(bg[4:6], 16)
-        lightness = (r + g + b) // 3
+        lightness = _bg_lightness(THEME_LIGHT)
         assert lightness >= 128, f"THEME_LIGHT bg_main should be light, lightness={lightness}"
 
     def test_theme_colors_are_valid_hex(self):
         """Wszystkie kolory w obu motywach są poprawnymi hex."""
-        import re
-
         hex_pattern = re.compile(r"^#[0-9a-fA-F]{6,8}$")
         for theme_name, theme in [("DARK", THEME_DARK), ("LIGHT", THEME_LIGHT)]:
             for key, color in theme.items():

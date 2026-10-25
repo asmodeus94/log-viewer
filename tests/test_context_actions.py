@@ -2,8 +2,9 @@
 
 import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Konfiguracja Qt offscreen
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -13,7 +14,8 @@ from PySide6 import QtWidgets
 
 
 def test_context_actions_disabled_no_tabs(tmp_path):
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication(sys.argv)
     win = LogViewerWindow()
 
     # Sprawdzenie czy nie ma otwartych kart

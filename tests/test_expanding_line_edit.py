@@ -2,12 +2,14 @@
 
 import os
 import sys
+from pathlib import Path
 
+# noinspection PyPackageRequirements
 import pytest
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import Qt
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

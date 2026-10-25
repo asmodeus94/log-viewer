@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import sys
-import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.config import UserConfig
 from log_viewer.controllers.tab_edit_controller import EditController
@@ -17,45 +17,31 @@ from PySide6 import QtWidgets
 from PySide6.QtWidgets import QMessageBox, QProgressDialog
 
 
+# noinspection PyProtectedMember
 @pytest.fixture
-def app_context():
+def app_context(tmp_path: Path):
     """Przygotowuje aplikację LogViewerWindow oraz pojedynczą kartę LogTab z plikiem testowym."""
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    cfg_file = tempfile.mktemp(suffix=".json")
-    cfg = UserConfig(config_path=cfg_file)
-    window = LogViewerWindow(config=cfg)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication(sys.argv)
+    window = LogViewerWindow(config=UserConfig(config_path=str(tmp_path / "edit_ctrl_cfg.json")))
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode="wb") as tmp:
-        test_file = tmp.name
-    with open(test_file, "wb") as f:
-        for i in range(100):
-            f.write(f"Line {i} content\n".encode())
+    log_path = tmp_path / "edit_ctrl_sample.log"
+    log_path.write_text("".join(f"Line {n} content\n" for n in range(100)), encoding="utf-8")
+    test_file = str(log_path)
 
-    tab = window._new_tab()
-    idx = LineIndexer(test_file, encoding="utf-8")
+    tab: LogTab = window._new_tab()
     tab.file_path = test_file
-    tab._on_index_done(idx)
-    app.processEvents()
+    tab._on_index_done(LineIndexer(test_file, encoding="utf-8"))
+    QtWidgets.QApplication.processEvents()
 
     yield window, tab, test_file
 
     try:
         tab.edit_buffer.clear()
-        for i in range(window.tabs.count()):
-            t = window.tabs.widget(i)
-            if isinstance(t, LogTab):
-                t.edit_buffer.clear()
-    except Exception:
+    except OSError:
         pass
-
     window.close()
-    app.processEvents()
-    for p in (test_file, cfg_file):
-        if os.path.exists(p):
-            try:
-                os.unlink(p)
-            except PermissionError:
-                pass
+    QtWidgets.QApplication.processEvents()
 
 
 class TestEditController:
@@ -66,7 +52,7 @@ class TestEditController:
 
     def test_revert_edit(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
         tab.edit_buffer.set(5, "Modified Line 5")
         assert tab.edit_buffer.has(5)
@@ -76,7 +62,7 @@ class TestEditController:
 
     def test_cmd_clear_edits_empty(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
         tab.edit_buffer.clear()
         with patch.object(QMessageBox, "question") as mock_q:
@@ -85,7 +71,7 @@ class TestEditController:
 
     def test_cmd_clear_edits_confirmed(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
         tab.edit_buffer.set(1, "Edit 1")
         tab.edit_buffer.set(2, "Edit 2")
@@ -97,7 +83,7 @@ class TestEditController:
 
     def test_cmd_save_edits_no_file(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.file_path = None
 
         with patch.object(QMessageBox, "information") as mock_info:
@@ -106,7 +92,7 @@ class TestEditController:
 
     def test_cmd_save_edits_no_edits(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.edit_buffer.clear()
 
         with patch.object(QMessageBox, "information") as mock_info:
@@ -115,7 +101,7 @@ class TestEditController:
 
     def test_on_save_done(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
         tab.edit_buffer.set(1, "Edited line")
         tab.save_progress = QProgressDialog()
@@ -128,7 +114,7 @@ class TestEditController:
 
     def test_on_save_error(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.save_progress = QProgressDialog()
 
         with patch.object(QMessageBox, "critical") as mock_crit:
@@ -138,7 +124,7 @@ class TestEditController:
 
     def test_on_save_compressed(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.save_progress = QProgressDialog()
 
         with patch.object(QMessageBox, "warning") as mock_warn:
@@ -148,7 +134,7 @@ class TestEditController:
 
     def test_on_save_file_changed_cancel(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.save_progress = QProgressDialog()
         tab.edit_buffer.set(1, "Edit")
 
@@ -159,7 +145,7 @@ class TestEditController:
 
     def test_on_save_file_changed_yes(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.save_progress = QProgressDialog()
         tab.edit_buffer.set(1, "Edit")
 
@@ -175,7 +161,7 @@ class TestEditController:
 
     def test_on_save_file_changed_no(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
         tab.save_progress = QProgressDialog()
         tab.edit_buffer.set(1, "Edit")
 
@@ -190,11 +176,13 @@ class TestEditController:
 
     def test_save_as_handlers(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
-        tab.save_as_progress = QProgressDialog()
+        dialog = QProgressDialog()
+        tab.save_as_progress = dialog
         controller._update_save_progress(50.0)
-        assert tab.save_as_progress.value() == 50
+        assert tab.save_as_progress is not None
+        assert dialog.value() == 50
 
         tab.save_as_path = "test_save_as.log"
         with patch.object(QMessageBox, "information") as mock_info:
@@ -216,11 +204,13 @@ class TestEditController:
 
     def test_export_handlers(self, app_context):
         _, tab, _ = app_context
-        controller = tab.edit_controller
+        controller: EditController = tab.edit_controller
 
-        tab.export_progress = QProgressDialog()
+        dialog = QProgressDialog()
+        tab.export_progress = dialog
         controller._update_export_progress(75.0)
-        assert tab.export_progress.value() == 75
+        assert tab.export_progress is not None
+        assert dialog.value() == 75
 
         tab.export_path = "export.txt"
         with patch.object(QMessageBox, "information") as mock_info, patch.object(tab, "set_status"):

@@ -2,8 +2,9 @@
 
 import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Konfiguracja Qt offscreen
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,7 +15,8 @@ from PySide6.QtGui import QTextCursor
 
 
 def test_format_dialog_next_prev_line():
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication(sys.argv)
 
     # Tworzymy edytor tekstowy
     editor = LogPlainTextEdit()
@@ -23,7 +25,7 @@ def test_format_dialog_next_prev_line():
     # Ustawiamy kursor na pierwszej linii i zaznaczamy ją
     cursor = editor.textCursor()
     cursor.setPosition(0)
-    cursor.select(QTextCursor.LineUnderCursor)
+    cursor.select(QTextCursor.SelectionType.LineUnderCursor)
     editor.setTextCursor(cursor)
 
     # Pobieramy zaznaczony tekst

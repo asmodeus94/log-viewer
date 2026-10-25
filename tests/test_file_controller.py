@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import sys
-import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+# noinspection PyPackageRequirements
 import pytest
 from log_viewer.bitset import Bitset
 from log_viewer.config import UserConfig
@@ -19,25 +19,24 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QMessageBox, QProgressDialog
 
 
+# noinspection PyProtectedMember
 @pytest.fixture
-def app_context():
+def app_context(tmp_path: Path):
     """Przygotowuje aplikację LogViewerWindow oraz pojedynczą kartę LogTab z plikiem testowym."""
-    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    cfg_file = tempfile.mktemp(suffix=".json")
-    cfg = UserConfig(config_path=cfg_file)
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=str(tmp_path / "file_ctrl_cfg.json"))
     window = LogViewerWindow(config=cfg)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".log", mode="wb") as tmp:
-        test_file = tmp.name
-    with open(test_file, "wb") as f:
-        for i in range(100):
-            f.write(f"Line {i} content\n".encode())
+    test_file_path = tmp_path / "file_ctrl_test.log"
+    test_file_path.write_bytes(b"".join(f"Line {i} content\n".encode() for i in range(100)))
+    test_file = str(test_file_path)
 
-    tab = window._new_tab()
+    tab: LogTab = window._new_tab()
     idx = LineIndexer(test_file, encoding="utf-8")
     tab.file_path = test_file
     tab._on_index_done(idx)
-    app.processEvents()
+    QtWidgets.QApplication.processEvents()
 
     yield window, tab, test_file
 
@@ -47,17 +46,11 @@ def app_context():
             t = window.tabs.widget(i)
             if isinstance(t, LogTab):
                 t.edit_buffer.clear()
-    except Exception:
+    except (OSError, RuntimeError):
         pass
 
     window.close()
-    app.processEvents()
-    for p in (test_file, cfg_file):
-        if os.path.exists(p):
-            try:
-                os.unlink(p)
-            except PermissionError:
-                pass
+    QtWidgets.QApplication.processEvents()
 
 
 class TestFileController:
@@ -68,7 +61,7 @@ class TestFileController:
 
     def test_stop_background_threads(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         mock_worker = MagicMock()
         tab.indexer_worker = mock_worker
@@ -84,7 +77,7 @@ class TestFileController:
 
     def test_open_file_not_found(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         with patch.object(QMessageBox, "critical") as mock_crit:
             controller.open_file("non_existent_file_xyz.log")
@@ -92,7 +85,7 @@ class TestFileController:
 
     def test_open_file_success(self, app_context):
         _, tab, test_file = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         received_titles: list[str] = []
         tab.title_changed.connect(received_titles.append)
@@ -107,15 +100,17 @@ class TestFileController:
 
     def test_on_index_progress(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
-        tab.index_progress = QProgressDialog()
+        dialog = QProgressDialog()
+        tab.index_progress = dialog
         controller._on_index_progress(50.0)
-        assert tab.index_progress.value() == 50
+        assert tab.index_progress is not None
+        assert dialog.value() == 50
 
     def test_cancel_indexing(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         mock_worker = MagicMock()
         tab.indexer_worker = mock_worker
@@ -124,7 +119,7 @@ class TestFileController:
 
     def test_close_index_progress(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         tab.index_progress = QProgressDialog()
         controller._close_index_progress()
@@ -132,7 +127,7 @@ class TestFileController:
 
     def test_on_index_error_cancelled(self, app_context):
         window, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         tab.indexer = None
         with patch.object(window, "close_tab") as mock_close:
@@ -141,7 +136,7 @@ class TestFileController:
 
     def test_on_index_error_other(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         with patch.object(QMessageBox, "critical") as mock_crit:
             controller._on_index_error("Some indexing failure")
@@ -149,7 +144,7 @@ class TestFileController:
 
     def test_on_index_done(self, app_context):
         _, tab, test_file = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         new_idx = LineIndexer(test_file, encoding="utf-8")
         with patch.object(tab, "load_window") as mock_load, patch.object(tab, "update_minimap") as mock_minimap:
@@ -160,7 +155,7 @@ class TestFileController:
 
     def test_start_reindex_and_finished(self, app_context):
         _, tab, test_file = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         controller.start_reindex(15)
         assert tab.reindex_saved_line == 15
@@ -174,7 +169,7 @@ class TestFileController:
 
     def test_on_reindex_after_save(self, app_context):
         _, tab, test_file = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         new_idx = LineIndexer(test_file, encoding="utf-8")
         with patch.object(tab, "load_window") as mock_load:
@@ -184,7 +179,7 @@ class TestFileController:
 
     def test_cancel_follow_if_active(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         tab.follow_active = True
         with patch.object(controller, "cmd_toggle_follow") as mock_toggle:
@@ -193,7 +188,7 @@ class TestFileController:
 
     def test_cmd_refresh_and_reload(self, app_context):
         _, tab, test_file = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         with patch.object(controller, "_check_for_updates_once") as mock_check:
             controller.cmd_refresh()
@@ -205,7 +200,7 @@ class TestFileController:
 
     def test_cmd_toggle_follow(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         assert not tab.follow_active
         with patch.object(controller, "_follow_poll"):
@@ -217,7 +212,7 @@ class TestFileController:
 
     def test_incremental_filter_done(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         tab.inc_new_total_lines = 100
         tab.filter_results = Bitset(100)
@@ -232,7 +227,7 @@ class TestFileController:
 
     def test_on_follow_reindex_failed(self, app_context):
         _, tab, _ = app_context
-        controller = tab.file_controller
+        controller: FileController = tab.file_controller
 
         with patch.object(tab, "set_status") as mock_status:
             controller._on_follow_reindex_failed("timeout")
