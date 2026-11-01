@@ -26,8 +26,10 @@ from PySide6.QtGui import (
     QPen,
     QResizeEvent,
     QTextCursor,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QApplication,
     QDialog,
     QDialogButtonBox,
@@ -68,6 +70,50 @@ def sync_inactive_palette(widget: QWidget) -> None:
             pal.color(QtGui.QPalette.ColorGroup.Active, role),
         )
     widget.setPalette(pal)
+
+
+def handle_shift_wheel_scroll(
+    scroll_area: QAbstractScrollArea,
+    event: QWheelEvent,
+) -> bool:
+    """Obsługuje przewijanie poziome przy przytrzymanym klawiszu Shift i ruchu kółkiem myszy.
+
+    Działa wieloplatformowo (Windows, Linux, macOS) niezależnie od tego, czy system
+    operacyjny przesyła deltę w osi Y (Windows/Linux), czy zamienia ją na oś X (macOS).
+    """
+    modifiers = event.modifiers()
+    if (modifiers & Qt.KeyboardModifier.ShiftModifier) and not (modifiers & Qt.KeyboardModifier.ControlModifier):
+        hbar = scroll_area.horizontalScrollBar()
+        if hbar is not None:
+            QApplication.sendEvent(hbar, event)
+            event.accept()
+            return True
+    return False
+
+
+class _ShiftWheelScrollFilter(QObject):
+    """Filtr zdarzeń przekierowujący Shift + kółko myszy do poziomego paska przewijania."""
+
+    def __init__(self, scroll_area: QAbstractScrollArea) -> None:
+        super().__init__(scroll_area)
+        self._scroll_area = scroll_area
+
+    def eventFilter(self, _watched: QObject, event: QEvent) -> bool:
+        return bool(
+            event.type() == QEvent.Type.Wheel
+            and isinstance(event, QWheelEvent)
+            and handle_shift_wheel_scroll(self._scroll_area, event)
+        )
+
+
+def install_shift_wheel_scroll(scroll_area: QAbstractScrollArea) -> QObject:
+    """Instaluje obsługę poziomego przewijania (Shift + Scroll) na podanym QAbstractScrollArea."""
+    flt = _ShiftWheelScrollFilter(scroll_area)
+    scroll_area.installEventFilter(flt)
+    viewport = scroll_area.viewport()
+    if viewport is not None:
+        viewport.installEventFilter(flt)
+    return flt
 
 
 def _find_parent_tab(widget: QWidget | None) -> LogTab | None:
@@ -316,6 +362,8 @@ class LogPlainTextEdit(QPlainTextEdit):
             event.ignore()
 
     def wheelEvent(self, e: QtGui.QWheelEvent) -> None:
+        if handle_shift_wheel_scroll(self, e):
+            return
         # Wykrycie przewijania kółkiem myszy i zatrzymanie np. trybu follow
         self.user_scrolled.emit()
         super().wheelEvent(e)
@@ -753,6 +801,11 @@ class FormatDialog(QDialog):
         self.ui = Ui_FormatDialog()
         self.ui.setupUi(self)
 
+        # Umożliwienie maksymalizacji i minimalizacji okna dialogowego
+        self.setWindowFlag(Qt.WindowType.WindowMinimizeButtonHint, True)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setSizeGripEnabled(True)
+
         self.original_text = text
         self.app = parent.window() if (parent and hasattr(parent, "window")) else parent
         self.t = self.app.t if (self.app and hasattr(self.app, "t")) else lambda k: k
@@ -803,6 +856,7 @@ class FormatDialog(QDialog):
 
         # Zachowaj identyczną paletę przy utracie fokusu (gdy fokus jest w polu wyszukiwania)
         sync_inactive_palette(self.text_edit)
+        self._shift_wheel_filter = install_shift_wheel_scroll(self.text_edit)
 
         # Inicjalizacja highlightera składni
         self.highlighter = StructuredCodeHighlighter(

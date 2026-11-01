@@ -301,6 +301,20 @@ def _is_none_constant(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and node.value is None
 
 
+def _is_optional_annotation(node: ast.AST | None) -> bool:
+    """Sprawdza, czy adnotacja typu zawiera unię z None (np. `QObject | None`)."""
+    if node is None:
+        return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return (
+            _is_none_constant(node.left)
+            or _is_none_constant(node.right)
+            or _is_optional_annotation(node.left)
+            or _is_optional_annotation(node.right)
+        )
+    return False
+
+
 def _is_getattr_none_call(node: ast.AST | None) -> bool:
     return (
         isinstance(node, ast.Call)
@@ -340,6 +354,51 @@ def _has_isinstance_narrowing(scope_nodes: list[ast.AST], var_name: str) -> bool
     )
 
 
+def _is_self_attr_expr(node: ast.AST, attr_name: str) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+        and node.attr == attr_name
+    )
+
+
+def _has_self_attr_narrowing(scope_nodes: list[ast.AST], attr_name: str) -> bool:
+    """Sprawdza, czy w danym zakresie występuje zawężenie typu dla `self.<attr>` (np. `if self.attr:` lub `if self.attr is not None:`)."""
+    for n in scope_nodes:
+        if isinstance(n, (ast.If, ast.Assert)):
+            for test_sub in ast.walk(n.test):
+                if _is_self_attr_expr(test_sub, attr_name):
+                    return True
+    return False
+
+
+def _collect_optional_self_attrs(cls: ast.ClassDef) -> dict[str, int]:
+    """Zbiera atrybuty klasy i instancji (`self.<attr>`) zadeklarowane z adnotacją `T | None`."""
+    opt_attrs: dict[str, int] = {}
+    for item in cls.body:
+        if (
+            isinstance(item, ast.AnnAssign)
+            and isinstance(item.target, ast.Name)
+            and _is_optional_annotation(item.annotation)
+        ):
+            opt_attrs[item.target.id] = item.lineno
+        elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == "__init__":
+            for sub in _walk_same_scope(item.body):
+                if (
+                    isinstance(sub, ast.AnnAssign)
+                    and isinstance(sub.target, ast.Attribute)
+                    and isinstance(sub.target.value, ast.Name)
+                    and sub.target.value.id == "self"
+                    and _is_optional_annotation(sub.annotation)
+                ):
+                    opt_attrs[sub.target.attr] = sub.lineno
+    return opt_attrs
+
+
+_SAFE_OPTIONAL_CALLS = frozenset({"isinstance", "getattr", "setattr", "hasattr", "id", "print", "bool", "repr", "str"})
+
+
 def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
     """Wykrywa konstrukcje powodujące ostrzeżenia PyTypeChecker / PyUnresolvedReferences w IntelliJ IDEA.
 
@@ -349,6 +408,8 @@ def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
        wykonywane jest `len(x)`, indeksowanie `x[...]` lub wywołanie metody `x.method()` po ponownym przypisaniu.
     3. Przypisania do atrybutów `x.attr = ...` na zmiennych zadeklarowanych jako generyczny `QObject`, `QWidget` lub `object`.
     4. Wywołania `Signal("qint64")` ze stałymi znakowymi zamiast typów Pythona (np. `Signal(int)`).
+    5. Przekazywanie atrybutu `self.<attr>` zadeklarowanego jako `T | None` bezpośrednio jako argument wywołania
+       po przypisaniu `self.<attr> = ...` (IntelliJ nie zawęża typu `self.<attr>` bez zmiennej lokalnej lub `if`).
     """
     issues: list[str] = []
 
@@ -365,6 +426,49 @@ def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
                             f"[PyTypeChecker] {rel}:{node.lineno}: Signal({arg_node.value!r}) uses string literal "
                             f"instead of Python type (e.g. int, str, object)"
                         )
+
+        # 5. Sprawdź w klasach przekazywanie `self.<attr>: T | None` po przypisaniu bez zmiennej lokalnej
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            opt_self_attrs = _collect_optional_self_attrs(cls)
+            if not opt_self_attrs:
+                continue
+            for item in cls.body:
+                if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                m_nodes = _walk_same_scope(item.body)
+                assigned_non_none: dict[str, int] = {}
+                for n in m_nodes:
+                    if isinstance(n, ast.Assign) and not _is_none_constant(n.value):
+                        for t in n.targets:
+                            if (
+                                isinstance(t, ast.Attribute)
+                                and isinstance(t.value, ast.Name)
+                                and t.value.id == "self"
+                                and t.attr in opt_self_attrs
+                            ):
+                                assigned_non_none.setdefault(t.attr, n.lineno)
+                for attr_name, assign_line in assigned_non_none.items():
+                    if _has_self_attr_narrowing(m_nodes, attr_name):
+                        continue
+                    decl_line = opt_self_attrs[attr_name]
+                    for n in m_nodes:
+                        if isinstance(n, ast.Call) and n.lineno >= assign_line:
+                            call_name = (
+                                n.func.id
+                                if isinstance(n.func, ast.Name)
+                                else (n.func.attr if isinstance(n.func, ast.Attribute) else "call")
+                            )
+                            if call_name in _SAFE_OPTIONAL_CALLS:
+                                continue
+                            all_call_args = list(n.args) + [kw.value for kw in n.keywords]
+                            if any(_is_self_attr_expr(arg, attr_name) for arg in all_call_args):
+                                issues.append(
+                                    f"[PyTypeChecker] {rel}:{n.lineno} in '{cls.name}.{item.name}': "
+                                    f"passing optional attribute 'self.{attr_name}' (declared as 'T | None' at line {decl_line}) "
+                                    f"directly to '{call_name}()'; assign to a local variable first"
+                                )
 
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
