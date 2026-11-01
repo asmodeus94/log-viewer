@@ -39,7 +39,7 @@ ignore = [
 "log_viewer/workers.py" = ["BLE001"]
 # W testach i skryptach pomocniczych zezwalamy na badanie prywatnych pól (_data), elastyczniejsze importy i sygnatury fixture'ów
 "tests/*" = ["E402", "F841", "SIM115", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PTH"]
-"dev-scripts/*" = ["E402", "E741", "SLF001", "BLE001", "ARG001", "ARG002", "ARG005", "PLW0108", "PTH"]
+"dev-scripts/*" = ["E402", "SLF001", "BLE001", "ARG005", "PLW0108"]
 "scripts/*" = ["BLE001", "SLF001", "ARG001", "ARG002"]
 "run.py" = ["E402"]
 

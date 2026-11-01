@@ -348,12 +348,23 @@ def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
     2. Zmienne lokalne `x: Any = None` lub `x = getattr(..., None)` bez `isinstance(x, ...)`, na których
        wykonywane jest `len(x)`, indeksowanie `x[...]` lub wywołanie metody `x.method()` po ponownym przypisaniu.
     3. Przypisania do atrybutów `x.attr = ...` na zmiennych zadeklarowanych jako generyczny `QObject`, `QWidget` lub `object`.
+    4. Wywołania `Signal("qint64")` ze stałymi znakowymi zamiast typów Pythona (np. `Signal(int)`).
     """
     issues: list[str] = []
 
     for p in files:
         rel = p.relative_to(repo_root).as_posix()
         tree = ast.parse(p.read_text(encoding="utf-8"), filename=rel)
+
+        # Sprawdź wywołania Signal("...") w całym pliku
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Signal":
+                for arg_node in node.args:
+                    if isinstance(arg_node, ast.Constant) and isinstance(arg_node.value, str):
+                        issues.append(
+                            f"[PyTypeChecker] {rel}:{node.lineno}: Signal({arg_node.value!r}) uses string literal "
+                            f"instead of Python type (e.g. int, str, object)"
+                        )
 
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -460,6 +471,270 @@ def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
     return issues
 
 
+def _collect_self_attrs(stmts: list[ast.stmt]) -> list[tuple[str, int]]:
+    """Zbiera wszystkie przypisania `self.<attr> = ...` w danej liście instrukcji metody."""
+    found: list[tuple[str, int]] = []
+    for node in _walk_same_scope(stmts):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                for sub in ast.walk(t):
+                    if (
+                        isinstance(sub, ast.Attribute)
+                        and isinstance(sub.value, ast.Name)
+                        and sub.value.id == "self"
+                        and isinstance(sub.ctx, ast.Store)
+                    ):
+                        found.append((sub.attr, node.lineno))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Attribute)
+            and isinstance(node.target.value, ast.Name)
+            and node.target.value.id == "self"
+        ):
+            found.append((node.target.attr, node.lineno))
+    return found
+
+
+def check_attributes_outside_init(files: list[Path], repo_root: Path) -> list[str]:
+    """Wykrywa atrybuty instancji `self.<attr>` definiowane poza metodą `__init__` (PyAttributeOutsideInit)."""
+    issues: list[str] = []
+
+    for p in files:
+        rel = p.relative_to(repo_root).as_posix()
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=rel)
+
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+
+            declared_attrs: set[str] = set()
+            methods_by_name: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+            methods: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
+
+            for item in cls.body:
+                if isinstance(item, ast.Assign):
+                    for t in item.targets:
+                        if isinstance(t, ast.Name):
+                            declared_attrs.add(t.id)
+                elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    declared_attrs.add(item.target.id)
+                elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    methods.append(item)
+                    methods_by_name.setdefault(item.name, item)
+                    for dec in item.decorator_list:
+                        if (isinstance(dec, ast.Name) and dec.id == "property") or (
+                            isinstance(dec, ast.Attribute) and dec.attr == "setter"
+                        ):
+                            declared_attrs.add(item.name)
+
+            if "__init__" not in methods_by_name:
+                continue
+
+            # Zbierz atrybuty z __init__ oraz prywatnych metod pomocniczych _* wywoływanych z __init__
+            init_helpers: set[str] = {"__init__", "__new__", "__post_init__", "setupUi", "retranslateUi"}
+            queue = ["__init__"]
+            while queue:
+                cur_m_name = queue.pop()
+                m_node = methods_by_name.get(cur_m_name)
+                if m_node is None:
+                    continue
+                for attr_name, _ in _collect_self_attrs(m_node.body):
+                    declared_attrs.add(attr_name)
+                for sub in _walk_same_scope(m_node.body):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and isinstance(sub.func.value, ast.Name)
+                        and sub.func.value.id == "self"
+                        and sub.func.attr.startswith("_")
+                        and sub.func.attr not in init_helpers
+                        and sub.func.attr in methods_by_name
+                    ):
+                        init_helpers.add(sub.func.attr)
+                        queue.append(sub.func.attr)
+
+            for method in methods:
+                if method.name in init_helpers:
+                    continue
+                for attr_name, lineno in _collect_self_attrs(method.body):
+                    if attr_name not in declared_attrs:
+                        issues.append(
+                            f"[PyAttributeOutsideInit] {rel}:{lineno} in '{cls.name}.{method.name}': "
+                            f"instance attribute 'self.{attr_name}' defined outside '__init__'"
+                        )
+
+    return issues
+
+
+def _collect_function_local_names(fn: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> dict[str, int]:
+    """Zbiera wszystkie nazwy parametrów i zmiennych lokalnych zdefiniowanych bezpośrednio w zakresie funkcji."""
+    names: dict[str, int] = {}
+    pos_args = fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs
+    for arg in pos_args:
+        if arg.arg not in ("self", "cls") and not arg.arg.startswith("_"):
+            names.setdefault(arg.arg, arg.lineno)
+    if fn.args.vararg and not fn.args.vararg.arg.startswith("_"):
+        names.setdefault(fn.args.vararg.arg, fn.args.vararg.lineno)
+    if fn.args.kwarg and not fn.args.kwarg.arg.startswith("_"):
+        names.setdefault(fn.args.kwarg.arg, fn.args.kwarg.lineno)
+
+    if isinstance(fn, ast.Lambda):
+        return names
+
+    for node in _walk_same_scope(fn.body):
+        if isinstance(node, (ast.Assign, ast.For, ast.AsyncFor)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                for sub in ast.walk(t):
+                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store) and not sub.id.startswith("_"):
+                        names.setdefault(sub.id, node.lineno)
+        elif (
+            isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and not node.target.id.startswith("_")
+        ):
+            names.setdefault(node.target.id, node.lineno)
+        elif isinstance(node, ast.ExceptHandler) and node.name and not node.name.startswith("_"):
+            names.setdefault(node.name, node.lineno)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars:
+                    for sub in ast.walk(item.optional_vars):
+                        if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store) and not sub.id.startswith("_"):
+                            names.setdefault(sub.id, node.lineno)
+
+    return names
+
+
+def check_shadowing_names(files: list[Path], repo_root: Path) -> list[str]:
+    """Wykrywa przesłanianie nazw z zewnętrznych zakresów funkcyjnych lub modułowych (PyShadowingNames)."""
+    issues: list[str] = []
+
+    for p in files:
+        rel = p.relative_to(repo_root).as_posix()
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=rel)
+
+        def visit_scope(
+            stmts: list[ast.stmt],
+            outer_names: dict[str, int],
+            scope_label: str,
+            rel_path: str = rel,
+        ) -> None:
+            for node in _walk_same_scope(stmts):
+                # Sprawdź zagnieżdżone funkcje i wyrażenia lambda
+                for child in ast.iter_child_nodes(node):
+                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                        local_names = _collect_function_local_names(child)
+                        child_label = "<lambda>" if isinstance(child, ast.Lambda) else child.name
+                        for var_name, var_line in local_names.items():
+                            if var_name in outer_names:
+                                issues.append(
+                                    f"[PyShadowingNames] {rel_path}:{var_line} in '{scope_label}.{child_label}': "
+                                    f"shadows name '{var_name}' from outer scope (line {outer_names[var_name]})"
+                                )
+                        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            merged = {**outer_names, **local_names}
+                            visit_scope(child.body, merged, f"{scope_label}.{child.name}", rel_path)
+
+        for top_node in ast.walk(tree):
+            if isinstance(top_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # Uruchamiamy dla każdej funkcji/metody względem jej własnego zakresu
+                fn_locals = _collect_function_local_names(top_node)
+                visit_scope(top_node.body, fn_locals, top_node.name)
+
+    # Deduplikacja zgłoszeń (gdy funkcja jest zagnieżdżona wielokrotnie)
+    seen: set[str] = set()
+    unique_issues: list[str] = []
+    for iss in issues:
+        if iss not in seen:
+            seen.add(iss)
+            unique_issues.append(iss)
+    return unique_issues
+
+
+def _handler_terminates(stmts: list[ast.stmt]) -> bool:
+    """Sprawdza, czy blok except bezwarunkowo kończy działanie (raise, return, break, continue, sys.exit)."""
+    for s in stmts:
+        if isinstance(s, (ast.Raise, ast.Return, ast.Break, ast.Continue)):
+            return True
+        if (
+            isinstance(s, ast.Expr)
+            and isinstance(s.value, ast.Call)
+            and (
+                (isinstance(s.value.func, ast.Name) and s.value.func.id in ("exit", "quit"))
+                or (
+                    isinstance(s.value.func, ast.Attribute)
+                    and isinstance(s.value.func.value, ast.Name)
+                    and s.value.func.value.id == "sys"
+                    and s.value.func.attr == "exit"
+                )
+            )
+        ):
+            return True
+    return False
+
+
+def _collect_defined_names_in_block(stmts: list[ast.stmt]) -> set[str]:
+    """Zbiera wszystkie nazwy definiowane w bloku instrukcji (przypisania, importy, funkcje, klasy)."""
+    defined: set[str] = set()
+    for node in _walk_same_scope(stmts):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                for sub in ast.walk(t):
+                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
+                        defined.add(sub.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            defined.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                defined.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+    return defined
+
+
+def check_try_except_imports(files: list[Path], repo_root: Path) -> list[str]:
+    """Wykrywa importy w bloku `try ... except ImportError`, które nie są zdefiniowane w bloku `except` (PyUnusedImports)."""
+    issues: list[str] = []
+
+    for p in files:
+        rel = p.relative_to(repo_root).as_posix()
+        content = p.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        tree = ast.parse(content, filename=rel)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Try):
+                continue
+
+            # Zbierz importowane symbole z bloku try (o ile instrukcja import nie ma własnego # noinspection PyUnusedImports)
+            imported_symbols: list[tuple[str, int]] = []
+            for stmt in node.body:
+                if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                    prev_line = lines[stmt.lineno - 2].strip() if stmt.lineno >= 2 else ""
+                    if "noinspection PyUnusedImports" in prev_line:
+                        continue
+                    for alias in stmt.names:
+                        if alias.name == "*":
+                            continue
+                        bound_name = alias.asname or alias.name.split(".")[0]
+                        imported_symbols.append((bound_name, stmt.lineno))
+
+            if not imported_symbols:
+                continue
+
+            for handler in node.handlers:
+                if _handler_terminates(handler.body):
+                    continue
+                defined_in_except = _collect_defined_names_in_block(handler.body)
+                for sym_name, lineno in imported_symbols:
+                    if sym_name not in defined_in_except:
+                        issues.append(
+                            f"[PyUnusedImports] {rel}:{lineno}: '{sym_name}' in the try block with "
+                            f"'except ImportError' should also be defined in the except block"
+                        )
+
+    return issues
+
+
 def check_test_conventions(tests_dir: Path, repo_root: Path) -> list[str]:
     """Weryfikuje konwencje w plikach testowych.
 
@@ -511,7 +786,7 @@ def check_test_conventions(tests_dir: Path, repo_root: Path) -> list[str]:
 def run_ast_checks(repo_root: Path) -> list[str]:
     """Uruchamia wszystkie kontrole AST i konwencji na kodzie źródłowym i testach."""
     files: list[Path] = []
-    for folder in ("log_viewer", "scripts"):
+    for folder in ("log_viewer", "scripts", "dev-scripts"):
         target_dir = repo_root / folder
         if target_dir.is_dir():
             files.extend(p for p in sorted(target_dir.rglob("*.py")) if not p.name.startswith("ui_"))
@@ -520,5 +795,8 @@ def run_ast_checks(repo_root: Path) -> list[str]:
         check_duplicated_code(files, repo_root)
         + check_dead_stores(files, repo_root)
         + check_ide_type_pitfalls(files, repo_root)
+        + check_attributes_outside_init(files, repo_root)
+        + check_shadowing_names(files, repo_root)
+        + check_try_except_imports(files, repo_root)
         + check_test_conventions(repo_root / "tests", repo_root)
     )

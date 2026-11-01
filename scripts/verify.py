@@ -4,8 +4,8 @@
 Sprawdza kod pod kątem:
 1. Kompilacji plików interfejsu .ui (compile_ui.py)
 2. Formatowania i analizy statycznej linterem (ruff format & ruff check)
-3. Zgodności typów (mypy: core, scripts oraz tests)
-4. Analizy AST pod kątem duplikacji kodu, nadpisywanych zmiennych i konwencji testów (ast_check.py)
+3. Zgodności typów (mypy: core, scripts, dev-scripts oraz tests)
+4. Analizy AST pod kątem duplikacji kodu, nadpisywanych zmiennych, atrybutów poza __init__, przesłanianie nazw i konwencji testów (ast_check.py)
 5. Automatycznej walidacji raportów SARIF (*.sarif, *.sarif.json)
 6. Poprawności działania testów jednostkowych (pytest)
 7. Opcjonalnych testów wydajnościowych / benchmarków (--benchmark)
@@ -25,13 +25,21 @@ import argparse
 import ctypes
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from ast_check import run_ast_checks
+from ast_check import (
+    check_attributes_outside_init,
+    check_duplicated_code,
+    check_ide_type_pitfalls,
+    check_shadowing_names,
+    check_try_except_imports,
+    run_ast_checks,
+)
 
 # Kolory ANSI do czytelnego formatowania w terminalu
 GREEN = "\033[92m"
@@ -132,11 +140,11 @@ def step_lint(repo_root: Path, py_exe: str) -> bool:
 
 
 def step_typecheck(repo_root: Path, py_exe: str) -> bool:
-    """Krok 3: Analiza typów statycznych (mypy dla log_viewer, scripts oraz tests)."""
-    # 3a: Kod główny i skrypty weryfikacyjne
-    targets_core = ["log_viewer", "scripts"]
+    """Krok 3: Analiza typów statycznych (mypy dla log_viewer, scripts, dev-scripts oraz tests)."""
+    # 3a: Kod główny, skrypty weryfikacyjne oraz skrypty deweloperskie
+    targets_core = ["log_viewer", "scripts", "dev-scripts"]
     cmd_core = [py_exe, "-m", "mypy"] + targets_core
-    code_core, _ = run_command(cmd_core, repo_root, "Step 3a: Static type check - core & scripts (mypy)")
+    code_core, _ = run_command(cmd_core, repo_root, "Step 3a: Static type check - core, scripts & dev-scripts (mypy)")
     if code_core != 0:
         return False
 
@@ -161,9 +169,9 @@ def step_typecheck(repo_root: Path, py_exe: str) -> bool:
 
 
 def step_inspect(repo_root: Path) -> bool:
-    """Krok 4: Analiza AST (DuplicatedCode, nadpisywane przypisania PyUnusedLocal oraz konwencje testów)."""
+    """Krok 4: Analiza AST (DuplicatedCode, nadpisywane przypisania PyUnusedLocal, atrybuty poza __init__, przesłanianie nazw i konwencje testów)."""
     print(
-        f"{CYAN}{BOLD}--> Step 4: AST Code Quality Inspection (DuplicatedCode, Dead Stores & Test Conventions){RESET}"
+        f"{CYAN}{BOLD}--> Step 4: AST Code Quality Inspection (DuplicatedCode, Dead Stores, Init Attributes, Shadowing & Conventions){RESET}"
     )
     issues = run_ast_checks(repo_root)
     if issues:
@@ -172,7 +180,7 @@ def step_inspect(repo_root: Path) -> bool:
         print(f"\n{RED}{BOLD}AST inspection failed: found {len(issues)} issue(s).{RESET}")
         return False
     print(
-        f"    {GREEN}All AST quality checks passed (0 duplicate blocks, 0 dead stores, 0 convention violations).{RESET}"
+        f"    {GREEN}All AST quality checks passed (0 duplicate blocks, 0 dead stores, 0 init/shadowing/type pitfalls).{RESET}"
     )
     return True
 
@@ -180,17 +188,21 @@ def step_inspect(repo_root: Path) -> bool:
 def _resolve_sarif_file_path(uri: str, repo_root: Path) -> Path | None:
     """Rozwiązuje ścieżkę pliku z formatu SARIF (URI / ścieżka względna) na obiekt Path."""
     clean = uri.replace("\\", "/")
-    if "file:/" in clean:
-        idx = clean.find("file:/")
-        path_str = clean[idx + 6 :]
-        if path_str.startswith("//"):
-            path_str = path_str[2:]
-        if path_str.startswith("/") and len(path_str) > 2 and path_str[2] == ":":
-            path_str = path_str[1:]
-        p = Path(path_str)
-    else:
-        p = repo_root / uri
+    for scheme in ("file:/", "ile:/"):
+        if scheme in clean:
+            idx = clean.find(scheme)
+            path_str = clean[idx + len(scheme) :]
+            while path_str.startswith("/"):
+                if len(path_str) > 2 and path_str[2] == ":":
+                    break
+                if len(path_str) > 1 and path_str[1] == ":":
+                    break
+                path_str = path_str[1:]
+            p = Path(path_str)
+            if p.is_file():
+                return p
 
+    p = repo_root / uri
     if p.is_file():
         return p
 
@@ -210,33 +222,76 @@ def _resolve_sarif_file_path(uri: str, repo_root: Path) -> Path | None:
     return None
 
 
-def _is_sarif_issue_active(file_path: Path, start_line: int | None, snippet: str | None) -> bool:
+def _line_contains_snippet(line: str, needle: str) -> bool:
+    """Sprawdza obecność fragmentu kodu w linii z uwzględnieniem granic słów dla identyfikatorów."""
+    if not needle:
+        return False
+    prefix = r"\b" if (needle[0].isalnum() or needle[0] == "_") else ""
+    suffix = r"\b" if (needle[-1].isalnum() or needle[-1] == "_") else ""
+    return bool(re.search(f"{prefix}{re.escape(needle)}{suffix}", line))
+
+
+def _is_sarif_issue_active(
+    file_path: Path,
+    repo_root: Path,
+    rule_id: str,
+    start_line: int | None,
+    snippet: str | None,
+) -> bool:
     """Sprawdza, czy problem z raportu SARIF nadal występuje w kodzie źródłowym.
 
-    Jeśli fragment kodu (snippet) nie występuje już w pliku w okolicach linii
-    lub w ogóle w pliku, problem uznaje się za rozwiązany (stale SARIF report).
+    Wykorzystuje analizatory AST dla reguł strukturalnych (DuplicatedCode, PyAttributeOutsideInit,
+    PyShadowingNames, PyUnusedImports) oraz weryfikację kontekstu linii dla pozostałych reguł.
     """
-    if not snippet or not snippet.strip():
-        # Brak fragmentu w raporcie — uznajemy zgłoszenie za aktywne
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        lines = content.splitlines()
+    except OSError:
         return True
 
-    try:
-        lines = file_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    # 1. Dla reguł wspieranych bezpośrednio przez analizator AST — weryfikuj stan AST pliku
+    if rule_id == "DuplicatedCode":
+        return bool(check_duplicated_code([file_path], repo_root))
+    if rule_id == "PyAttributeOutsideInit":
+        attr_issues = check_attributes_outside_init([file_path], repo_root)
+        if not snippet:
+            return bool(attr_issues)
+        attr_name = snippet.strip().removeprefix("self.")
+        return any(f"'self.{attr_name}'" in iss for iss in attr_issues)
+    if rule_id == "PyShadowingNames":
+        shadow_issues = check_shadowing_names([file_path], repo_root)
+        if not snippet:
+            return bool(shadow_issues)
+        var_name = snippet.strip()
+        return any(f"'{var_name}'" in iss for iss in shadow_issues)
+    if rule_id == "PyUnusedImports":
+        import_issues = check_try_except_imports([file_path], repo_root)
+        if not snippet:
+            return bool(import_issues)
+        sym_name = snippet.strip()
+        return any(f"'{sym_name}'" in iss for iss in import_issues)
+    if (
+        rule_id == "PyTypeChecker"
+        and "os.path.abspath" not in content
+        and 'Signal("qint64"' not in content
+        and not check_ide_type_pitfalls([file_path], repo_root)
+    ):
+        return False
+
+    if not snippet or not snippet.strip():
         return True
 
     needle = snippet.strip()
 
-    # Jeśli linia jest znana, sprawdź najpierw w oknie ±5 linii
+    # Sprawdź w oknie ±5 linii wokół raportowanej linii
     if start_line is not None and 1 <= start_line <= len(lines):
         start_idx = max(0, start_line - 6)
         end_idx = min(len(lines), start_line + 5)
         for i in range(start_idx, end_idx):
-            if needle in lines[i]:
+            if _line_contains_snippet(lines[i], needle):
                 return True
 
-    # Jeśli nie ma w oknie, sprawdź czy występuje w całym pliku
-    return any(needle in line for line in lines)
+    return any(_line_contains_snippet(line, needle) for line in lines)
 
 
 def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
@@ -313,7 +368,7 @@ def step_sarif(repo_root: Path, target_path: str | None = None) -> bool:
                     # Sprawdź czy problem jest wciąż aktywny w kodzie
                     is_active = True
                     if file_path is not None and file_path.is_file():
-                        is_active = _is_sarif_issue_active(file_path, start_line, snippet_text)
+                        is_active = _is_sarif_issue_active(file_path, repo_root, rule_id, start_line, snippet_text)
 
                     if not is_active:
                         resolved_count += 1

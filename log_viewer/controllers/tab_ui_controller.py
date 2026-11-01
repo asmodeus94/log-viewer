@@ -19,6 +19,7 @@ class UIController(QObject):
     def __init__(self, tab: LogTab) -> None:
         super().__init__(tab)
         self.tab: LogTab = tab
+        self._return_key_filter: QtCore.QObject | None = None
 
     def setup_ui_elements(self) -> None:
         self._setup_ui_elements()

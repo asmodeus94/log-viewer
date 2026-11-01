@@ -1,6 +1,20 @@
-"""Testy formatters.py — format_json, format_xml, format_log."""
+"""Testy formatters.py — format_json, format_xml, format_log oraz integracja z log_generator."""
+
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
 
 from log_viewer.formatters import format_json, format_log, format_xml
+
+
+def _load_log_generator_module():
+    gen_path = Path(__file__).resolve().parent.parent / "dev-scripts" / "log_generator.py"
+    spec = importlib.util.spec_from_file_location("log_generator", gen_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class TestFormatJson:
@@ -89,3 +103,60 @@ class TestFormatLog:
     def test_non_existing_formatter(self):
         input_text = '{"key":"value"}'
         assert format_log(input_text, "UNKNOWN") == input_text
+
+
+class TestLogGeneratorChallengeIntegration:
+    """Weryfikuje, czy logi generowane przez ulepszony log_generator.py poprawnie przechodzą przez formatery."""
+
+    def test_generated_json_xml_and_hybrid_challenge_lines(self, tmp_path: Path):
+        mod = _load_log_generator_module()
+        gen = mod.JsonLogGenerator
+
+        # 1. Linia z dwoma strukturami JSON i fałszywymi tropami (decoys) w prefiksie
+        json_line = gen.generate_formatted_line(
+            4, fmt_mode="JSON", multi_structure=True, include_decoys=True, long_line=False
+        )
+        formatted_j = format_json(json_line)
+        assert formatted_j != json_line
+        assert "\n{\n" in formatted_j
+        assert '"response_for_seq": 5' in formatted_j
+
+        # 2. Linia z dwoma kopertami SOAP XML, komentarzami, CDATA, polskimi znakami i fałszywymi tropami
+        xml_line = gen.generate_formatted_line(
+            4, fmt_mode="XML", multi_structure=True, include_decoys=True, long_line=False
+        )
+        formatted_x = format_xml(xml_line)
+        assert formatted_x != xml_line
+        assert "<soap:Envelope" in formatted_x
+        assert "<!--" in formatted_x
+        assert "<![CDATA[" in formatted_x
+
+        # 3. Linia hybrydowa z transformacją JSON -> XML (variant 2: i=2)
+        hybrid_line = gen.generate_formatted_line(
+            2, fmt_mode="HYBRID", multi_structure=True, include_decoys=True, long_line=False
+        )
+        assert format_json(hybrid_line) != hybrid_line
+        assert format_xml(hybrid_line) != hybrid_line
+
+        # 4. Bardzo długa linia (> 15 KB) z markerem wyszukiwania na samym końcu (i=14 -> is_long=True)
+        long_line = gen.generate_formatted_line(
+            14, fmt_mode="JSON", multi_structure=True, include_decoys=True, long_line=True
+        )
+        assert len(long_line) > 12_000
+        assert "END_OF_LONG_LINE_MARKER_15" in long_line
+        assert '"END_OF_LONG_LINE_MARKER_15"' in format_json(long_line)
+
+        # 5. Zapis wsadowy (run_batch) w trybie HYBRID
+        out_file = tmp_path / "challenge_batch.log"
+        written = gen.run_batch(
+            filepath=str(out_file),
+            count=20,
+            overwrite=True,
+            fmt_mode="HYBRID",
+            multi_structure=True,
+            include_decoys=True,
+            long_lines=True,
+        )
+        assert written == 20
+        lines = out_file.read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 20
