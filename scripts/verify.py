@@ -270,13 +270,15 @@ def _is_sarif_issue_active(
             return bool(import_issues)
         sym_name = snippet.strip()
         return any(f"'{sym_name}'" in iss for iss in import_issues)
-    if (
-        rule_id == "PyTypeChecker"
-        and "os.path.abspath" not in content
-        and 'Signal("qint64"' not in content
-        and not check_ide_type_pitfalls([file_path], repo_root)
-    ):
-        return False
+    if rule_id == "PyTypeChecker":
+        pitfall_issues = check_ide_type_pitfalls([file_path], repo_root)
+        if pitfall_issues:
+            if not snippet or not snippet.strip():
+                return True
+            sym_name = snippet.strip()
+            if any(sym_name in iss for iss in pitfall_issues):
+                return True
+        return "os.path.abspath" in content or 'Signal("qint64"' in content
 
     if not snippet or not snippet.strip():
         return True
