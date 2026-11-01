@@ -268,11 +268,13 @@ class SearchController(QObject):
         self._cancel_active_search()
 
         self.tab.search_pattern = ""
+        self.tab.search_compiled = None
         self.tab.search_results = []
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab.search_results_all = Bitset(total)
         self.tab.search_result_index = -1
         self.tab.search_extra_sel = None
+        self.tab.search_match_extra_sels = []
 
         if self.tab.search_model:
             self.tab.search_model.clear()

@@ -83,6 +83,13 @@ THEME_DARK = {
     "current_line": "#2a2d2e",
     "context": "#3a3d3a",
     "search_active": "#ff8c00",
+    "search_match_active": "#fff176",
+    # Kolorowanie składni (FormatDialog)
+    "syn_key": "#9cdcfe",
+    "syn_string": "#ce9178",
+    "syn_number": "#b5cea8",
+    "syn_literal": "#569cd6",
+    "syn_comment": "#6a9955",
     # Mini-map
     "minimap_bg": "#1e1e1e",
     "minimap_error": "#f44747",
@@ -123,6 +130,13 @@ THEME_LIGHT = {
     "current_line": "#f0f0f0",
     "context": "#e8f5e9",
     "search_active": "#ff8c00",
+    "search_match_active": "#ffeb3b",
+    # Kolorowanie składni (FormatDialog)
+    "syn_key": "#0451a5",
+    "syn_string": "#a31515",
+    "syn_number": "#098658",
+    "syn_literal": "#0000ff",
+    "syn_comment": "#008000",
     # Mini-map
     "minimap_bg": "#ffffff",
     "minimap_error": "#d73a49",

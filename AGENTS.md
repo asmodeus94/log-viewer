@@ -53,6 +53,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 
 ## 13. Standardy Jakości Kodu (Clean Code)
 - **Typowanie statyczne:** Każda nowa funkcja, metoda i klasa musi posiadać adnotacje typów (Type Hints wg PEP 484) dla argumentów i wartości zwracanych (np. `def parse_line(line: str) -> dict:`). Wymagany Python 3.10+.
+- **Zgodność z analizatorem typów IntelliJ IDEA / PyCharm:** Unikaj adnotacji `param: Any = None` oraz zmiennych lokalnych `x: Any = None` lub `x = getattr(..., None)` bez zawężenia typu przez `isinstance(x, ...)`, ponieważ analizator IDE wnioskuje dla nich unię `Any | None` i zgłasza ostrzeżenia `PyTypeChecker` / `PyUnresolvedReferences`. Zamiast tego używaj konkretnych unii typów (np. `LogTab | None = None`). Nie przypisuj również niestandardowych atrybutów bezpośrednio na zmiennych o generycznych typach `QObject`, `QWidget` lub `object`.
 - **Pythonic style:** Wykorzystuj wbudowane mechanizmy języka – używaj f-stringów do formatowania tekstu, list/dict comprehensions dla wydajności, oraz menedżerów kontekstu (`with`) do zarządzania zasobami i blokadami.
 - Preferuj nowoczesny moduł `pathlib` do operacji na ścieżkach nad tradycyjnym `os.path` (chyba że konwencja istniejącego kodu/testów wymaga inaczej).
 - Zmiany w kodzie nie mogą generować nowych ostrzeżeń linterów (utrzymuj kod zgodny ze standardami PEP 8).
@@ -69,7 +70,7 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
 
 ## 15. Optymalizacja operacji listowych
 - Do przeszukiwania posortowanych kolekcji i list (np. w mapowaniach numerów linii z fizycznymi bytami) zawsze używaj modułu **`bisect`** (`bisect_left` lub `bisect_right`) zamiast wbudowanego, liniowego `list.index()`.
-- W przypadku operowania na zbiorach wyników mogących przekraczać miliony elementów (np. filtrowanie logów), bezwzględnie unikaj alokacji dużych list w Pythonie. Zamiast tego używaj wysoce zoptymalizowanej struktury **`Bitset`** opierającej się o wbudowany typ `array.array('Q')` i realizuj zliczanie iteracji wspierając się metodami implementowanymi po stronie języka C (np. `itertools.accumulate` w połączeniu z `int.bit_count`), by eliminować blokujące główny lub poboczny wątek pętle.
+- W przypadku operowania na zbiorach wyników mogących przekraczać miliony elementów (np. filtrowanie logów), bezwzględędnie unikaj alokacji dużych list w Pythonie. Zamiast tego używaj wysoce zoptymalizowanej struktury **`Bitset`** opierającej się o wbudowany typ `array.array('Q')` i realizuj zliczanie iteracji wspierając się metodami implementowanymi po stronie języka C (np. `itertools.accumulate` w połączeniu z `int.bit_count`), by eliminować blokujące główny lub poboczny wątek pętle.
 
 ## 16. Bramka Jakości Kodu i Obowiązkowa Procedura Weryfikacji (Quality Gate)
 - **Żelazna zasada weryfikacji:** Przed zakończeniem jakichkolwiek prac modyfikujących kod źródłowy, agent AI oraz programista mają **bezwzględny obowiązek** uruchomienia centralnego skryptu weryfikacyjnego:
@@ -77,11 +78,12 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
   .venv\Scripts\python.exe scripts/verify.py
   ```
 - **Zadania bramki jakości:** Skrypt sekwencyjnie weryfikuje:
-  1. Kompilację plików interfejsu Qt (`scripts/compile_ui.py`).
-  2. Sprawdzenie formatowania i reguł lintera (`ruff format --check` oraz `ruff check`).
-  3. Sprawdzenie statycznej kontroli typów (`mypy log_viewer scripts`).
-  4. Pełne wykonanie testów jednostkowych i GUI (`pytest tests/`).
-  5. Opcjonalną walidację raportów SARIF (`scripts/verify.py --sarif`).
+  1. Kompilację plików interfejsu Qt (`scripts/compile_ui.py` — krok `ui`).
+  2. Sprawdzenie formatowania i reguł lintera (`ruff format --check` oraz `ruff check` — krok `lint`).
+  3. Sprawdzenie statycznej kontroli typów w kodzie i testach (`mypy log_viewer scripts` oraz `mypy tests` — krok `mypy`).
+  4. Inspekcję jakości AST (`scripts/ast_check.py`: duplikaty kodu `DuplicatedCode`, nadpisywane zmienne `PyUnusedLocal`, pułapki typów IDE `PyTypeChecker`/`PyUnresolvedReferences` oraz konwencje testów — krok `inspect`).
+  5. Pełne wykonanie testów jednostkowych i GUI (`pytest tests/` — krok `test`).
+  6. Opcjonalną walidację raportów SARIF (`scripts/verify.py --sarif` — krok `sarif`).
 - **Automatyczna naprawa:** W przypadku problemów ze stylem, importami lub formatowaniem, należy użyć:
   ```powershell
   .venv\Scripts\python.exe scripts/verify.py --fix

@@ -5,7 +5,7 @@ from __future__ import annotations
 import bisect
 from collections import OrderedDict
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6 import QtCore, QtGui
 from PySide6.QtCore import QAbstractListModel, QEvent, QModelIndex, QObject, QPoint, QRect, QSize, Qt, Signal
@@ -41,10 +41,61 @@ from PySide6.QtWidgets import (
 )
 
 from .bitset import Bitset
-from .formatters import FORMATTERS, format_log
-from .helpers import THEME, THEME_DARK
+from .formatters import FORMATTER_MAX_CHARS, FORMATTERS, format_log
+from .helpers import THEME, THEME_DARK, fmt_size
+from .highlighters import MAX_HIGHLIGHT_DOC_CHARS, StructuredCodeHighlighter
 from .ui.ui_format_dialog import Ui_FormatDialog
 from .ui.ui_settings_dialog import Ui_SettingsDialog
+
+if TYPE_CHECKING:
+    from .log_tab import LogTab
+
+MAX_DIALOG_EXTRA_SELECTIONS = 1500
+
+
+def sync_inactive_palette(widget: QWidget) -> None:
+    """Kopiuje kolory palety Active do Inactive, aby podświetlenie i tekst nie bladły po utracie fokusu."""
+    pal = widget.palette()
+    for role in (
+        QtGui.QPalette.ColorRole.Highlight,
+        QtGui.QPalette.ColorRole.HighlightedText,
+        QtGui.QPalette.ColorRole.Base,
+        QtGui.QPalette.ColorRole.Text,
+    ):
+        pal.setColor(
+            QtGui.QPalette.ColorGroup.Inactive,
+            role,
+            pal.color(QtGui.QPalette.ColorGroup.Active, role),
+        )
+    widget.setPalette(pal)
+
+
+def _find_parent_tab(widget: QWidget | None) -> LogTab | None:
+    """Wyszukuje nadrzędny obiekt LogTab dla podanego widgetu."""
+    cur: QObject | None = widget
+    while cur is not None:
+        if (hasattr(cur, "get_display_text") and hasattr(cur, "line_map")) or hasattr(cur, "last_formatter"):
+            return cast("LogTab", cur)
+        cur = cur.parent()
+    return None
+
+
+def get_full_line_text_at_cursor(editor: QPlainTextEdit | QTextEdit, tab: LogTab | None = None) -> str:
+    """Pobiera pełny (nieucięty przez widok) tekst linii w miejscu kursora."""
+    target_tab = tab if tab is not None else _find_parent_tab(editor)
+    cursor = editor.textCursor()
+    widget_line = cursor.blockNumber()
+    if target_tab is not None and hasattr(target_tab, "get_display_text") and hasattr(target_tab, "line_map"):
+        line_map = target_tab.line_map
+        if line_map is not None and 0 <= widget_line < len(line_map):
+            file_line = line_map[widget_line]
+            full_text = target_tab.get_display_text(file_line, widget_line)
+            if full_text:
+                return full_text
+
+    sel_cursor = QTextCursor(cursor)
+    sel_cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+    return sel_cursor.selectedText().replace("\u2029", "\n")
 
 
 class LineNumberArea(QWidget):
@@ -154,28 +205,7 @@ class LogPlainTextEdit(QPlainTextEdit):
         # Wymuszamy, aby nieaktywny stan kontrolki miał identyczne kolory
         # jak aktywny (tło, podświetlenie, tekst), żeby np. wynik wyszukiwania
         # (żółte tło) nie bladł, gdy focus jest na dolnej liście wyników.
-        pal = self.palette()
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
-            QtGui.QPalette.ColorRole.Highlight,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Highlight),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
-            QtGui.QPalette.ColorRole.HighlightedText,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.HighlightedText),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
-            QtGui.QPalette.ColorRole.Base,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Base),
-        )
-        pal.setColor(
-            QtGui.QPalette.ColorGroup.Inactive,
-            QtGui.QPalette.ColorRole.Text,
-            pal.color(QtGui.QPalette.ColorGroup.Active, QtGui.QPalette.ColorRole.Text),
-        )
-        self.setPalette(pal)
+        sync_inactive_palette(self)
 
     @property
     def line_number_area(self) -> LineNumberArea:
@@ -223,9 +253,7 @@ class LogPlainTextEdit(QPlainTextEdit):
             self.copy()
 
     def _do_copy_line(self) -> None:
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-        selected_text = cursor.selectedText()
+        selected_text = get_full_line_text_at_cursor(self)
         if selected_text:
             QApplication.clipboard().setText(selected_text)
 
@@ -237,17 +265,12 @@ class LogPlainTextEdit(QPlainTextEdit):
             app.cmd_format_selection()
 
     def _do_format_line(self) -> None:
-        cursor = self.textCursor()
-        cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-        selected_text = cursor.selectedText().replace("\u2029", "\n")
+        tab = _find_parent_tab(self)
+        selected_text = get_full_line_text_at_cursor(self, tab)
         if not selected_text.strip():
             return
 
-        tab: Any = self.parent()
-        while tab is not None and not hasattr(tab, "last_formatter"):
-            tab = tab.parent()
-
-        last_formatter = getattr(tab, "last_formatter", "JSON")
+        last_formatter = tab.last_formatter if (tab is not None and hasattr(tab, "last_formatter")) else "JSON"
         dialog = FormatDialog(self, selected_text, last_formatter)
         dialog.exec()
 
@@ -420,7 +443,11 @@ class SearchResultsModel(QAbstractListModel):
         self._color_info = QColor(THEME_DARK["info"])
         self._color_debug = QColor(THEME_DARK["debug"])
 
-    def set_results(self, results: Sequence[int | tuple[int, str]] | Bitset | None, indexer: Any = None) -> None:
+    def set_results(
+        self,
+        results: Sequence[int | tuple[int, str]] | Bitset | None,
+        indexer: object | None = None,
+    ) -> None:
         """Zastępuje wszystkie wyniki. Wywołuje beginResetModel/endResetModel."""
         self.beginResetModel()
         self._line_cache.clear()
@@ -712,7 +739,8 @@ class MiniMap(QWidget):
 class FormatDialog(QDialog):
     """
     Dialog pozwalający na sformatowanie przekazanego fragmentu tekstu
-    (np. JSON) i jego podgląd. Pamięta wybrany formatter w trakcie sesji.
+    (np. JSON, XML), kolorowanie składni oraz wyszukiwanie wewnątrz sformatowanego kodu.
+    Pamięta wybrany formatter w trakcie sesji.
     """
 
     editor: QPlainTextEdit | QTextEdit | None
@@ -725,6 +753,8 @@ class FormatDialog(QDialog):
         self.original_text = text
         self.app = parent.window() if (parent and hasattr(parent, "window")) else parent
         self.t = self.app.t if (self.app and hasattr(self.app, "t")) else lambda k: k
+        app_theme = getattr(self.app, "theme", None)
+        self._theme: dict[str, str] = app_theme if isinstance(app_theme, dict) else THEME
 
         self.editor = None
         if isinstance(parent, (QPlainTextEdit, QTextEdit)):
@@ -755,18 +785,237 @@ class FormatDialog(QDialog):
         self.ui.btn_next.setText(self.t("btn_next_line"))
         self.ui.btn_next.clicked.connect(self._on_next_line)
 
+        self.ui.btn_copy.setText(self.t("btn_copy"))
+        self.ui.btn_copy.clicked.connect(self._on_copy)
+        self.ui.wrap_cb.setText(self.t("cb_word_wrap"))
+        self.ui.wrap_cb.toggled.connect(self._on_wrap_toggled)
+
         # Tłumaczenie systemowego przycisku 'Close'
         self.ui.buttons.button(QDialogButtonBox.StandardButton.Close).setText(self.t("btn_close"))
 
         self.text_edit = self.ui.text_edit
-        # Zastosuj czcionkę stałej szerokości
         font = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
         font.setPointSize(10)
-
         self.text_edit.setFont(font)
+
+        # Zachowaj identyczną paletę przy utracie fokusu (gdy fokus jest w polu wyszukiwania)
+        sync_inactive_palette(self.text_edit)
+
+        # Inicjalizacja highlightera składni
+        self.highlighter = StructuredCodeHighlighter(
+            self.text_edit.document(),
+            mode=self.formatter_combo.currentText(),
+            theme=self._theme,
+        )
+
+        # Wyszukiwarka wewnątrz FormatDialog
+        self.search_input = self.ui.search_input
+        self.search_input.setPlaceholderText(self.t("ph_format_search"))
+        self.btn_search_prev = self.ui.btn_search_prev
+        self.btn_search_next = self.ui.btn_search_next
+        self.search_case_cb = self.ui.search_case_cb
+        self.search_case_cb.setText(self.t("cb_case"))
+        self.lbl_search_count = self.ui.lbl_search_count
+
+        self._search_matches: list[tuple[int, int]] = []
+        self._current_match_idx: int = -1
+        self._search_timer = QtCore.QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(120)
+        self._search_timer.timeout.connect(lambda: self._perform_search(reset_index=True))
+
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        self.search_case_cb.toggled.connect(lambda _checked: self._perform_search(reset_index=True))
+        self.btn_search_next.clicked.connect(self.find_next)
+        self.btn_search_prev.clicked.connect(self.find_prev)
+
+        # Skrót Ctrl+F do aktywacji pola wyszukiwania
+        self._action_find = QAction(self)
+        self._action_find.setShortcut(QKeySequence("Ctrl+F"))
+        self._action_find.triggered.connect(self.focus_search)
+        self.addAction(self._action_find)
 
         # Zastosuj formatowanie przy otwarciu
         self._apply_format(self.formatter_combo.currentText())
+
+    def focus_search(self) -> None:
+        """Ustawia focus na polu wyszukiwania i zaznacza tekst."""
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
+    def clear_search(self) -> None:
+        """Czyści pole wyszukiwania oraz podświetlenia w oknie FormatDialog."""
+        self._search_timer.stop()
+        self.search_input.clear()
+        self._search_matches = []
+        self._current_match_idx = -1
+        self.lbl_search_count.setText("")
+        self.text_edit.setExtraSelections([])
+
+    def _on_copy(self) -> None:
+        """Kopiuje zaznaczony tekst lub całą zawartość okna do schowka."""
+        cursor = self.text_edit.textCursor()
+        if cursor.hasSelection():
+            text_to_copy = cursor.selectedText().replace("\u2029", "\n")
+        else:
+            text_to_copy = self.text_edit.toPlainText()
+        if text_to_copy:
+            QApplication.clipboard().setText(text_to_copy)
+
+    def _on_wrap_toggled(self, checked: bool) -> None:
+        """Przełącza zawijanie wierszy w edytorze FormatDialog."""
+        mode = QPlainTextEdit.LineWrapMode.WidgetWidth if checked else QPlainTextEdit.LineWrapMode.NoWrap
+        self.text_edit.setLineWrapMode(mode)
+
+    def _on_search_text_changed(self, text: str) -> None:
+        if not text or len(self.text_edit.toPlainText()) < 50_000:
+            self._perform_search(reset_index=True)
+        else:
+            self._search_timer.start(120)
+
+    def _perform_search(self, reset_index: bool = True) -> None:
+        self._search_timer.stop()
+        pattern = self.search_input.text()
+        if not pattern:
+            self._search_matches = []
+            self._current_match_idx = -1
+            self.lbl_search_count.setText("")
+            self.text_edit.setExtraSelections([])
+            return
+
+        doc_text = self.text_edit.toPlainText()
+        case = self.search_case_cb.isChecked()
+        haystack = doc_text if case else doc_text.lower()
+        needle = pattern if case else pattern.lower()
+        pat_len = len(needle)
+
+        matches: list[tuple[int, int]] = []
+        if pat_len > 0 and doc_text:
+            pos = 0
+            while True:
+                idx = haystack.find(needle, pos)
+                if idx == -1:
+                    break
+                matches.append((idx, idx + pat_len))
+                pos = idx + pat_len
+
+        self._search_matches = matches
+        if not matches:
+            self._current_match_idx = -1
+            empty_msg = self.t("lbl_format_search_empty")
+            self.lbl_search_count.setText(empty_msg if empty_msg != "lbl_format_search_empty" else "0 / 0")
+            self.text_edit.setExtraSelections([])
+            return
+
+        if reset_index or self._current_match_idx < 0 or self._current_match_idx >= len(matches):
+            self._current_match_idx = 0
+
+        self._update_search_selections_and_scroll()
+
+    def _update_search_selections_and_scroll(self) -> None:
+        matches = self._search_matches
+        total = len(matches)
+        if total == 0 or self._current_match_idx < 0 or self._current_match_idx >= total:
+            self.text_edit.setExtraSelections([])
+            return
+
+        current_1based = self._current_match_idx + 1
+        tpl = self.t("lbl_format_search_count")
+        if "{current" in tpl:
+            self.lbl_search_count.setText(tpl.format(current=current_1based, total=total))
+        else:
+            self.lbl_search_count.setText(f"{current_1based:,} / {total:,}")
+
+        doc = self.text_edit.document()
+        fmt_passive = QtGui.QTextCharFormat()
+        fmt_passive.setBackground(QColor(self._theme.get("highlight", "#fff176")))
+        fmt_passive.setForeground(QColor("#000000"))
+
+        fmt_active = QtGui.QTextCharFormat()
+        fmt_active.setBackground(QColor(self._theme.get("search_active", "#ff8c00")))
+        fmt_active.setForeground(QColor("#000000"))
+        fmt_active.setFontWeight(QFont.Weight.Bold)
+
+        # Ogranicz liczbę pasywnych ExtraSelection dla zachowania płynności przy tysiącach trafień
+        half_win = MAX_DIALOG_EXTRA_SELECTIONS // 2
+        start_slice = max(0, self._current_match_idx - half_win)
+        end_slice = min(total, start_slice + MAX_DIALOG_EXTRA_SELECTIONS)
+
+        sels: list[QTextEdit.ExtraSelection] = []
+        for idx in range(start_slice, end_slice):
+            if idx == self._current_match_idx:
+                continue
+            m_start, m_end = matches[idx]
+            sel = QTextEdit.ExtraSelection()
+            c = QTextCursor(doc)
+            c.setPosition(m_start)
+            c.setPosition(m_end, QTextCursor.MoveMode.KeepAnchor)
+            sel.cursor = c
+            sel.format = fmt_passive
+            sels.append(sel)
+
+        act_start, act_end = matches[self._current_match_idx]
+        act_sel = QTextEdit.ExtraSelection()
+        act_cursor = QTextCursor(doc)
+        act_cursor.setPosition(act_start)
+        act_cursor.setPosition(act_end, QTextCursor.MoveMode.KeepAnchor)
+        act_sel.cursor = act_cursor
+        act_sel.format = fmt_active
+        sels.append(act_sel)
+
+        self.text_edit.setExtraSelections(sels)
+
+        # Przewiń widok do aktywnego trafienia bez modyfikacji selekcji kursora
+        nav_cursor = QTextCursor(doc)
+        nav_cursor.setPosition(act_end)
+        self.text_edit.setTextCursor(nav_cursor)
+        self.text_edit.ensureCursorVisible()
+        nav_cursor.setPosition(act_start)
+        self.text_edit.setTextCursor(nav_cursor)
+        self.text_edit.ensureCursorVisible()
+
+    def find_next(self) -> None:
+        """Przechodzi do następnego wyniku wyszukiwania w FormatDialog."""
+        if not self._search_matches:
+            if self.search_input.text():
+                self._perform_search(reset_index=True)
+            return
+        self._current_match_idx = (self._current_match_idx + 1) % len(self._search_matches)
+        self._update_search_selections_and_scroll()
+
+    def find_prev(self) -> None:
+        """Przechodzi do poprzedniego wyniku wyszukiwania w FormatDialog."""
+        if not self._search_matches:
+            if self.search_input.text():
+                self._perform_search(reset_index=True)
+            return
+        self._current_match_idx = (self._current_match_idx - 1) % len(self._search_matches)
+        self._update_search_selections_and_scroll()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and (self.search_input.hasFocus() or self.search_input.text()):
+            self.clear_search()
+            self.text_edit.setFocus()
+            event.accept()
+            return
+
+        if event.key() == Qt.Key.Key_F3:
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self.find_prev()
+            else:
+                self.find_next()
+            event.accept()
+            return
+
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.search_input.hasFocus():
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self.find_prev()
+            else:
+                self.find_next()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
 
     def _reformat_current_text(self) -> None:
         """Pobiera obecny tekst, aktualizuje oryginał i ponawia formatowanie."""
@@ -780,11 +1029,41 @@ class FormatDialog(QDialog):
 
     def _apply_format(self, formatter_name: str) -> None:
         """Aplikuje wybrany formatter. Jeśli się nie uda, pokazuje oryginalny tekst."""
-        formatted = format_log(self.original_text, formatter_name)
-        if formatted:
-            self.text_edit.setPlainText(formatted)
-        else:
-            self.text_edit.setPlainText(self.t("msg_format_failed") + "\n\n" + self.original_text)
+        max_chars = FORMATTER_MAX_CHARS.get(formatter_name, 5_000_000)
+        if len(self.original_text) > max_chars:
+            tpl = self.t("msg_format_too_large")
+            warn_prefix = (
+                tpl.format(size=fmt_size(len(self.original_text)))
+                if "{size" in tpl
+                else f"Line too large ({fmt_size(len(self.original_text))}):"
+            )
+            target_text = warn_prefix + "\n\n" + self.original_text
+            self.highlighter.set_mode(formatter_name, rehighlight=False)
+            self.highlighter.enabled = False
+            self.text_edit.setPlainText(target_text)
+            if self.search_input.text():
+                self._perform_search(reset_index=True)
+            return
+
+        use_wait_cursor = len(self.original_text) > 100_000
+        if use_wait_cursor:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            formatted = format_log(self.original_text, formatter_name)
+            if formatted:
+                target_text = formatted
+            else:
+                target_text = self.t("msg_format_failed") + "\n\n" + self.original_text
+
+            self.highlighter.set_mode(formatter_name, rehighlight=False)
+            self.highlighter.enabled = len(target_text) <= MAX_HIGHLIGHT_DOC_CHARS
+            self.text_edit.setPlainText(target_text)
+        finally:
+            if use_wait_cursor:
+                QApplication.restoreOverrideCursor()
+
+        if self.search_input.text():
+            self._perform_search(reset_index=True)
 
     def get_selected_formatter(self) -> str:
         """Zwraca nazwę wybranego formattera, by aplikacja mogła ją zapamiętać."""
@@ -812,7 +1091,10 @@ class FormatDialog(QDialog):
         self._move_editor_line(QtGui.QTextCursor.MoveOperation.Down, QtGui.QTextCursor.MoveOperation.Start)
 
     def _load_cursor_text(self, cursor: QtGui.QTextCursor) -> None:
-        selected_text = cursor.selectedText().replace("\u2029", "\n")
+        if self.editor is not None:
+            selected_text = get_full_line_text_at_cursor(self.editor)
+        else:
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
         self.original_text = selected_text
         self._apply_format(self.formatter_combo.currentText())
 
@@ -945,7 +1227,7 @@ class ExpandingLineEdit(QWidget):
     """
     Pole tekstowe zachowujące stały rozmiar jednowierszowy w layoucie,
     które w przypadku tekstu wielowierszowego lub naciśnięcia Shift+Enter
-    płynnie rozwija nakładkę (overlay) w dół, nie spychając innych kontrolek.
+    płynnie rozwija nakładkę (overlay) w dół, nie spychając innych kontrolkami.
     """
 
     returnPressed = Signal()

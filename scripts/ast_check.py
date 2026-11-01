@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scripts/ast_check.py — Szybka analiza AST (duplikaty kodu, nadpisywane zmienne lokalne oraz konwencje testów)."""
+"""scripts/ast_check.py — Szybka analiza AST (duplikaty kodu, nadpisywane zmienne lokalne, pułapki typów IDE oraz konwencje testów)."""
 
 from __future__ import annotations
 
@@ -276,6 +276,190 @@ def check_dead_stores(files: list[Path], repo_root: Path) -> list[str]:
     return issues
 
 
+def _is_any_annotation(node: ast.AST | None) -> bool:
+    if node is None:
+        return False
+    if isinstance(node, ast.Name) and node.id == "Any":
+        return True
+    return isinstance(node, ast.Attribute) and node.attr == "Any"
+
+
+def _is_generic_qt_annotation(node: ast.AST | None) -> str | None:
+    """Sprawdza, czy adnotacja to generyczny QObject / QWidget (lub QObject | None / QWidget | None)."""
+    if node is None:
+        return None
+    if isinstance(node, ast.Name) and node.id in ("QObject", "QWidget", "object"):
+        return node.id
+    if isinstance(node, ast.Attribute) and node.attr in ("QObject", "QWidget"):
+        return node.attr
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _is_generic_qt_annotation(node.left) or _is_generic_qt_annotation(node.right)
+    return None
+
+
+def _is_none_constant(node: ast.AST | None) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def _is_getattr_none_call(node: ast.AST | None) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) >= 3
+        and _is_none_constant(node.args[2])
+    )
+
+
+def _walk_same_scope(stmts: list[ast.stmt]) -> list[ast.AST]:
+    """Zwraca wszystkie węzły AST wewnątrz listy instrukcji z pominięciem zagnieżdżonych funkcji i klas."""
+    result: list[ast.AST] = []
+    stack: list[ast.AST] = list(stmts)
+    while stack:
+        cur = stack.pop()
+        result.append(cur)
+        for child in ast.iter_child_nodes(cur):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            stack.append(child)
+    return result
+
+
+def _is_named_expr(node: ast.AST, var_name: str) -> bool:
+    return isinstance(node, ast.Name) and node.id == var_name
+
+
+def _has_isinstance_narrowing(scope_nodes: list[ast.AST], var_name: str) -> bool:
+    return any(
+        isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Name)
+        and n.func.id == "isinstance"
+        and len(n.args) >= 2
+        and _is_named_expr(n.args[0], var_name)
+        for n in scope_nodes
+    )
+
+
+def check_ide_type_pitfalls(files: list[Path], repo_root: Path) -> list[str]:
+    """Wykrywa konstrukcje powodujące ostrzeżenia PyTypeChecker / PyUnresolvedReferences w IntelliJ IDEA.
+
+    W szczególności:
+    1. Parametry o sygnaturze `param: Any = None` używane w ciele funkcji — IntelliJ wnioskuje typ `Any | None`.
+    2. Zmienne lokalne `x: Any = None` lub `x = getattr(..., None)` bez `isinstance(x, ...)`, na których
+       wykonywane jest `len(x)`, indeksowanie `x[...]` lub wywołanie metody `x.method()` po ponownym przypisaniu.
+    3. Przypisania do atrybutów `x.attr = ...` na zmiennych zadeklarowanych jako generyczny `QObject`, `QWidget` lub `object`.
+    """
+    issues: list[str] = []
+
+    for p in files:
+        rel = p.relative_to(repo_root).as_posix()
+        tree = ast.parse(p.read_text(encoding="utf-8"), filename=rel)
+
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            scope_nodes = _walk_same_scope(fn.body)
+            any_none_vars: dict[str, int] = {}
+            generic_qt_vars: dict[str, tuple[str, int]] = {}
+
+            # 1. Sprawdź parametry z domyślną wartością None i adnotacją Any lub generycznym QObject/QWidget
+            pos_args = fn.args.posonlyargs + fn.args.args
+            num_defaults = len(fn.args.defaults)
+            for idx, arg in enumerate(pos_args):
+                def_idx = idx - (len(pos_args) - num_defaults)
+                if def_idx >= 0 and _is_none_constant(fn.args.defaults[def_idx]) and _is_any_annotation(arg.annotation):
+                    any_none_vars[arg.arg] = arg.lineno
+                qt_base = _is_generic_qt_annotation(arg.annotation)
+                if qt_base is not None:
+                    generic_qt_vars[arg.arg] = (qt_base, arg.lineno)
+
+            for idx, arg in enumerate(fn.args.kwonlyargs):
+                kw_def = fn.args.kw_defaults[idx]
+                if kw_def is not None and _is_none_constant(kw_def) and _is_any_annotation(arg.annotation):
+                    any_none_vars[arg.arg] = arg.lineno
+                qt_base = _is_generic_qt_annotation(arg.annotation)
+                if qt_base is not None:
+                    generic_qt_vars[arg.arg] = (qt_base, arg.lineno)
+
+            # 2. Sprawdź zmienne lokalne `x: Any = None`, `x = getattr(..., None)` oraz `x: QObject | None = ...`
+            for node in scope_nodes:
+                if (
+                    isinstance(node, ast.AnnAssign)
+                    and isinstance(node.target, ast.Name)
+                    and not node.target.id.startswith("_")
+                ):
+                    if _is_any_annotation(node.annotation) and _is_none_constant(node.value):
+                        any_none_vars[node.target.id] = node.lineno
+                    qt_base = _is_generic_qt_annotation(node.annotation)
+                    if qt_base is not None:
+                        generic_qt_vars[node.target.id] = (qt_base, node.lineno)
+                elif isinstance(node, ast.Assign) and _is_getattr_none_call(node.value):
+                    for t in node.targets:
+                        if isinstance(t, ast.Name) and not t.id.startswith("_"):
+                            any_none_vars[t.id] = node.lineno
+
+            # 3. Sprawdź niebezpieczne użycia zmiennych `Any | None` bez zawężenia isinstance(...)
+            for var_name, decl_line in any_none_vars.items():
+                if _has_isinstance_narrowing(scope_nodes, var_name):
+                    continue
+
+                for node in scope_nodes:
+                    # Wywołanie len(var_name)
+                    if (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "len"
+                        and len(node.args) == 1
+                        and _is_named_expr(node.args[0], var_name)
+                    ):
+                        issues.append(
+                            f"[PyTypeChecker] {rel}:{node.lineno} in '{fn.name}': "
+                            f"'len({var_name})' on 'Any | None' variable (declared at line {decl_line}) "
+                            f"without isinstance() narrowing"
+                        )
+                    # Indeksowanie var_name[...]
+                    elif (
+                        isinstance(node, ast.Subscript)
+                        and _is_named_expr(node.value, var_name)
+                        and isinstance(node.ctx, ast.Load)
+                    ):
+                        issues.append(
+                            f"[PyUnresolvedReferences] {rel}:{node.lineno} in '{fn.name}': "
+                            f"indexing '{var_name}[...]' on 'Any | None' variable (declared at line {decl_line}) "
+                            f"without isinstance() narrowing"
+                        )
+                    # Dostęp do atrybutu/metody var_name.attr
+                    elif (
+                        isinstance(node, ast.Attribute)
+                        and _is_named_expr(node.value, var_name)
+                        and isinstance(node.ctx, ast.Load)
+                    ):
+                        issues.append(
+                            f"[PyUnresolvedReferences] {rel}:{node.lineno} in '{fn.name}': "
+                            f"attribute access '{var_name}.{node.attr}' on 'Any | None' variable "
+                            f"(declared at line {decl_line}); use a specific type union 'T | None' instead of 'Any'"
+                        )
+
+            # 4. Sprawdź przypisania atrybutów `var.attr = ...` na generycznych `QObject`/`QWidget`/`object`
+            for var_name, (qt_base, decl_line) in generic_qt_vars.items():
+                if _has_isinstance_narrowing(scope_nodes, var_name):
+                    continue
+                for node in scope_nodes:
+                    if (
+                        isinstance(node, ast.Attribute)
+                        and _is_named_expr(node.value, var_name)
+                        and isinstance(node.ctx, ast.Store)
+                    ):
+                        issues.append(
+                            f"[PyUnresolvedReferences] {rel}:{node.lineno} in '{fn.name}': "
+                            f"setting attribute '{var_name}.{node.attr}' on generic '{qt_base}' "
+                            f"(declared at line {decl_line}); annotate with concrete class (e.g. 'LogTab | None')"
+                        )
+
+    return issues
+
+
 def check_test_conventions(tests_dir: Path, repo_root: Path) -> list[str]:
     """Weryfikuje konwencje w plikach testowych.
 
@@ -335,5 +519,6 @@ def run_ast_checks(repo_root: Path) -> list[str]:
     return (
         check_duplicated_code(files, repo_root)
         + check_dead_stores(files, repo_root)
+        + check_ide_type_pitfalls(files, repo_root)
         + check_test_conventions(repo_root / "tests", repo_root)
     )

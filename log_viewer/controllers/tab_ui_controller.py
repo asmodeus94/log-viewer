@@ -9,7 +9,7 @@ from PySide6.QtGui import QFont, QFontDatabase, QKeySequence
 
 from log_viewer.bitset import bisect_left_custom
 from log_viewer.helpers import THEME_DARK
-from log_viewer.widgets import SearchResultsModel
+from log_viewer.widgets import SearchResultsModel, sync_inactive_palette
 
 if TYPE_CHECKING:
     from log_viewer.log_tab import LogTab
@@ -174,19 +174,7 @@ class UIController(QObject):
             self.tab.text.line_number_area.setStyleSheet(f"background-color: {t['bg_main']};")
         if hasattr(self.tab, "minimap"):
             self.tab.minimap.apply_theme(t)
-        pal = self.tab.text.palette()
-        for role in (
-            QtGui.QPalette.ColorRole.Highlight,
-            QtGui.QPalette.ColorRole.HighlightedText,
-            QtGui.QPalette.ColorRole.Base,
-            QtGui.QPalette.ColorRole.Text,
-        ):
-            pal.setColor(
-                QtGui.QPalette.ColorGroup.Inactive,
-                role,
-                pal.color(QtGui.QPalette.ColorGroup.Active, role),
-            )
-        self.tab.text.setPalette(pal)
+        sync_inactive_palette(self.tab.text)
 
         self.update_text_colors()
 

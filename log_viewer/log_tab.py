@@ -166,6 +166,7 @@ class LogTab(QWidget):
         self._search_worker: FilterWorker | None = None
         self._search_model: SearchResultsModel | None = None
         self._search_extra_sel: QtWidgets.QTextEdit.ExtraSelection | None = None
+        self._search_match_extra_sels: list[QtWidgets.QTextEdit.ExtraSelection] = []
 
         # Scroll tracking & minimapa
         self._scroll_debounce_timer = QTimer(self)
@@ -700,6 +701,14 @@ class LogTab(QWidget):
         self._search_extra_sel = val
 
     @property
+    def search_match_extra_sels(self) -> list[QtWidgets.QTextEdit.ExtraSelection]:
+        return self._search_match_extra_sels
+
+    @search_match_extra_sels.setter
+    def search_match_extra_sels(self, val: list[QtWidgets.QTextEdit.ExtraSelection]) -> None:
+        self._search_match_extra_sels = val
+
+    @property
     def search_model(self) -> SearchResultsModel | None:
         return self._search_model
 
@@ -805,6 +814,7 @@ class LogTab(QWidget):
             "edited": QColor(t.get("edited", "#ce9178")),
             "current_line": QColor(t.get("current_line", "#2a2d2e")),
             "search_active": QColor(t.get("search_active", "#ff8c00")),
+            "search_match_active": QColor(t.get("search_match_active", "#fff176")),
             "black": QColor("#000000"),
         }
         self.ui_controller.apply_theme()
@@ -1316,6 +1326,8 @@ class LogTab(QWidget):
         # --- Wyczyść dane wyszukiwania ---
         self._search_results = []
         self._search_results_all = []
+        self._search_extra_sel = None
+        self._search_match_extra_sels = []
         if self._search_model is not None:
             self._search_model.clear()
             self._search_model = None

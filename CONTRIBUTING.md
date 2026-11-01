@@ -33,7 +33,7 @@ python scripts/install_hooks.py
 ## Standardy Kodowania
 
 * Piszemy zgodnie z wytycznymi **PEP 8** dla języka Python (wersja docelowa: Python 3.10+).
-* Używaj adnotacji typów (_Type Hints_ wg PEP 484) na zdefiniowanych obiektach i parametrach funkcji (np. `def fn(a: int) -> bool:`).
+* Używaj adnotacji typów (_Type Hints_ wg PEP 484) na zdefiniowanych obiektach i parametrach funkcji (np. `def fn(a: int) -> bool:`). Unikaj adnotacji `Any = None` na rzecz konkretnych unii typów (`T | None = None`), aby zachować pełną zgodność z analizą statyczną w `mypy` oraz IntelliJ IDEA / PyCharm.
 * Skrypt i funkcjonalności powinny zawierać zwięzłe i merytoryczne tzw. _Docstrings_ (szczególnie jeżeli dany moduł realizuje złożone wyliczenia matematyczne lub specyficzną logikę wątkową).
 * Preferuj użycie modułu `pathlib.Path` zamiast przestarzałego `os.path`.
 * **Komunikacja, Dokumentacja i Komentarze muszą być w języku polskim.** Projekt korzysta z języka polskiego jako głównego narzędzia do opisywania logiki. Oczekuje się, że wszystkie _docstringi_, komentarze bezpośrednio w kodzie, komunikaty o błędach (nie skierowane w świat), logi wewnętrzne oraz treści zapytań (prompty) będą sformułowane całkowicie w języku polskim, by utrzymać najwyższą spójność merytoryczną.
@@ -50,9 +50,10 @@ python scripts/verify.py
 Skrypt ten weryfikuje sekwencyjnie:
 1. Kompilację plików szablonów interfejsu Qt (`scripts/compile_ui.py`).
 2. Sprawdzenie formatowania i reguł lintera (`ruff format --check` oraz `ruff check`).
-3. Statyczną analizę typów (`mypy log_viewer scripts`).
-4. Pełne wykonanie testów jednostkowych i GUI (`pytest tests/`).
-5. Opcjonalną walidację raportów SARIF (jeśli obecne w repozytorium).
+3. Statyczną analizę typów (`mypy log_viewer scripts` oraz `mypy tests`).
+4. Inspekcję jakości AST (`scripts/ast_check.py` — wykrywanie zduplikowanego kodu, nadpisywanych zmiennych lokalnych, pułapek typów IDE oraz weryfikację konwencji testów).
+5. Pełne wykonanie testów jednostkowych i GUI (`pytest tests/`).
+6. Opcjonalną walidację raportów SARIF (jeśli obecne w repozytorium).
 
 ### Przydatne opcje skryptu verify:
 * **Automatyczna naprawa stylu i importów:**
@@ -65,11 +66,12 @@ Skrypt ten weryfikuje sekwencyjnie:
   ```
 * **Uruchomienie pojedynczego kroku:**
   ```bash
-  python scripts/verify.py --step ui     # tylko kompilacja UI
-  python scripts/verify.py --step lint   # tylko ruff format + check
-  python scripts/verify.py --step mypy   # tylko kontrola typów mypy
-  python scripts/verify.py --step test   # tylko testy pytest
-  python scripts/verify.py --step sarif  # tylko walidacja SARIF
+  python scripts/verify.py --step ui       # tylko kompilacja UI
+  python scripts/verify.py --step lint     # tylko ruff format + check
+  python scripts/verify.py --step mypy     # tylko kontrola typów mypy
+  python scripts/verify.py --step inspect  # tylko inspekcja AST (ast_check.py)
+  python scripts/verify.py --step test     # tylko testy pytest
+  python scripts/verify.py --step sarif    # tylko walidacja SARIF
   ```
 
 ## Uruchamianie Testów Jednostkowych

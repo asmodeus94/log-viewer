@@ -19,6 +19,16 @@ class TestFormatJson:
         expected_output = '2023-10-10 INFO:\n{\n    "key": "value"\n}\n[END]'
         assert format_json(input_text) == expected_output
 
+    def test_multiple_json_objects_in_single_line(self):
+        input_text = '2026-11-01 INFO Request: {"req": 1} Response: {"res": 2} Done'
+        expected_output = '2026-11-01 INFO Request:\n{\n    "req": 1\n}\nResponse:\n{\n    "res": 2\n}\nDone'
+        assert format_json(input_text) == expected_output
+
+    def test_pathological_braces_safety(self):
+        # Tysiące otwierających nawiasów klamrowych nie mogą zawiesić parsera (limit prób)
+        input_text = "{" * 5000 + " not a json"
+        assert format_json(input_text) == input_text
+
     def test_invalid_json(self):
         input_text = '{"key":"value"'
         assert format_json(input_text) == input_text
@@ -40,6 +50,11 @@ class TestFormatXml:
     def test_valid_xml_with_prefix_and_suffix(self):
         input_text = "2023-10-10 INFO: <root><key>value</key></root> [END]"
         expected_output = '2023-10-10 INFO:\n<?xml version="1.0" ?>\n<root>\n    <key>value</key>\n</root>\n[END]'
+        assert format_xml(input_text) == expected_output
+
+    def test_multiple_xml_blocks_in_single_line(self):
+        input_text = "REQ: <a/> RESP: <b/> END"
+        expected_output = 'REQ:\n<?xml version="1.0" ?>\n<a/>\nRESP:\n<?xml version="1.0" ?>\n<b/>\nEND'
         assert format_xml(input_text) == expected_output
 
     def test_invalid_xml(self):
