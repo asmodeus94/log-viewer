@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from log_viewer.helpers import fmt_size
-from log_viewer.widgets import FormatDialog
+from log_viewer.widgets import FormatDialog, get_full_line_text_at_cursor
 from log_viewer.workers import ExportWorker, SaveAsWorker, SaveWorker
 
 if TYPE_CHECKING:
@@ -39,11 +39,10 @@ class EditController(QObject):
     def cmd_format_selection(self) -> None:
         """Pobiera zaznaczony tekst i wywołuje dialog do jego sformatowania."""
         cursor = self.tab.text.textCursor()
-        if not cursor.hasSelection():
-            # Jeżeli nie ma zaznaczenia, bierzemy całą bieżącą linię
-            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
-
-        selected_text = cursor.selectedText().replace("\u2029", "\n")
+        if cursor.hasSelection():
+            selected_text = cursor.selectedText().replace("\u2029", "\n")
+        else:
+            selected_text = get_full_line_text_at_cursor(self.tab.text, self.tab)
 
         if not selected_text.strip():
             return

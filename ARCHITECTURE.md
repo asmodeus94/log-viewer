@@ -14,7 +14,8 @@ flowchart TD
     C -->|"Indeksuje plik partiami"| D["indexer.py: LineIndexer"]
     D -->|"Zwraca indeksy linii do GUI"| Z
     Z -->|"Zarządza wirtualnym oknem i pobiera linie"| D
-    Z -->|"Aktualizuje i renderuje"| E["widgets.py: LogPlainTextEdit, MiniMap & ExpandingLineEdit"]
+    Z -->|"Aktualizuje i renderuje"| E["widgets.py: LogPlainTextEdit, MiniMap, ExpandingLineEdit & FormatDialog"]
+    E -->|"Formatuje i koloruje struktury"| FH["formatters.py & highlighters.py"]
     Z -->|"Żąda wyszukiwania / filtrowania"| F("workers.py: FilterWorker & IncrementalFilterWorker")
     F -->|"Przeszukuje bajty asynchronicznie"| G["filter_engine.py: FilterEngine"]
     G -->|"Zwraca skompresowane dopasowania"| H["bitset.py: Bitset"]
@@ -32,11 +33,11 @@ Pełni rolę kontrolera głównego okna aplikacji. Zawiera klasę `LogViewerWind
 ### 2. `log_tab.py` i podpakiet `controllers/`
 Zawiera klasę `LogTab`, czyli widżet odpowiadający za pojedynczą otwartą zakładkę pliku. Komponent ten wykorzystuje architekturę kompozycji, oddelegowując swoje odpowiedzialności domenowe do wyspecjalizowanych kontrolerów znajdujących się w katalogu `log_viewer/controllers/`:
 * `FileController` – zarządza wczytywaniem, indeksowaniem, przeładowywaniem plików oraz śledzeniem zmian w trybie na żywo (*Tail / Follow Mode*).
-* `EditController` – nadzoruje edycję tekstu wewnątrz wirtualnego widoku, operacje dialogowe zapisu oraz eksport zmian.
+* `EditController` – nadzoruje edycję tekstu wewnątrz wirtualnego widoku, wywoływanie okna formatowania (`FormatDialog`), operacje dialogowe zapisu oraz eksport zmian.
 * `SearchController` – koordynuje proces wyszukiwania fraz i wyrażeń w pliku oraz w przefiltrowanych wynikach.
 * `FilterController` – steruje filtrowaniem zawartości z uwzględnieniem dodatkowych opcji (jak linie kontekstu, negacja, wyrażenia regularne).
 * `BookmarkController` – zarządza zakładkami (*bookmarks*) w obrębie otwartego pliku oraz ich usuwaniem i nawigacją.
-* `ViewportController` – zarządza wirtualnym oknem (*viewport*), leniwym doładowywaniem wierszy z krawędzi (`append_lines`, `prepend_lines`), nawigacją (`cmd_goto`, skok do linii i do offsetu bajtowego) oraz zaznaczeniami podświetleń (`ExtraSelections`).
+* `ViewportController` – zarządza wirtualnym oknem (*viewport*), leniwym doładowywaniem wierszy z krawędzi (`append_lines`, `prepend_lines`), pobieraniem pełnej (nieuciętej przez widok) treści linii z bufora lub `LineIndexer`, nawigacją (`cmd_goto`, skok do linii i do offsetu bajtowego) oraz zaznaczeniami podświetleń (`ExtraSelections`, w tym podświetlaniem dokładnych dopasowań podciągów w aktywnej linii wyszukiwania i automatycznym przewijaniem poziomym do trafienia).
 * `UIController` – zarządza elementami interfejsu karty, połączeniami sygnałów i slotów (drzewa zakładek i edycji, widok wyników wyszukiwania `search_results_view`), dynamiczną aplikacją motywów (Dark/Light), czcionek oraz synchronizacją wskaźnika minimapy.
 
 Klasa główna `LogTab` spina ze sobą te kontrolery, zachowując zwięzłość kodu i spójność stanu w karcie.
@@ -51,7 +52,7 @@ Niskopoziomowy silnik wyszukiwania i filtrowania danych realizowany w osobnym w�
 
 ### 5. `bitset.py`
 Samodzielny fundament wydajnościowy aplikacji, operujący bezpośrednio na tablicach słów maszynowych `array.array('Q')`:
-* Przechowuje miliony trafień w skompresowanej strukturze bitowej, redukując zużycie pamięci operacyjnej do ułamka megabajta.
+* Przechowuje miliony trafień w skompresowanej strukturze bitowej, redukując zużycie zużycie pamięci operacyjnej do ułamka megabajta.
 * Oferuje zoptymalizowane zliczanie unikalnych dopasowań w C (`itertools.accumulate` oraz `int.bit_count`) i leniwe buforowanie długości.
 * Zawiera autorskie, szybkie implementacje wyszukiwania binarnego (`bisect_left_custom`, `bisect_right_custom`) operujące bezpośrednio na bitach bez konieczności rozpakowywania ich do list Pythona.
 
@@ -61,11 +62,13 @@ Zarządza stanem modyfikacji tekstu bez naruszania oryginalnego pliku źródłow
 * Realizuje bezpieczny, atomowy zapis do pliku z użyciem pliku tymczasowego (`.log-viewer_tmp_*`) oraz kopii zapasowej (`.bak`).
 * Weryfikuje nienaruszalność pliku przed zapisem w nanosekundach (`st_mtime_ns`) oraz rozmiarze (`st_size`), zabezpieczając przed błędami wyścigu (TOCTOU).
 
-### 7. `formatters.py`
-Moduł odpowiedzialny za automatyczne wykrywanie i estetyczne formatowanie (*pretty-print*) uporządkowanych struktur danych:
-* `format_json` – wyodrębnia i formatuje struktury JSON osadzone wewnątrz linii tekstu.
-* `format_xml` – bezpiecznie wyodrębnia i formatuje bloki XML przy użyciu biblioteki `defusedxml` (zabezpieczenie przed atakami typu XML Entity Expansion).
-* Wykorzystywany m.in. przez okno dialogowe `FormatDialog` do analizy trudnych do odczytania rekordów logów.
+### 7. `formatters.py` i `highlighters.py`
+Moduły odpowiedzialne za wyodrębnianie, estetyczne formatowanie (*pretty-print*) oraz kolorowanie składni uporządkowanych struktur danych:
+* `formatters.py`:
+  * `format_json` – bezpiecznie wyodrębnia i formatuje jedną lub wiele struktur JSON (`raw_decode` w pętli) osadzonych wewnątrz pojedynczej linii lub wielu linii tekstu, z limitami bezpieczeństwa chroniącymi przed zawieszeniem wątku GUI (`MAX_STRUCTURES_PER_LINE`, `MAX_JSON_PARSE_ATTEMPTS`, `MAX_FORMAT_INPUT_CHARS`).
+  * `format_xml` – bezpiecznie wyodrębnia i formatuje jedną lub wiele struktur XML przy użyciu biblioteki `defusedxml` (zabezpieczenie przed atakami typu XML Entity Expansion oraz limity `MAX_XML_PARSE_ATTEMPTS` i `MAX_XML_INPUT_CHARS`).
+* `highlighters.py`:
+  * `StructuredCodeHighlighter` – klasa oparta na `QSyntaxHighlighter` zapewniająca kolorowanie składni JSON i XML dostosowane do aktywnego motywu (`THEME_DARK` / `THEME_LIGHT`), wyposażona w bezpieczniki długości pojedynczego bloku (`MAX_HIGHLIGHT_BLOCK_LEN`) oraz rozmiaru dokumentu (`MAX_HIGHLIGHT_DOC_CHARS`).
 
 ### 8. `workers.py`
 Katalog obiektów wspierających asynchroniczność w Qt przy użyciu technologii `QThread` i `QObject`.
@@ -79,13 +82,14 @@ Zawiera workery, których cel polega na odseparowaniu ciężkich operacji Wejśc
 
 ### 9. `widgets.py`
 Definiuje wyspecjalizowane, wizualne komponenty widoku dla biblioteki PySide6:
-* `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
+* `LogPlainTextEdit` – autorski widżet poszerzający bazowy `QPlainTextEdit` o wsparcie do pracy ze zdarzeniami `Drag & Drop`, numeracją wierszy, skrótami formatowania/kopiowania pełnych linii oraz malowaniem kontekstowego podświetlenia dla bieżącej linii.
 * `MiniMap` – maluje na kanwie pionową mapę wskaźnika pozycji i widocznego obszaru w oparciu o całkowitą liczbę wierszy, oferując błyskawiczną nawigację.
 * `SearchResultsModel` – model danych oparty na `QAbstractListModel`, optymalizujący listę setek tysięcy rezultatów bez obciążania i zawieszania aplikacji za pomocą leniwego pobierania elementów w miarę scrollowania (`fetchMore()`). Jako źródło prawdy przyjmuje strukturę `Bitset`.
 * `ExpandingLineEdit` – zaawansowane pole wyszukiwania z pływającą nakładką wielowierszową (*floating overlay*), automatycznym rozszerzaniem widoku dla długich zapytań, historią wyrażeń i wsparciem skrótów klawiszowych, działające bez deformowania layoutu kontrolek rodzica.
-* Oraz dodatkowe komponenty (takie jak `LineNumberArea`, `SettingsDialog`, `FormatDialog`), które odpowiadają za detale wizualne i okna dialogowe aplikacji.
+* `FormatDialog` – okno dialogowe do formatowania i analizy struktur JSON/XML (pobierające pełne, nieucięte linie z pliku), wyposażone w kolorowanie składni (`StructuredCodeHighlighter`), wbudowaną wyszukiwarkę wewnętrzną (`Ctrl+F`, `F3`/`Shift+F3`, licznik trafień, dwustopniowy `Escape`), przełącznik zawijania wierszy (`Word Wrap`), kopiowanie do schowka oraz nawigację między sąsiednimi liniami logu.
+* Oraz dodatkowe komponenty (takie jak `LineNumberArea`, `SettingsDialog`), które odpowiadają za detale wizualne i ustawienia aplikacji.
 
 ### 10. Moduły wspierające: `config.py`, `i18n.py`, `helpers.py`
 * `config.py` – zarządza trwałą konfiguracją użytkownika (`UserConfig`) zapisaną w pliku JSON w katalogu domowym (`~/.log-viewer.json`).
 * `i18n.py` – centralne repozytorium tłumaczeń interfejsu aplikacji, wspierające przełączanie w locie pomiędzy językiem polskim i angielskim.
-* `helpers.py` – zawiera stałe systemowe, definicje palet stylów motywów (`THEME_DARK`, `THEME_LIGHT`), obsługę przezroczystego odczytu plików skompresowanych (`open_maybe_compressed` dla `.gz`, `.bz2`, `.xz`), skracanie zbyt długich linii (`truncate_for_display`) oraz parser zdarzeń przeciągania plików (Drag & Drop).
+* `helpers.py` – zawiera stałe systemowe, definicje palet stylów motywów (`THEME_DARK`, `THEME_LIGHT`, w tym kolory podświetleń wyszukiwania i składni JSON/XML), obsługę przezroczystego odczytu plików skompresowanych (`open_maybe_compressed` dla `.gz`, `.bz2`, `.xz`), skracanie zbyt długich linii (`truncate_for_display`) oraz parser zdarzeń przeciągania plików (Drag & Drop).

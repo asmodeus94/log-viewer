@@ -177,6 +177,7 @@ class ViewportController(QObject):
         self._context_widget_lines = context_widget_lines
         self._filter_hit_widget_lines = filter_hit_widget_lines
         self.tab.search_extra_sel = None
+        self.tab.search_match_extra_sels = []
         self.tab.text.set_line_map(line_map)
 
         self._rebuild_extra_selections()
@@ -581,14 +582,56 @@ class ViewportController(QObject):
             edit = self.tab.edit_buffer.get(file_line_no)
             if edit is not None:
                 return edit
-        if widget_line_idx < len(self.tab.window_lines):
+        if (
+            0 <= widget_line_idx < len(self.tab.window_lines)
+            and self.tab.window_lines[widget_line_idx][0] == file_line_no
+        ):
+            return self.tab.window_lines[widget_line_idx][1]
+        if self.tab.indexer is not None:
+            read = self.tab.indexer.read_lines(file_line_no, 1)
+            if read:
+                return read[0][1]
+        if 0 <= widget_line_idx < len(self.tab.window_lines):
             return self.tab.window_lines[widget_line_idx][1]
         return ""
 
     _get_display_text = get_display_text
 
+    def _find_line_search_matches(self, line_text: str) -> list[tuple[int, int]]:
+        """Zwraca listę niepustych przedziałów (start, end) dopasowań wyszukiwania w podanym tekście linii."""
+        if not line_text or self.tab.last_search_negate:
+            return []
+
+        pattern = self.tab.search_pattern
+        if not pattern:
+            return []
+
+        if self.tab.last_search_regex:
+            compiled = self.tab.search_compiled
+            if compiled is None:
+                return []
+            return [(m.start(), m.end()) for m in compiled.finditer(line_text) if m.end() > m.start()]
+
+        case = self.tab.last_search_case
+        haystack = line_text if case else line_text.lower()
+        needle = pattern if case else pattern.lower()
+        pat_len = len(needle)
+        if pat_len == 0:
+            return []
+
+        matches: list[tuple[int, int]] = []
+        pos = 0
+        while True:
+            idx = haystack.find(needle, pos)
+            if idx == -1:
+                break
+            matches.append((idx, idx + pat_len))
+            pos = idx + pat_len
+        return matches
+
     def _highlight_and_scroll(self, widget_line_no: int) -> None:
-        block_cursor = QtGui.QTextCursor(self.tab.text.document().findBlockByNumber(widget_line_no))
+        block = self.tab.text.document().findBlockByNumber(widget_line_no)
+        block_cursor = QtGui.QTextCursor(block)
         sel_cursor = QtGui.QTextCursor(block_cursor)
         sel_cursor.select(QtGui.QTextCursor.SelectionType.LineUnderCursor)
 
@@ -600,8 +643,48 @@ class ViewportController(QObject):
         sel.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
         self.tab.search_extra_sel = sel
 
+        line_text = block.text()
+        matches = self._find_line_search_matches(line_text)
+        match_sels: list[QtWidgets.QTextEdit.ExtraSelection] = []
+        if matches and block.isValid():
+            fmt_match = QtGui.QTextCharFormat()
+            fmt_match.setBackground(colors.get("search_match_active", QColor("#fff176")))
+            fmt_match.setForeground(colors.get("black", QColor("#000000")))
+            fmt_match.setFontWeight(QtGui.QFont.Weight.Bold)
+            block_pos = block.position()
+            for start, end in matches:
+                m_sel = QtWidgets.QTextEdit.ExtraSelection()
+                m_cursor = QtGui.QTextCursor(self.tab.text.document())
+                m_cursor.setPosition(block_pos + start)
+                m_cursor.setPosition(block_pos + end, QtGui.QTextCursor.MoveMode.KeepAnchor)
+                m_sel.cursor = m_cursor
+                m_sel.format = fmt_match
+                match_sels.append(m_sel)
+        self.tab.search_match_extra_sels = match_sels
+
         block_cursor.clearSelection()
-        self.tab.text.setTextCursor(block_cursor)
+        if matches and block.isValid():
+            block_pos = block.position()
+            # Przewiń poziomo tak, by koniec i początek pierwszego dopasowania znalazły się w widoku
+            block_cursor.setPosition(block_pos + matches[0][1])
+            self.tab.text.setTextCursor(block_cursor)
+            self.tab.text.ensureCursorVisible()
+            block_cursor.setPosition(block_pos + matches[0][0])
+            self.tab.text.setTextCursor(block_cursor)
+            self.tab.text.ensureCursorVisible()
+        elif (
+            block.isValid()
+            and not self.tab.last_search_negate
+            and bool(self.tab.search_pattern)
+            and " ... [truncated " in line_text
+        ):
+            # Dopasowanie w uciętej części linii — przewiń poziomo do komunikatu o ucięciu
+            block_cursor.setPosition(block.position() + len(line_text))
+            self.tab.text.setTextCursor(block_cursor)
+            self.tab.text.ensureCursorVisible()
+        else:
+            self.tab.text.setTextCursor(block_cursor)
+            self.tab.text.ensureCursorVisible()
 
         self._update_current_line_highlight()
         self.tab.text.viewport().update()
@@ -641,6 +724,10 @@ class ViewportController(QObject):
             cur.format.setBackground(color_current_line)
             cur.format.setProperty(QtGui.QTextFormat.Property.FullWidthSelection, True)
             sels.append(cur)
+
+        match_sels = self.tab.search_match_extra_sels
+        if match_sels:
+            sels.extend(match_sels)
 
         self.tab.text.setExtraSelections(sels)
 
