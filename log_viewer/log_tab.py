@@ -247,13 +247,30 @@ class LogTab(QWidget):
         self._edge_timer.start()
 
         # Konfiguracja niestandardowych opcji menu kontekstowego
-        action_refresh = QAction(self.t("btn_refresh"), self)
-        action_refresh.triggered.connect(self.cmd_refresh)
-        action_reload = QAction(self.t("btn_reload"), self)
-        action_reload.triggered.connect(self.cmd_reload)
-        self.ui.text.custom_context_actions.extend([action_refresh, action_reload])
+        self._action_refresh = QAction(self.t("btn_refresh"), self)
+        self._action_refresh.setProperty("i18n_key", "btn_refresh")
+        self._action_refresh.triggered.connect(self.cmd_refresh)
+        self._action_reload = QAction(self.t("btn_reload"), self)
+        self._action_reload.setProperty("i18n_key", "btn_reload")
+        self._action_reload.triggered.connect(self.cmd_reload)
+        self.ui.text.custom_context_actions.extend([self._action_refresh, self._action_reload])
 
     # ------------------------------------------------------------------ helpers
+    def retranslate_ui(self) -> None:
+        """Aktualizuje etykiety i teksty akcji po zmianie języka."""
+        if hasattr(self, "_action_refresh"):
+            self._action_refresh.setText(self.t("btn_refresh"))
+        if hasattr(self, "_action_reload"):
+            self._action_reload.setText(self.t("btn_reload"))
+        self.lbl_bookmarks.setText(self.t("lbl_bookmarks"))
+        self.lbl_edits.setText(self.t("lbl_edits"))
+        self.bm_tree.setHeaderLabels([self.t("col_line")])
+        self.ed_tree.setHeaderLabels([self.t("col_line")])
+        self.btn_del_bookmarks.setText(self.t("btn_delete_sel"))
+        self.btn_del_edits.setText(self.t("btn_delete_sel"))
+        self.search_results_label.setText(self.t("lbl_search_results_empty"))
+        self.refresh_status()
+
     def t(self, key: str) -> str:
         return self._main.t(key)
 

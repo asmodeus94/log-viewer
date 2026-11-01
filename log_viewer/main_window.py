@@ -258,14 +258,7 @@ class LogViewerWindow(QMainWindow):
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)
             if isinstance(tab, LogTab):
-                tab.lbl_bookmarks.setText(self.t("lbl_bookmarks"))
-                tab.lbl_edits.setText(self.t("lbl_edits"))
-                tab.bm_tree.setHeaderLabels([self.t("col_line")])
-                tab.ed_tree.setHeaderLabels([self.t("col_line")])
-                tab.btn_del_bookmarks.setText(self.t("btn_delete_sel"))
-                tab.btn_del_edits.setText(self.t("btn_delete_sel"))
-                tab.search_results_label.setText(self.t("lbl_search_results_empty"))
-                tab.refresh_status()
+                tab.retranslate_ui()
         tab = self.tabs.currentWidget()
         if isinstance(tab, LogTab):
             tab.refresh_status()

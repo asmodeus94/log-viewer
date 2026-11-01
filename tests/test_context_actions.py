@@ -36,3 +36,35 @@ def test_context_actions_disabled_no_tabs(tmp_path):
 
     # Zamykamy okno
     win.close()
+
+
+def test_context_menu_reload_refresh_translations(tmp_path):
+    if QtWidgets.QApplication.instance() is None:
+        QtWidgets.QApplication(sys.argv)
+    win = LogViewerWindow()
+    win.set_language("pl")
+
+    test_file = tmp_path / "test_ctx.log"
+    test_file.write_text("Line 1\nLine 2")
+    tab = win.open_file_in_tab(str(test_file))
+    assert tab is not None
+
+    # Sprawdzenie początkowych polskich nazw w menu kontekstowym tekstu
+    custom_actions = tab.ui.text.custom_context_actions
+    action_texts = [a.text() for a in custom_actions]
+    assert "Odśwież (F5)" in action_texts
+    assert "Przeładuj (Ctrl+R)" in action_texts
+
+    # Zmiana języka na angielski
+    win.set_language("en")
+    action_texts_en = [a.text() for a in tab.ui.text.custom_context_actions]
+    assert "Refresh (F5)" in action_texts_en
+    assert "Reload (Ctrl+R)" in action_texts_en
+
+    # Powrót do języka polskiego
+    win.set_language("pl")
+    action_texts_pl = [a.text() for a in tab.ui.text.custom_context_actions]
+    assert "Odśwież (F5)" in action_texts_pl
+    assert "Przeładuj (Ctrl+R)" in action_texts_pl
+
+    win.close()

@@ -366,6 +366,9 @@ class LogPlainTextEdit(QPlainTextEdit):
         if self.custom_context_actions:
             menu.addSeparator()
             for action in self.custom_context_actions:
+                i18n_key = action.property("i18n_key")
+                if i18n_key:
+                    action.setText(t(i18n_key))
                 menu.addAction(action)
 
         menu.exec(event.globalPos())
