@@ -87,3 +87,6 @@ Plik ten zawiera zbiór kluczowych reguł i uwag dla agentów AI pracujących z 
   .venv\Scripts\python.exe scripts/verify.py --fix
   ```
 - **Fizyczna blokada (Hooks):** W projekcie skonfigurowany jest Lifecycle Hook Antigravity (`.agents/hooks.json` -> `scripts/verify_hook.py`) oraz Git Pre-commit hook (`scripts/install_hooks.py`). Zakończenie odpowiedzi przez agenta lub wykonanie `git commit` zostanie fizycznie zablokowane, dopóki kod nie osiągnie 0 błędów i pełnej zgodności z bramką jakości.
+
+## 17. Ochrona plików i katalogów ignorowanych (.gitignore / exclude)
+- Jeżeli tworzony jest jakikolwiek plik lub struktura w miejscu wyznaczonym przez użytkownika i katalog ten jest celowo dodany do ignorowanych, **pod żadnym pozorem nie wolno usuwać ani modyfikować tych wpisów w `.gitignore` ani w pliku wykluczeń Git `exclude` (`.git/info/exclude`)**. Celowe wykluczenia muszą bezwzględnie pozostać nienaruszone.
