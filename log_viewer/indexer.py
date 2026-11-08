@@ -1,4 +1,4 @@
-"""LineIndexer — rzadki indeks (byte_offset, line_number) co ~1 MB."""
+"""LineIndexer — rzadki indeks (byte_offset, line_number) co ~16 KB."""
 
 from __future__ import annotations
 
@@ -228,7 +228,7 @@ def _indexer_worker_chunk(args: tuple[int, int, str, int, int]) -> tuple[int, li
 
 class LineIndexer:
     """
-    Buduje rzadki indeks pliku: co ~1 MB zapisuje (byte_offset, line_number).
+    Buduje rzadki indeks pliku: co ~16 KB zapisuje (byte_offset, line_number).
     Pozwala na O(log N) skok do dowolnej linii bez wczytywania całego pliku.
 
     Utrzymuje jeden otwarty deskryptor pliku (z blokadą).
@@ -324,7 +324,7 @@ class LineIndexer:
 
     def _get_file(self) -> typing.IO[bytes]:
         if self._file_cache is None:
-            buffering = 1024 * 1024 if not self.is_compressed else -1
+            buffering = 64 * 1024 if not self.is_compressed else -1
             self._file_cache = open_maybe_compressed(str(self.path), "rb", buffering=buffering)
         file_obj = self._file_cache
         assert file_obj is not None
@@ -767,7 +767,7 @@ class LineIndexer:
         nl_cnt = 0
         last_nl_global = -1
         bytes_left = to_read
-        chunk_size = 512 * 1024
+        chunk_size = 64 * 1024
 
         with self._file_lock:
             f = self._get_file()

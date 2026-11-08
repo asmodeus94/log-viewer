@@ -213,18 +213,116 @@ class FilterStrategy(ABC):
         return hits
 
 
+def _build_case_insensitive_bytes_regex(needle: str, encoding: str) -> re.Pattern[bytes] | None:
+    """Buduje skompilowany wzorzec re.Pattern[bytes] dla case-insensitive wyszukiwania Unicode na surowych bajtach.
+
+    Dla każdego znaku z `needle` wyznacza wszystkie jego warianty wielkości liter (lower, upper, title, casefold),
+    koduje je w zadanym kodowaniu do surowych bajtów i tworzy alternatywę bajtową (np. (?:\xc5\x81|\xc5\x82) dla Ł/ł).
+    Dzięki temu silnik `re` w kodzie C przeszukuje surowe bajty bez dekodowania 4-megabajtowych bloków i bez
+    błędów wynikających z ograniczenia `bytes.lower()` / `re.IGNORECASE` na bajtach wyłącznie do ASCII.
+    """
+    if not needle:
+        return None
+
+    parts: list[bytes] = []
+    for ch in needle:
+        variants: set[str] = {ch, ch.lower(), ch.upper(), ch.title()}
+        cf = ch.casefold()
+        if cf:
+            variants.add(cf)
+            variants.add(cf.upper())
+            variants.add(cf.lower())
+
+        byte_variants: set[bytes] = set()
+        try:
+            for v in variants:
+                byte_variants.add(v.encode(encoding, errors="strict"))
+        except (UnicodeError, LookupError, ValueError):
+            return None
+
+        if not byte_variants:
+            return None
+
+        if len(byte_variants) == 1:
+            parts.append(re.escape(next(iter(byte_variants))))
+        else:
+            sorted_vars = sorted(byte_variants)
+            parts.append(b"(?:" + b"|".join(re.escape(bv) for bv in sorted_vars) + b")")
+
+    try:
+        return re.compile(b"".join(parts))
+    except re.error:
+        return None
+
+
+def _scan_bytes_regex_matches(pattern: re.Pattern[bytes], chunk: bytes, start_line: int) -> list[int]:
+    """Skanuje chunk bajtów za pomocą compiled regex bytes i zwraca listę numerów linii z dopasowaniem."""
+    hits: list[int] = []
+    pos = 0
+    last_nl_pos = -1
+    lines_counted = start_line
+    chunk_len = len(chunk)
+    chunk_ends_nl = not chunk or chunk.endswith(b"\n")
+    search = pattern.search
+    count = chunk.count
+    find = chunk.find
+    append = hits.append
+
+    while True:
+        match = search(chunk, pos)
+        if match is None:
+            break
+
+        hit_pos = match.start()
+        if hit_pos == chunk_len and chunk_ends_nl:
+            break
+
+        nl_count = count(b"\n", last_nl_pos + 1, hit_pos)
+        lines_counted += nl_count
+        append(lines_counted)
+
+        next_nl = find(b"\n", hit_pos)
+        if next_nl == -1:
+            break
+
+        last_nl_pos = next_nl
+        lines_counted += 1
+        pos = next_nl + 1
+
+    return hits
+
+
 class PlainTextStrategy(FilterStrategy):
     """Strategia dla zwykłego wyszukiwania tekstu (bez wyrażeń regularnych)."""
 
     def __init__(self, needle: str, case_sensitive: bool, negate: bool, encoding: str) -> None:
         super().__init__(negate, encoding)
+        self.needle = needle
         self.case_sensitive = case_sensitive
         self.needle_bytes: bytes = needle.encode(encoding, errors="replace")
+        self._unicode_matcher: re.Pattern[bytes] | None = None
+        self._use_str_fallback: bool = False
+        self._needle_str_cf: str = ""
+
         if not case_sensitive:
-            self.needle_bytes = self.needle_bytes.lower()
+            if needle.isascii():
+                self.needle_bytes = self.needle_bytes.lower()
+            else:
+                self._unicode_matcher = _build_case_insensitive_bytes_regex(needle, encoding)
+                if self._unicode_matcher is None:
+                    self._use_str_fallback = True
+                    self._needle_str_cf = needle.casefold()
 
     def match(self, line_bytes: bytes) -> bool:
-        if not self.case_sensitive:
+        if self._unicode_matcher is not None:
+            matched = self._unicode_matcher.search(line_bytes) is not None
+        elif self._use_str_fallback:
+            try:
+                text = line_bytes.decode(self.encoding, errors="replace")
+            except (UnicodeError, LookupError, ValueError, TypeError):
+                text = repr(line_bytes)
+            matched = self._needle_str_cf in text.casefold()
+        elif not self.case_sensitive:
             matched = self.needle_bytes in line_bytes.lower()
         else:
             matched = self.needle_bytes in line_bytes
@@ -232,7 +330,7 @@ class PlainTextStrategy(FilterStrategy):
         return not matched if self.negate else matched
 
     def match_chunk(self, chunk: bytes, start_line: int) -> list[int]:
-        if not self.needle_bytes:
+        if not self.needle:
             return (
                 []
                 if self.negate
@@ -242,6 +340,12 @@ class PlainTextStrategy(FilterStrategy):
                     )
                 )
             )
+
+        if self._unicode_matcher is not None:
+            return self._match_chunk_unicode_bytes(chunk, start_line)
+
+        if self._use_str_fallback:
+            return self._match_chunk_str_fallback(chunk, start_line)
 
         haystack = chunk.lower() if not self.case_sensitive else chunk
         hits: list[int] = []
@@ -282,6 +386,70 @@ class PlainTextStrategy(FilterStrategy):
 
         return hits
 
+    def _match_chunk_unicode_bytes(self, chunk: bytes, start_line: int) -> list[int]:
+        assert self._unicode_matcher is not None
+        if self.negate:
+            lines = chunk.split(b"\n")
+            if lines and lines[-1] == b"":
+                lines.pop()
+            hits: list[int] = []
+            search = self._unicode_matcher.search
+            for line_bytes in lines:
+                if search(line_bytes) is None:
+                    hits.append(start_line)
+                start_line += 1
+            return hits
+
+        return _scan_bytes_regex_matches(self._unicode_matcher, chunk, start_line)
+
+    def _match_chunk_str_fallback(self, chunk: bytes, start_line: int) -> list[int]:
+        try:
+            target = chunk.decode(self.encoding, errors="replace")
+        except (UnicodeError, LookupError, ValueError, TypeError):
+            target = repr(chunk)
+
+        target_cf = target.casefold()
+        needle_cf = self._needle_str_cf
+
+        if self.negate:
+            lines = target_cf.split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
+            hits: list[int] = []
+            for line_str in lines:
+                if needle_cf not in line_str:
+                    hits.append(start_line)
+                start_line += 1
+            return hits
+
+        hits = []
+        pos = 0
+        last_nl_pos = -1
+        lines_counted = start_line
+        count = target_cf.count
+        find = target_cf.find
+        append = hits.append
+
+        while True:
+            hit_pos = find(needle_cf, pos)
+            if hit_pos == -1:
+                break
+
+            nl_count = count("\n", last_nl_pos + 1, hit_pos)
+            lines_counted += nl_count
+            if not hits or hits[-1] != lines_counted:
+                append(lines_counted)
+
+            next_nl = find("\n", hit_pos)
+            if next_nl == -1:
+                break
+
+            last_nl_pos = next_nl
+            lines_counted += 1
+            pos = next_nl + 1
+
+        return hits
+
 
 class RegexStrategy(FilterStrategy):
     """Strategia dla wyrażeń regularnych z optymalizacją pod surowe bajty."""
@@ -293,11 +461,15 @@ class RegexStrategy(FilterStrategy):
         self.matcher_str: re.Pattern[str] = re.compile(pattern, self.flags)
 
         self.matcher_bytes: re.Pattern[bytes] | None = None
-        try:
-            pattern_bytes = pattern.encode(encoding, errors="replace")
-            self.matcher_bytes = re.compile(pattern_bytes, self.flags)
-        except (re.error, UnicodeError, ValueError):
-            pass  # Fallback na sprawdzanie łańcuchów znaków
+        # Jeśli szukamy case-insensitive i wzorzec zawiera znaki spoza ASCII,
+        # flaga re.IGNORECASE na surowych bajtach działa w Pythonie wyłącznie jako re.ASCII!
+        # W takim wypadku używamy matcher_str (Fallback na łańcuchy znaków) z pełnym Unicode.
+        if case_sensitive or pattern.isascii():
+            try:
+                pattern_bytes = pattern.encode(encoding, errors="replace")
+                self.matcher_bytes = re.compile(pattern_bytes, self.flags)
+            except (re.error, UnicodeError, ValueError):
+                pass  # Fallback na sprawdzanie łańcuchów znaków
 
     def match(self, line_bytes: bytes) -> bool:
         # Najpierw sprawdź na surowych bajtach (szybkie)
@@ -323,39 +495,7 @@ class RegexStrategy(FilterStrategy):
     def _match_chunk_bytes(self, chunk: bytes, start_line: int) -> list[int]:
         """Dopasowywanie regex bezpośrednio na bajtach z szybkim skokiem do nowej linii (Optymalizacja 2.3)."""
         assert self.matcher_bytes is not None
-        hits: list[int] = []
-        pos = 0
-        last_nl_pos = -1
-        lines_counted = start_line
-        chunk_len = len(chunk)
-        chunk_ends_nl = not chunk or chunk.endswith(b"\n")
-        search = self.matcher_bytes.search
-        count = chunk.count
-        find = chunk.find
-        append = hits.append
-
-        while True:
-            match = search(chunk, pos)
-            if match is None:
-                break
-
-            hit_pos = match.start()
-            if hit_pos == chunk_len and chunk_ends_nl:
-                break
-
-            nl_count = count(b"\n", last_nl_pos + 1, hit_pos)
-            lines_counted += nl_count
-            append(lines_counted)
-
-            next_nl = find(b"\n", hit_pos)
-            if next_nl == -1:
-                break
-
-            last_nl_pos = next_nl
-            lines_counted += 1
-            pos = next_nl + 1
-
-        return hits
+        return _scan_bytes_regex_matches(self.matcher_bytes, chunk, start_line)
 
     def _match_chunk_str(self, chunk: bytes, start_line: int) -> list[int]:
         """Fallback dopasowywania regex na str z szybkim skokiem do nowej linii (Optymalizacja 2.3)."""

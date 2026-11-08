@@ -30,6 +30,12 @@ def _collect_entries(**kwargs: Any) -> tuple[int, int]:
 
 
 class TestLineIndexerBasic:
+    def test_default_interval_is_16kb(self, temp_log_file):
+        path = temp_log_file(num_lines=10)
+        idx = LineIndexer(path)
+        assert idx.index_interval_bytes == 16 * 1024
+        idx.close()
+
     def test_basic_indexing(self, temp_log_file):
         path = temp_log_file(num_lines=10000)
         idx = LineIndexer(path)

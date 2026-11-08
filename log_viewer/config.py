@@ -18,6 +18,8 @@ from .helpers import (
     WINDOW_SIZE_LINES,
 )
 
+_LEGACY_INDEX_INTERVAL_BYTES = 1 * 1024 * 1024
+
 
 def secure_opener(path: str, flags: int) -> int:
     return os.open(path, flags, 0o600)
@@ -63,6 +65,8 @@ class UserConfig:
                 for k, v in self.DEFAULTS.items():
                     if k in data and (v is None or isinstance(data[k], type(v)) or data[k] is None):
                         self._data[k] = data[k]
+                if self._data.get("index_interval_bytes") == _LEGACY_INDEX_INTERVAL_BYTES:
+                    self._data["index_interval_bytes"] = INDEX_INTERVAL_BYTES
         except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
             # Brak pliku przy pierwszym uruchomieniu jest normalny — nie loguj
             if isinstance(e, FileNotFoundError):
