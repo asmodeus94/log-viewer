@@ -447,7 +447,7 @@ class SettingsDialog(QDialog):
         self.ws_spin.setValue(app.window_size_lines)
         self.md_spin.setValue(app.max_display_lines)
         self.ml_spin.setValue(app.max_display_line_length)
-        self.ii_spin.setValue(app.index_interval_bytes // (1024 * 1024))
+        self.ii_spin.setValue(max(4, app.index_interval_bytes // 1024))
 
         # Ustaw etykiety z i18n
         self.ui.lbl_font_family.setText(self.t("lbl_font_family"))
@@ -465,7 +465,7 @@ class SettingsDialog(QDialog):
             self.ws_spin.value(),
             self.md_spin.value(),
             self.ml_spin.value(),
-            self.ii_spin.value() * 1024 * 1024,
+            self.ii_spin.value() * 1024,
         )
 
 

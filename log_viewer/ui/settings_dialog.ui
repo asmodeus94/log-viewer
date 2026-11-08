@@ -124,10 +124,13 @@
    <item row="6" column="1">
     <widget class="QSpinBox" name="ii_spin">
      <property name="minimum">
-      <number>1</number>
+      <number>4</number>
      </property>
      <property name="maximum">
-      <number>100</number>
+      <number>10240</number>
+     </property>
+     <property name="singleStep">
+      <number>16</number>
      </property>
     </widget>
    </item>

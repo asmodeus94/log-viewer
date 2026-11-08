@@ -2,8 +2,11 @@
 
 import json
 import os
+from unittest.mock import MagicMock
 
 from log_viewer.config import UserConfig
+from log_viewer.helpers import INDEX_INTERVAL_BYTES
+from log_viewer.widgets import SettingsDialog
 
 
 class TestUserConfig:
@@ -13,6 +16,7 @@ class TestUserConfig:
         assert cfg.get("encoding") == "utf-8"
         assert cfg.get("font_size") == 10
         assert cfg.get("font_family") is None
+        assert cfg.get("index_interval_bytes") == 16 * 1024
 
     def test_save_and_load(self, temp_config_path):
         cfg1 = UserConfig(config_path=temp_config_path)
@@ -83,3 +87,37 @@ class TestUserConfig:
         cfg.set("language", "en")
         captured = capsys.readouterr()
         assert "Warning" in captured.err or "could not save" in captured.err.lower()
+
+    def test_legacy_index_interval_migrated(self, temp_config_path):
+        """Dawną wartość domyślną 1 MB (1048576) migrujemy do nowej 16 KB."""
+        with open(temp_config_path, "w", encoding="utf-8") as f:
+            json.dump({"index_interval_bytes": 1048576}, f)
+        cfg = UserConfig(config_path=temp_config_path)
+        assert cfg.get("index_interval_bytes") == INDEX_INTERVAL_BYTES
+        assert cfg.get("index_interval_bytes") == 16 * 1024
+
+    def test_custom_index_interval_preserved(self, temp_config_path):
+        """Niestandardowa wartość użytkownika (np. 64 KB) jest zachowywana bez zmian."""
+        with open(temp_config_path, "w", encoding="utf-8") as f:
+            json.dump({"index_interval_bytes": 65536}, f)
+        cfg = UserConfig(config_path=temp_config_path)
+        assert cfg.get("index_interval_bytes") == 65536
+
+    def test_settings_dialog_kb_values(self, qtbot):
+        """SettingsDialog inicjalizuje pole interwału w KB i zwraca wartość w bajtach."""
+        mock_app = MagicMock()
+        mock_app.font_family = "Consolas"
+        mock_app.font_size = 10
+        mock_app.window_size_lines = 100
+        mock_app.max_display_lines = 1000
+        mock_app.max_display_line_length = 500
+        mock_app.index_interval_bytes = 32 * 1024  # 32 KB
+        mock_app.t.side_effect = lambda k: k
+
+        dlg = SettingsDialog(None, mock_app)
+        qtbot.addWidget(dlg)
+
+        assert dlg.ii_spin.value() == 32
+        dlg.ii_spin.setValue(64)
+        vals = dlg.get_values()
+        assert vals[5] == 64 * 1024

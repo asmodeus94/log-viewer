@@ -919,3 +919,145 @@ class TestFilterWorkerSearchInFilter:
         assert partial == (0, raw_words)
 
         idx.close()
+
+
+class TestUnicodeCaseInsensitiveSearch:
+    """Testy wyszukiwania bez rozróżniania wielkości liter dla znaków spoza ASCII (Unicode)."""
+
+    def test_plaintext_unicode_case_insensitive_utf8(self):
+        from log_viewer.filter_engine import PlainTextStrategy
+
+        strategy_upper = PlainTextStrategy("BŁĄD", case_sensitive=False, negate=False, encoding="utf-8")
+        strategy_lower = PlainTextStrategy("błąd", case_sensitive=False, negate=False, encoding="utf-8")
+
+        lines = [
+            "2026-11-08 [ERROR] Wystąpił błąd krytyczny\n".encode(),
+            "2026-11-08 [FATAL] BŁĄD SYSTEMU BAZY\n".encode(),
+            "2026-11-08 [WARN] Błąd połączenia sieciowego\n".encode(),
+            "2026-11-08 [INFO] Operacja zakończona sukcesem\n".encode(),
+        ]
+
+        # 'BŁĄD' musi dopasować wszystkie 3 warianty
+        assert strategy_upper.match(lines[0]) is True
+        assert strategy_upper.match(lines[1]) is True
+        assert strategy_upper.match(lines[2]) is True
+        assert strategy_upper.match(lines[3]) is False
+
+        # 'błąd' również musi dopasować wszystkie 3 warianty
+        assert strategy_lower.match(lines[0]) is True
+        assert strategy_lower.match(lines[1]) is True
+        assert strategy_lower.match(lines[2]) is True
+        assert strategy_lower.match(lines[3]) is False
+
+    def test_plaintext_unicode_case_sensitive_utf8(self):
+        from log_viewer.filter_engine import PlainTextStrategy
+
+        strategy_upper = PlainTextStrategy("BŁĄD", case_sensitive=True, negate=False, encoding="utf-8")
+        line_lower = "2026-11-08 [ERROR] Wystąpił błąd krytyczny\n".encode()
+        line_upper = "2026-11-08 [FATAL] BŁĄD SYSTEMU BAZY\n".encode()
+        line_mixed = "2026-11-08 [WARN] Błąd połączenia sieciowego\n".encode()
+
+        assert strategy_upper.match(line_upper) is True
+        assert strategy_upper.match(line_lower) is False
+        assert strategy_upper.match(line_mixed) is False
+
+    def test_plaintext_unicode_match_chunk_utf8(self):
+        from log_viewer.filter_engine import PlainTextStrategy
+
+        chunk = (
+            b"Linia 0: brak problemow\n"
+            b"Linia 1: wystapil blad\n"
+            b"Linia 2: to jest b\xc5\x82\xc4\x85d\n"  # błąd
+            b"Linia 3: to jest B\xc5\x81\xc4\x84D\n"  # BŁĄD
+            b"Linia 4: to jest B\xc5\x82\xc4\x85d\n"  # Błąd
+            b"Linia 5: wszystko w porzadku\n"
+        )
+        strategy = PlainTextStrategy("BŁĄD", case_sensitive=False, negate=False, encoding="utf-8")
+        hits = strategy.match_chunk(chunk, start_line=10)
+        assert hits == [12, 13, 14]
+
+        # Negacja
+        strategy_neg = PlainTextStrategy("BŁĄD", case_sensitive=False, negate=True, encoding="utf-8")
+        hits_neg = strategy_neg.match_chunk(chunk, start_line=10)
+        assert hits_neg == [10, 11, 15]
+
+    def test_plaintext_unicode_cp1250(self):
+        from log_viewer.filter_engine import PlainTextStrategy
+
+        strategy = PlainTextStrategy("BŁĄD", case_sensitive=False, negate=False, encoding="cp1250")
+        line_lower = "Wystąpił błąd połączenia\n".encode("cp1250")
+        line_upper = "KRYTYCZNY BŁĄD SERWERA\n".encode("cp1250")
+        line_none = "Wszystko w porządku\n".encode("cp1250")
+
+        assert strategy.match(line_lower) is True
+        assert strategy.match(line_upper) is True
+        assert strategy.match(line_none) is False
+
+    def test_regex_unicode_case_insensitive_utf8(self):
+        from log_viewer.filter_engine import RegexStrategy
+
+        strategy = RegexStrategy(r"błąd\s+\d+", case_sensitive=False, negate=False, encoding="utf-8")
+        line1 = "2026-11-08 BŁĄD 404 w module sieci\n".encode()
+        line2 = "2026-11-08 błąd 500 w bazie\n".encode()
+        line3 = "2026-11-08 Błąd bez numeru\n".encode()
+
+        assert strategy.match(line1) is True
+        assert strategy.match(line2) is True
+        assert strategy.match(line3) is False
+
+        chunk = line1 + line2 + line3
+        hits = strategy.match_chunk(chunk, start_line=0)
+        assert hits == [0, 1]
+
+    def test_regex_unicode_case_sensitive_utf8(self):
+        from log_viewer.filter_engine import RegexStrategy
+
+        strategy = RegexStrategy(r"błąd\s+\d+", case_sensitive=True, negate=False, encoding="utf-8")
+        line1 = "2026-11-08 BŁĄD 404 w module sieci\n".encode()
+        line2 = "2026-11-08 błąd 500 w bazie\n".encode()
+
+        assert strategy.match(line1) is False
+        assert strategy.match(line2) is True
+
+    def test_filter_engine_full_run_unicode(self, temp_log_file):
+        import threading
+
+        from log_viewer.filter_engine import FilterEngine
+        from log_viewer.indexer import LineIndexer
+
+        text = (
+            "Linia 0: start\n"
+            "Linia 1: wykryto błąd aplikacji\n"
+            "Linia 2: informacja o systemie\n"
+            "Linia 3: KRYTYCZNY BŁĄD SERWERA\n"
+            "Linia 4: koniec\n"
+        )
+        path = temp_log_file(content=text.encode("utf-8"))
+        idx = LineIndexer(path)
+        engine = FilterEngine(path, idx)
+
+        done_bitset = None
+        done_error = None
+        done_event = threading.Event()
+
+        def on_done(bitset, error):
+            nonlocal done_bitset, done_error
+            done_bitset = bitset
+            done_error = error
+            done_event.set()
+
+        engine.start(
+            pattern="BŁĄD",
+            use_regex=False,
+            case_sensitive=False,
+            negate=False,
+            on_progress=lambda *args: None,
+            on_done=on_done,
+        )
+
+        assert done_event.wait(timeout=5.0)
+        assert done_error is None
+        assert done_bitset is not None
+        assert list(done_bitset) == [1, 3]
+
+        idx.close()
