@@ -9,7 +9,7 @@ from PySide6.QtGui import QFont, QFontDatabase, QKeySequence
 
 from log_viewer.bitset import bisect_left_custom
 from log_viewer.helpers import THEME_DARK
-from log_viewer.widgets import SearchResultsModel, sync_inactive_palette
+from log_viewer.widgets import SearchResultsModel, install_shift_wheel_scroll, sync_inactive_palette
 
 if TYPE_CHECKING:
     from log_viewer.log_tab import LogTab
@@ -20,6 +20,7 @@ class UIController(QObject):
         super().__init__(tab)
         self.tab: LogTab = tab
         self._return_key_filter: QtCore.QObject | None = None
+        self._shift_wheel_filters: list[QtCore.QObject] = []
 
     def setup_ui_elements(self) -> None:
         self._setup_ui_elements()
@@ -129,11 +130,18 @@ class UIController(QObject):
                     return True
                 return super().eventFilter(obj, event)
 
-        self._return_key_filter = ReturnKeyFilter(self.tab)
-        self.tab.search_results_view.installEventFilter(self._return_key_filter)
+        return_key_filter = ReturnKeyFilter(self.tab)
+        self._return_key_filter = return_key_filter
+        self.tab.search_results_view.installEventFilter(return_key_filter)
 
         # Poprawka: nawigacja klawiszem enter i double-click
         self.tab.search_results_view.doubleClicked.connect(self.tab.on_search_result_clicked)
+
+        self._shift_wheel_filters = [
+            install_shift_wheel_scroll(self.tab.search_results_view),
+            install_shift_wheel_scroll(self.tab.bm_tree),
+            install_shift_wheel_scroll(self.tab.ed_tree),
+        ]
 
         self.tab.minimap.position_clicked.connect(self.tab.on_minimap_click)
         self.tab.pct_label.setStyleSheet(f"color: {THEME_DARK['fg_dim']}; font-size: 10px; padding: 4px;")
