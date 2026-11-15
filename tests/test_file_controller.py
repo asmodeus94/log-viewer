@@ -175,7 +175,7 @@ class TestFileController:
         with patch.object(tab, "load_window") as mock_load:
             controller._on_reindex_after_save(new_idx, 25)
             assert tab.indexer is new_idx
-            mock_load.assert_called_with(at_line=25)
+            mock_load.assert_called_with(at_line=25, force_reload=True)
 
     def test_cancel_follow_if_active(self, app_context):
         _, tab, _ = app_context

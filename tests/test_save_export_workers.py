@@ -3,11 +3,12 @@
 import array
 import os
 import tempfile
+from pathlib import Path
 
 from log_viewer.bitset import Bitset
 from log_viewer.edit_buffer import EditBuffer
 from log_viewer.indexer import LineIndexer
-from log_viewer.workers import ExportWorker, SaveAsWorker
+from log_viewer.workers import ExportWorker, SaveAsWorker, SaveWorker
 
 
 def create_temp_file(lines: list[str]) -> str:
@@ -90,6 +91,96 @@ class TestSaveAsWorker:
             assert content == raw_lines
         finally:
             _cleanup_paths(src_path, dst_path)
+
+
+class TestSaveWorkerAndLineEndings:
+    def test_save_worker_cancel_leaves_source_intact(self, tmp_path: Path):
+        src_file = tmp_path / "save_cancel.log"
+        payload = (b"A" * 1023 + b"\n") * 2200
+        src_file.write_bytes(payload)
+        st = src_file.stat()
+
+        buf = EditBuffer()
+        buf.set(0, "SHOULD NOT BE SAVED")
+
+        worker = SaveWorker(
+            buf,
+            str(src_file),
+            expected_mtime=st.st_mtime_ns,
+            expected_size=st.st_size,
+            encoding="utf-8",
+        )
+        finished_called = False
+        errors: list[str] = []
+
+        def on_finished(_backup: str) -> None:
+            nonlocal finished_called
+            finished_called = True
+
+        def on_error(err: str) -> None:
+            errors.append(err)
+
+        def cancel_on_progress(_pct: float) -> None:
+            worker.cancel()
+
+        worker.progress.connect(cancel_on_progress)
+        worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
+        worker.run()
+
+        assert not finished_called
+        assert errors == ["cancelled"]
+        assert src_file.read_bytes() == payload
+        assert not (tmp_path / "save_cancel.log.bak").exists()
+        assert list(tmp_path.glob(".log-viewer_tmp_*")) == []
+
+    def test_save_as_preserves_crlf_and_lf(self, tmp_path: Path):
+        src_file = tmp_path / "mixed.log"
+        dst_file = tmp_path / "mixed_out.log"
+        src_file.write_bytes(b"line0\r\nline1\nline2\r\n")
+
+        buf = EditBuffer()
+        buf.set(0, "NEW_0")
+        buf.set(1, "NEW_1")
+
+        worker = SaveAsWorker(buf, str(src_file), str(dst_file), encoding="utf-8")
+        finished_called = False
+
+        def on_finished() -> None:
+            nonlocal finished_called
+            finished_called = True
+
+        worker.finished.connect(on_finished)
+        worker.run()
+
+        assert finished_called
+        assert dst_file.read_bytes() == b"NEW_0\r\nNEW_1\nline2\r\n"
+
+    def test_export_preserves_crlf_and_lf_filtered_and_full(self, tmp_path: Path):
+        src_file = tmp_path / "export_mixed.log"
+        dst_full = tmp_path / "export_full.log"
+        dst_filtered = tmp_path / "export_filtered.log"
+        src_file.write_bytes(b"ERR0\r\nINFO1\nERR2\r\nINFO3\n")
+
+        buf = EditBuffer()
+        buf.set(0, "ERR0_FIXED")
+        buf.set(1, "INFO1_FIXED")
+
+        w_full = ExportWorker(buf, str(src_file), str(dst_full), encoding="utf-8", filter_active=False)
+        w_full.run()
+        assert dst_full.read_bytes() == b"ERR0_FIXED\r\nINFO1_FIXED\nERR2\r\nINFO3\n"
+
+        filter_results = Bitset.from_indices(array.array("Q", [0, 2]), 4)
+        w_filtered = ExportWorker(
+            buf,
+            str(src_file),
+            str(dst_filtered),
+            encoding="utf-8",
+            filter_active=True,
+            filter_results=filter_results,
+        )
+        w_filtered.run()
+        assert dst_filtered.read_bytes() == b"ERR0_FIXED\r\nERR2\r\n"
 
 
 class TestExportWorker:

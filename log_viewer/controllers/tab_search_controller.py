@@ -264,11 +264,13 @@ class SearchController(QObject):
         else:
             self.tab.navigate_to_search_result(len(self.tab.search_results_all) - 1)
 
-    def cmd_clear_search(self) -> None:
+    def reset_search_results(self, clear_pattern: bool = False) -> None:
+        """Czyści bieżące wyniki wyszukiwania i model wyników; opcjonalnie także wzorzec."""
         self._cancel_active_search()
-
-        self.tab.search_pattern = ""
-        self.tab.search_compiled = None
+        self.tab.search_engine = None
+        if clear_pattern:
+            self.tab.search_pattern = ""
+            self.tab.search_compiled = None
         self.tab.search_results = []
         total = self.tab.indexer.line_count if self.tab.indexer else 0
         self.tab.search_results_all = Bitset(total)
@@ -276,12 +278,19 @@ class SearchController(QObject):
         self.tab.search_extra_sel = None
         self.tab.search_match_extra_sels = []
 
-        if self.tab.search_model:
+        if self.tab.search_model is not None:
             self.tab.search_model.clear()
 
-        self.tab.search_results_label.setText(self.tab.t("lbl_search_results_empty"))
-        self.tab.main_window.search_entry.clear()
+        try:
+            self.tab.search_results_label.setText(self.tab.t("lbl_search_results_empty"))
+        except (RuntimeError, AttributeError):
+            pass
 
+        if clear_pattern:
+            self.tab.main_window.search_entry.clear()
+
+    def cmd_clear_search(self) -> None:
+        self.reset_search_results(clear_pattern=True)
         self.tab.update_current_line_highlight()
         self.tab.refresh_status()
 

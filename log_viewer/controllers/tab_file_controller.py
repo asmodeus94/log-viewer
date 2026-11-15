@@ -237,6 +237,34 @@ class FileController(QObject):
         self.tab.set_status(self.tab.fmt("st_done", total=idx.line_count, size=fmt_size(idx.size)))
         return file_path
 
+    def _reset_search_state(self) -> None:
+        """Czyści nieaktualne wyniki i stan wyszukiwania po zmianie indeksu."""
+        if getattr(self.tab, "search_controller", None) is not None:
+            self.tab.search_controller.reset_search_results(clear_pattern=False)
+        else:
+            self.tab.search_engine = None
+            self.tab.search_results = []
+            self.tab.search_result_index = -1
+
+    def _reset_search_and_filter_after_reindex(self, saved_line: int = 0) -> bool:
+        """Czyści stan wyszukiwania oraz stare Bitsety filtra po podmianie indeksu.
+
+        Zwraca True, jeśli aktywny filtr został ponownie uruchomiony w tle.
+        """
+        self._reset_search_state()
+        self.tab.filter_context_lines = set()
+        self.tab.filter_hit_text_map = {}
+        self.tab.filter_hit_lines = set()
+        if self.tab.filter_active and self.tab.filter_pattern:
+            self.tab.filter_results = Bitset(0)
+            self.tab.filter_all_lines = Bitset(0)
+            if getattr(self.tab, "filter_controller", None) is not None:
+                return self.tab.filter_controller.reapply_filter(saved_line=saved_line)
+            return False
+        self.tab.filter_results = None
+        self.tab.filter_all_lines = None
+        return False
+
     @Slot(object)
     def _on_index_done(self, idx: LineIndexer) -> None:
         if getattr(self.tab, "edit_buffer", None) is None:
@@ -255,12 +283,12 @@ class FileController(QObject):
         self.tab.filter_hit_text_map = {}
         self.tab.filter_hit_lines = set()
         self.tab.filter_engine = None
-        self.tab.search_engine = None
         try:
             self.tab.text.clear()
         except RuntimeError:
             pass
         file_path = self._apply_new_indexer(idx)
+        self._reset_search_state()
         try:
             self.tab.load_window(at_line=0)
         except OSError:
@@ -326,11 +354,13 @@ class FileController(QObject):
             except (OSError, RuntimeError):
                 pass
         self._apply_new_indexer(idx)
-        try:
-            self.tab.load_window(at_line=saved_line)
-        except OSError:
-            # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
-            pass
+        reapplied = self._reset_search_and_filter_after_reindex(saved_line=saved_line)
+        if not reapplied:
+            try:
+                self.tab.load_window(at_line=saved_line, force_reload=True)
+            except OSError:
+                # Ignorujemy potencjalne usunięcie pliku z dysku pod maską w trakcie lub tuż po reindeksie.
+                pass
 
     def cancel_follow_if_active(self) -> None:
         """Wyłącza tryb śledzenia (follow) przy ręcznych przesunięciach użytkownika."""
@@ -668,17 +698,32 @@ class FileController(QObject):
         self.tab.last_file_size = new_size
         if new_inode != 0:
             self.tab.last_file_inode = new_inode
-        last_start = max(0, idx.line_count - self.tab.window_size_lines)
-        self.tab.load_window(at_line=last_start)
-        self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
         file_path = self.tab.file_path
+        if file_path:
+            try:
+                st = Path(file_path).stat()
+                self.tab.file_mtime_at_open = st.st_mtime_ns
+                self.tab.file_size_at_open = st.st_size
+            except OSError:
+                pass
+        self.tab.inc_pending_lines = 0
+        reapplied = self._reset_search_and_filter_after_reindex(saved_line=0)
+        if not reapplied:
+            last_start = max(0, idx.line_count - self.tab.window_size_lines)
+            self.tab.ignore_scroll_events = True
+            try:
+                self.tab.load_window(at_line=last_start, force_reload=True)
+                self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+            finally:
+                self.tab.ignore_scroll_events = False
         try:
             mtime = Path(file_path).stat().st_mtime if file_path else 0
             mtime_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mtime))
         except OSError:
             mtime_str = "?"
         ctime_str = time.strftime("%H:%M:%S")
-        self.tab.set_status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
+        if not reapplied:
+            self.tab.set_status(self.tab.t("st_following").format(mtime=mtime_str, ctime=ctime_str))
 
     @Slot(str)
     def _on_follow_reindex_failed(self, _err: str) -> None:

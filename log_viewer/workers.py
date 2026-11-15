@@ -12,9 +12,9 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from .bitset import Bitset
 from .edit_buffer import EditBuffer
-from .exceptions import CompressedSaveError, FileChangedError
+from .exceptions import CompressedSaveError, FileChangedError, SaveCancelledError
 from .filter_engine import FilterEngine, FilterStrategy, PlainTextStrategy, RegexStrategy
-from .helpers import open_maybe_compressed
+from .helpers import extract_line_ending, open_maybe_compressed
 from .indexer import LineIndexer
 
 
@@ -206,6 +206,11 @@ class SaveWorker(QObject):
         self._expected_mtime = expected_mtime
         self._expected_size = expected_size
         self._encoding = encoding
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        """Żąda anulowania zapisu. Bezpieczne do wywołania z głównego wątku."""
+        self._cancel_event.set()
 
     @Slot()
     def run(self) -> None:
@@ -220,6 +225,7 @@ class SaveWorker(QObject):
                 expected_mtime=self._expected_mtime,
                 expected_size=self._expected_size,
                 encoding=self._encoding,
+                cancel_check=self._cancel_event.is_set,
             )
             self.finished.emit(backup_path)
         except BaseException as e:
@@ -227,6 +233,8 @@ class SaveWorker(QObject):
                 self.file_changed.emit(str(e))
             elif isinstance(e, CompressedSaveError):
                 self.compressed.emit(str(e))
+            elif isinstance(e, SaveCancelledError):
+                self.error.emit("cancelled")
             else:
                 self.error.emit(str(e))
 
@@ -283,7 +291,10 @@ class SaveAsWorker(QObject):
                         if line_no in edits:
                             new_text = edits[line_no]
                             if new_text is not None:
-                                dst.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                dst.write(
+                                    new_text.rstrip("\r\n").encode(self._encoding, errors="replace")
+                                    + extract_line_ending(raw)
+                                )
                         else:
                             dst.write(raw)
 
@@ -395,7 +406,10 @@ class ExportWorker(QObject):
                             if line_no in edits:
                                 new_text = edits[line_no]
                                 if new_text is not None:
-                                    out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                    out.write(
+                                        new_text.rstrip("\r\n").encode(self._encoding, errors="replace")
+                                        + extract_line_ending(raw)
+                                    )
                                     count += 1
                             else:
                                 out.write(raw)
@@ -445,7 +459,10 @@ class ExportWorker(QObject):
                             if target_line in edits:
                                 new_text = edits[target_line]
                                 if new_text is not None:
-                                    out.write(new_text.encode(self._encoding, errors="replace") + b"\n")
+                                    out.write(
+                                        new_text.rstrip("\r\n").encode(self._encoding, errors="replace")
+                                        + extract_line_ending(raw)
+                                    )
                                     count += 1
                             else:
                                 out.write(raw)

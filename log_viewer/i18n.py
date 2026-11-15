@@ -98,6 +98,7 @@ I18N: dict[str, dict[str, str]] = {
         "msg_save_ok": "Zapisano {n:,} edycji do pliku:\n{path}",
         "msg_no_edits": "Brak edycji do zapisania.",
         "msg_confirm_save": "Zapisanie {n:,} edycji nadpisze oryginalny plik ({size}). Kontynuować?\n\nKopia zapasowa zostanie utworzona jako {path}.bak",
+        "msg_save_slow_warning": "⚠️ Plik ma {size} — zapis potrwa ~{sec}s.",
         "msg_file_changed": "Plik zmienił się od czasu otwarcia (rotacja logrotate, modyfikacja przez inny proces).\n\n{error}\n\nEdycje w buforze: {n:,}\n\nTak = przeładuj plik (porzuć edycje)\nNie = zachowaj edycje (użyj Zapisz jako)\nAnuluj = nic nie rób",
         "msg_save_as_suggested": "Edycje zachowane w buforze. Użyj 'Zapisz jako…' aby zapisać do nowego pliku.",
         "msg_clear_edits": "Wyczyścić bufor {n:,} edycji?",
@@ -112,7 +113,11 @@ I18N: dict[str, dict[str, str]] = {
         "msg_no_bookmarks": "Brak zakładek.",
         "msg_no_selection": "Nic nie zaznaczono.",
         "btn_delete_sel": "Usuń zaznaczone",
-        "msg_about": "log-viewer 1.0\n\ntkinter + biblioteka standardowa Pythona\nWielkie pliki logów — wirtualne okno, indeks 1MB, follow mode.\nDrag&drop plików na okno (wymagany tkinterdnd2).",
+        "msg_about": (
+            "log-viewer 1.0\n\nPySide6 (Qt6) + Python\n"
+            "Wielkie pliki logów — wirtualne okno, rzadki indeks 16 KB, tryb Follow (tail -f).\n"
+            "Obsługa plików skompresowanych (.gz, .bz2, .xz) oraz natywny Drag & Drop."
+        ),
         "mi_copy": "Kopiuj",
         "mi_copy_line": "Kopiuj linię",
         "mi_format_line": "Formatuj linię",
@@ -242,6 +247,7 @@ I18N: dict[str, dict[str, str]] = {
         "msg_save_ok": "Saved {n:,} edits to file:\n{path}",
         "msg_no_edits": "No edits to save.",
         "msg_confirm_save": "Saving {n:,} edits will overwrite the original file ({size}). Continue?\n\nA backup copy will be created as {path}.bak",
+        "msg_save_slow_warning": "⚠️ File size is {size} — saving will take ~{sec}s.",
         "msg_file_changed": "File changed since opening (logrotate rotation, modification by another process).\n\n{error}\n\nEdits in buffer: {n:,}\n\nYes = reload file (discard edits)\nNo = keep edits (use Save As)\nCancel = do nothing",
         "msg_save_as_suggested": "Edits kept in buffer. Use 'Save As…' to write to a new file.",
         "msg_clear_edits": "Clear buffer of {n:,} edits?",
@@ -256,7 +262,11 @@ I18N: dict[str, dict[str, str]] = {
         "msg_no_bookmarks": "No bookmarks.",
         "msg_no_selection": "Nothing selected.",
         "btn_delete_sel": "Delete selected",
-        "msg_about": "log-viewer 1.0\n\ntkinter + Python standard library\nHuge log files — virtual window, 1MB index, follow mode.\nDrag&drop files onto window (requires tkinterdnd2).",
+        "msg_about": (
+            "log-viewer 1.0\n\nPySide6 (Qt6) + Python\n"
+            "Huge log files — virtual window, 16 KB sparse index, Follow mode (tail -f).\n"
+            "Compressed files (.gz, .bz2, .xz) and native Drag & Drop support."
+        ),
         "mi_copy": "Copy",
         "mi_copy_line": "Copy line",
         "mi_format_line": "Format line",

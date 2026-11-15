@@ -23,3 +23,9 @@ class CompressedSaveError(Exception):
     """
 
     pass
+
+
+class SaveCancelledError(Exception):
+    """Rzucany gdy użytkownik anuluje zapis edycji w trakcie kopiowania strumienia."""
+
+    pass
