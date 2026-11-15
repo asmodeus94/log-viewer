@@ -88,12 +88,12 @@ def check_duplicated_code(files: list[Path], repo_root: Path) -> list[str]:
         for length in range(1, min(n + 1, 25)):
             for i in range(0, n - length + 1):
                 w = sum(weights[i : i + length])
-                if w < 65:
-                    continue
                 s0, s1 = stmts[i], stmts[i + length - 1]
                 end_line = s1.end_lineno or s1.lineno
                 lines = end_line - s0.lineno + 1
                 if lines < 6:
+                    continue
+                if w < 65 and not (lines >= 7 and w >= 55):
                     continue
                 loc = (rel, s0.lineno, end_line, w)
                 _record_dup(seen_exact, "\n".join(exact_norms[i : i + length]), loc, lines, raw_dups)

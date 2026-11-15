@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import math
 import multiprocessing
 import random
 import sys
@@ -205,6 +206,104 @@ STYLE_BTN_AUTOSCROLL = """
 # ============================================================================
 
 
+def format_duration(seconds: float) -> str:
+    """Formatuje czas trwania w sekundach do czytelnej postaci (zawsze nieujemnej)."""
+    val = float(seconds)
+    if not math.isfinite(val):
+        return "0.0s"
+    sec = max(0.0, val)
+    if sec < 60.0:
+        return f"{sec:.1f}s"
+    total_secs = int(sec)
+    hours, rem = divmod(total_secs, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
+
+
+def compute_eta(current: float, total: float, elapsed: float) -> float:
+    """Oblicza szacowany czas pozostały (ETA) w sekundach, gwarantując wynik >= 0.0."""
+    cur_val = float(current)
+    tot_val = float(total)
+    el_val = float(elapsed)
+    if not (math.isfinite(cur_val) and math.isfinite(tot_val) and math.isfinite(el_val)):
+        return 0.0
+    done = max(0.0, cur_val)
+    target = max(0.0, tot_val)
+    el = max(0.0, el_val)
+    if done <= 0.0 or el <= 0.0 or done >= target:
+        return 0.0
+    rate = done / el
+    if rate <= 0.0:
+        return 0.0
+    return max(0.0, (target - done) / rate)
+
+
+def _format_batch_status(
+    prefix: str,
+    current: float,
+    total: float,
+    unit: str,
+    speed: float,
+    speed_unit: str,
+    elapsed: float,
+    scale: float = 1.0,
+    decimals: int = 0,
+) -> tuple[int, str]:
+    """Oblicza bezpieczny procent [0, 100] i tekst postępu z Elapsed, Speed oraz ETA."""
+    safe_cur = max(0.0, float(current))
+    safe_tot = max(0.0, float(total))
+    safe_el = max(0.0, float(elapsed))
+    safe_spd = max(0.0, float(speed))
+    pct_f = min(100.0, max(0.0, (safe_cur / safe_tot) * 100.0)) if safe_tot > 0.0 else 100.0
+    eta = compute_eta(safe_cur, safe_tot, safe_el)
+    cur_disp = safe_cur / scale
+    tot_disp = safe_tot / scale
+    text = (
+        f"{prefix}: {cur_disp:.{decimals}f} / {tot_disp:.{decimals}f} {unit} ({pct_f:.1f}%) | "
+        f"Speed: {safe_spd:.1f} {speed_unit} | Elapsed: {format_duration(safe_el)} | ETA: {format_duration(eta)}"
+    )
+    return int(min(100.0, pct_f)), text
+
+
+def _run_line_batch_writer(
+    filepath: str,
+    count: int,
+    overwrite: bool,
+    line_factory: Callable[[int], str],
+    stop_event: threading.Event | None = None,
+    progress_callback: Callable[[int, int, float, float], None] | None = None,
+) -> tuple[int, float]:
+    """Wspólna pętla zapisu wsadowego linii z pomiarem czasu (perf_counter) i throttlingiem co 0.05 s."""
+    mode = "w" if overwrite else "a"
+    start_time = time.perf_counter()
+    last_progress_time = 0.0
+    last_reported = -1
+    safe_count = max(0, count)
+    written = 0
+
+    with open(filepath, mode, encoding="utf-8", buffering=1024 * 1024) as f:
+        for idx in range(safe_count):
+            if stop_event and stop_event.is_set():
+                break
+            f.write(line_factory(idx))
+            written += 1
+            now = time.perf_counter()
+            if progress_callback and (now - last_progress_time >= 0.05):
+                elapsed = max(0.0, now - start_time)
+                speed = written / elapsed if elapsed > 0 else 0.0
+                progress_callback(written, safe_count, speed, elapsed)
+                last_progress_time = now
+                last_reported = written
+
+    total_elapsed = max(0.0, time.perf_counter() - start_time)
+    if progress_callback and last_reported != written:
+        final_speed = written / total_elapsed if total_elapsed > 0 else 0.0
+        progress_callback(written, safe_count, final_speed, total_elapsed)
+    return written, total_elapsed
+
+
 class MultiAppWorker:
     """Worker generating logs for a single APP instance in a background thread."""
 
@@ -393,44 +492,58 @@ class FastLogGenerator:
         Returns: (written_bytes, elapsed_seconds).
         """
         mode = "wb" if overwrite else "ab"
-        start_time = time.time()
+        start_time = time.perf_counter()
         file_p = Path(filepath)
-        written_bytes = 0 if overwrite or not file_p.exists() else file_p.stat().st_size
+        # Zapamiętujemy rozmiar istniejącego pliku wyłącznie do celów informacyjnych po dopisaniu
+        initial_bytes = file_p.stat().st_size if (not overwrite and file_p.exists()) else 0
+        safe_target = max(0, target_bytes)
+        written_bytes = 0
 
         if log_callback:
-            target_mb = target_bytes / (1024 * 1024)
+            target_mb = safe_target / (1024 * 1024)
             log_callback(f"Fast write started to '{filepath}'. Target: {target_mb:.2f} MB.")
 
         cur_dt = datetime.now()
         last_progress_time = 0.0
+        last_reported_bytes = -1
 
         try:
             with open(filepath, mode, buffering=8 * 1024 * 1024) as f:
-                while written_bytes < target_bytes:
+                while written_bytes < safe_target:
                     if stop_event and stop_event.is_set():
                         if log_callback:
                             log_callback("Generation cancelled by user.")
                         break
 
                     chunk = cls.generate_chunk(chunk_lines, timestamp=cur_dt.strftime("%Y-%m-%d %H:%M:%S"))
-                    if written_bytes + len(chunk) > target_bytes:
-                        chunk = chunk[: target_bytes - written_bytes]
+                    if written_bytes + len(chunk) > safe_target:
+                        chunk = chunk[: safe_target - written_bytes]
 
                     f.write(chunk)
                     written_bytes += len(chunk)
                     cur_dt += timedelta(seconds=1)
 
-                    now = time.time()
-                    elapsed = now - start_time
+                    now = time.perf_counter()
+                    elapsed = max(0.0, now - start_time)
                     speed_mb = (written_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
 
-                    if progress_callback and ((now - last_progress_time >= 0.05) or (written_bytes >= target_bytes)):
-                        progress_callback(written_bytes, target_bytes, speed_mb, elapsed)
+                    if progress_callback and (now - last_progress_time >= 0.05):
+                        progress_callback(written_bytes, safe_target, speed_mb, elapsed)
                         last_progress_time = now
+                        last_reported_bytes = written_bytes
 
-            elapsed = time.time() - start_time
+            elapsed = max(0.0, time.perf_counter() - start_time)
+            if progress_callback and last_reported_bytes != written_bytes:
+                final_speed_mb = (written_bytes / (1024 * 1024)) / elapsed if elapsed > 0 else 0.0
+                progress_callback(written_bytes, safe_target, final_speed_mb, elapsed)
             if log_callback:
-                log_callback(f"Done! Written {written_bytes / (1024**2):.2f} MB in {elapsed:.2f} s.")
+                if not overwrite and initial_bytes > 0:
+                    total_mb = (initial_bytes + written_bytes) / (1024**2)
+                    log_callback(
+                        f"Done! Appended {written_bytes / (1024**2):.2f} MB in {elapsed:.2f} s (total file size: {total_mb:.2f} MB)."
+                    )
+                else:
+                    log_callback(f"Done! Written {written_bytes / (1024**2):.2f} MB in {elapsed:.2f} s.")
             return written_bytes, elapsed
         except Exception as err:
             if log_callback:
@@ -457,29 +570,24 @@ class TargetLogGenerator:
         interval: int = 15,
         overwrite: bool = False,
         stop_event: threading.Event | None = None,
-        progress_callback: Callable[[int, int], None] | None = None,
+        progress_callback: Callable[[int, int, float, float], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Generates a batch of test lines."""
-        mode = "w" if overwrite else "a"
         if log_callback:
             log_callback(f"Generating {count} test lines to '{filepath}' (keyword: {phrase})...")
 
-        generated = 0
-        with open(filepath, mode, encoding="utf-8") as f:
-            for i in range(1, count + 1):
-                if stop_event and stop_event.is_set():
-                    break
-                line = cls.generate_line(i, phrase, interval)
-                f.write(line)
-                generated += 1
-                if i % 100 == 0 or i == count:
-                    f.flush()
-                    if progress_callback:
-                        progress_callback(generated, count)
+        generated, elapsed = _run_line_batch_writer(
+            filepath=filepath,
+            count=count,
+            overwrite=overwrite,
+            line_factory=lambda idx: cls.generate_line(idx + 1, phrase, interval),
+            stop_event=stop_event,
+            progress_callback=progress_callback,
+        )
 
         if log_callback:
-            log_callback(f"Finished writing {generated} lines to '{filepath}'.")
+            log_callback(f"Finished writing {generated} lines to '{filepath}' in {elapsed:.2f} s.")
         return generated
 
     @classmethod
@@ -803,23 +911,22 @@ class JsonLogGenerator:
         include_decoys: bool = False,
         long_lines: bool = False,
         stop_event: threading.Event | None = None,
-        progress_callback: Callable[[int, int], None] | None = None,
+        progress_callback: Callable[[int, int, float, float], None] | None = None,
         log_callback: Callable[[str], None] | None = None,
     ) -> int:
         """Generates a batch of structured JSON / XML / Hybrid records."""
-        mode = "w" if overwrite else "a"
         base_time = datetime.now() - timedelta(minutes=max(1, count // 10))
 
         if log_callback:
             log_callback(f"Generating {count} structured ({fmt_mode}) records to '{filepath}'...")
 
-        written = 0
-        with open(filepath, mode, encoding="utf-8") as f:
-            for i in range(count):
-                if stop_event and stop_event.is_set():
-                    break
-                line = cls.generate_formatted_line(
-                    i,
+        written, elapsed = _run_line_batch_writer(
+            filepath=filepath,
+            count=count,
+            overwrite=overwrite,
+            line_factory=lambda idx: (
+                cls.generate_formatted_line(
+                    idx,
                     base_time=base_time,
                     fmt_mode=fmt_mode,
                     indent=indent,
@@ -827,15 +934,14 @@ class JsonLogGenerator:
                     include_decoys=include_decoys,
                     long_line=long_lines,
                 )
-                f.write(line + "\n")
-                written += 1
-                if (i + 1) % 50 == 0 or (i + 1) == count:
-                    f.flush()
-                    if progress_callback:
-                        progress_callback(written, count)
+                + "\n"
+            ),
+            stop_event=stop_event,
+            progress_callback=progress_callback,
+        )
 
         if log_callback:
-            log_callback(f"Written {written} structured ({fmt_mode}) records to '{filepath}'.")
+            log_callback(f"Written {written} structured ({fmt_mode}) records to '{filepath}' in {elapsed:.2f} s.")
         return written
 
     @classmethod
@@ -946,15 +1052,10 @@ def run_cli_fast(args: argparse.Namespace) -> None:
     stop_event = threading.Event()
 
     def progress_cb(cur_written: int, total: int, speed: float, cur_elapsed: float) -> None:
-        pct = (cur_written / total) * 100 if total > 0 else 0
-        written_mb = cur_written / (1024 * 1024)
-        total_mb = total / (1024 * 1024)
-        print(
-            f"\rProgress: {written_mb:.1f} / {total_mb:.1f} MB ({pct:.1f}%) | "
-            f"Speed: {speed:.1f} MB/s | Elapsed: {cur_elapsed:.1f}s",
-            end="",
-            flush=True,
+        _, text = _format_batch_status(
+            "Progress", cur_written, total, "MB", speed, "MB/s", cur_elapsed, scale=1024 * 1024, decimals=1
         )
+        print(f"\r{text}", end="", flush=True)
 
     try:
         written, elapsed = FastLogGenerator.generate_to_size(
@@ -1003,6 +1104,11 @@ def run_cli_target(args: argparse.Namespace) -> None:
         count = args.count
         print(f"Mode: Batch ({count} lines)\n")
         stop_event = threading.Event()
+
+        def target_progress_cb(cur: int, tot: int, spd: float, cur_el: float) -> None:
+            _, text = _format_batch_status("Progress", cur, tot, "lines", spd, "lines/s", cur_el)
+            print(f"\r{text}", end="", flush=True)
+
         try:
             TargetLogGenerator.run_batch(
                 filepath=filepath,
@@ -1011,9 +1117,7 @@ def run_cli_target(args: argparse.Namespace) -> None:
                 interval=interval,
                 overwrite=not args.append,
                 stop_event=stop_event,
-                progress_callback=lambda cur, tot: print(
-                    f"\rProgress: {cur}/{tot} lines ({(cur / tot) * 100:.1f}%)", end="", flush=True
-                ),
+                progress_callback=target_progress_cb,
                 log_callback=lambda msg: print(f"\n{msg}"),
             )
         except KeyboardInterrupt:
@@ -1058,6 +1162,11 @@ def run_cli_json(args: argparse.Namespace) -> None:
         count = args.count
         print(f"Mode: Batch ({count} records)\n")
         stop_event = threading.Event()
+
+        def json_progress_cb(cur: int, tot: int, spd: float, cur_el: float) -> None:
+            _, text = _format_batch_status("Progress", cur, tot, "records", spd, "rec/s", cur_el)
+            print(f"\r{text}", end="", flush=True)
+
         try:
             JsonLogGenerator.run_batch(
                 filepath=filepath,
@@ -1069,9 +1178,7 @@ def run_cli_json(args: argparse.Namespace) -> None:
                 include_decoys=include_decoys,
                 long_lines=long_lines,
                 stop_event=stop_event,
-                progress_callback=lambda cur, tot: print(
-                    f"\rProgress: {cur}/{tot} records ({(cur / tot) * 100:.1f}%)", end="", flush=True
-                ),
+                progress_callback=json_progress_cb,
                 log_callback=lambda msg: print(f"\n{msg}"),
             )
         except KeyboardInterrupt:
@@ -1153,12 +1260,38 @@ if GUI_AVAILABLE:
         act_layout.addWidget(btn_stop)
         return progress_bar, lbl_status, btn_start, btn_stop, act_layout
 
+    def _assemble_batch_tab_layout(
+        tab: QWidget,
+        group_title: str,
+        form: QFormLayout,
+        progress_bar: QProgressBar,
+        status_label: QLabel,
+        act_layout: QHBoxLayout,
+        chk_overwrite: QCheckBox | None = None,
+        overwrite_label: str = "Write options:",
+        overwrite_enabled: bool = True,
+    ) -> None:
+        """Finalizuje wspólny układ zakładki wsadowej z grupą parametrów, paskiem postępu i przyciskami."""
+        if chk_overwrite is not None:
+            chk_overwrite.setChecked(True)
+            chk_overwrite.setEnabled(overwrite_enabled)
+            form.addRow(overwrite_label, chk_overwrite)
+
+        layout = QVBoxLayout(tab)
+        group = QGroupBox(group_title)
+        group.setLayout(form)
+        layout.addWidget(group)
+        layout.addWidget(progress_bar)
+        layout.addWidget(status_label)
+        layout.addLayout(act_layout)
+        layout.addStretch()
+
     class TabSignals(QObject):
         """Universal signal hub for background GUI workers."""
 
         log_msg = Signal(str)
         progress_val = Signal(int, int)  # (current, total)
-        progress_stats = Signal(int, int, float, float)  # (written_bytes, total_bytes, speed_mb, elapsed_s)
+        progress_stats = Signal(int, int, float, float)  # (current, total, speed, elapsed_s)
         finished = Signal()
 
     def _create_tab_signals(
@@ -1407,8 +1540,6 @@ if GUI_AVAILABLE:
             self._setup_layout(file_layout, act_layout)
 
         def _setup_layout(self, file_layout: QHBoxLayout, act_layout: QHBoxLayout) -> None:
-            layout = QVBoxLayout(self)
-            group = QGroupBox("Fast File Generation Parameters")
             form = QFormLayout()
 
             form.addRow("Output file path:", file_layout)
@@ -1429,15 +1560,16 @@ if GUI_AVAILABLE:
             self.spin_chunk.setSingleStep(10_000)
             form.addRow("Buffer chunk size (lines):", self.spin_chunk)
 
-            self.chk_overwrite.setChecked(True)
-            form.addRow("Write mode:", self.chk_overwrite)
-
-            group.setLayout(form)
-            layout.addWidget(group)
-            layout.addWidget(self.progress_bar)
-            layout.addWidget(self.lbl_stats)
-            layout.addLayout(act_layout)
-            layout.addStretch()
+            _assemble_batch_tab_layout(
+                self,
+                "Fast File Generation Parameters",
+                form,
+                self.progress_bar,
+                self.lbl_stats,
+                act_layout,
+                chk_overwrite=self.chk_overwrite,
+                overwrite_label="Write mode:",
+            )
 
         def browse_file(self) -> None:
             f, _ = QFileDialog.getSaveFileName(
@@ -1447,13 +1579,11 @@ if GUI_AVAILABLE:
                 self.entry_file.setText(f)
 
         def update_stats(self, written: int, total: int, speed: float, elapsed: float) -> None:
-            pct = int((written / total) * 100) if total > 0 else 0
-            self.progress_bar.setValue(min(100, pct))
-            w_mb = written / (1024 * 1024)
-            t_mb = total / (1024 * 1024)
-            self.lbl_stats.setText(
-                f"Written: {w_mb:.1f} / {t_mb:.1f} MB ({pct}%) | Speed: {speed:.1f} MB/s | Elapsed: {elapsed:.1f}s"
+            pct, text = _format_batch_status(
+                "Written", written, total, "MB", speed, "MB/s", elapsed, scale=1024 * 1024, decimals=1
             )
+            self.progress_bar.setValue(pct)
+            self.lbl_stats.setText(text)
 
         def start_fast_gen(self) -> None:
             filepath = self.entry_file.text().strip()
@@ -1466,6 +1596,8 @@ if GUI_AVAILABLE:
             multiplier = 1024 * 1024 * 1024 if unit == "GB" else 1024 * 1024
             target_bytes = int(size_val * multiplier)
 
+            chunk_lines = self.spin_chunk.value()
+            overwrite = self.chk_overwrite.isChecked()
             self.stop_event.clear()
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
@@ -1477,8 +1609,8 @@ if GUI_AVAILABLE:
                     FastLogGenerator.generate_to_size(
                         filepath=filepath,
                         target_bytes=target_bytes,
-                        chunk_lines=self.spin_chunk.value(),
-                        overwrite=self.chk_overwrite.isChecked(),
+                        chunk_lines=chunk_lines,
+                        overwrite=overwrite,
                         stop_event=self.stop_event,
                         progress_callback=lambda w, t, s, el: self.signals.progress_stats.emit(w, t, s, el),
                         log_callback=lambda msg: self.signals.log_msg.emit(msg),
@@ -1506,7 +1638,10 @@ if GUI_AVAILABLE:
             self.main_window = main_window
             self.stop_event = threading.Event()
             self.signals = _create_tab_signals(
-                main_window, on_finished=self.on_finished, on_progress=self.update_progress
+                main_window,
+                on_finished=self.on_finished,
+                on_progress=self.update_progress,
+                on_stats=self.update_stats,
             )
 
             self.entry_file, self.btn_browse, file_layout = _create_file_picker_row(
@@ -1518,6 +1653,8 @@ if GUI_AVAILABLE:
             self.rb_batch = QRadioButton("Batch mode (Generate exact line count)", self)
             self.spin_delay = QDoubleSpinBox(self)
             self.spin_count = QSpinBox(self)
+            self.chk_overwrite = QCheckBox("Overwrite file (batch mode)", self)
+            self.rb_live.setChecked(True)
             (
                 self.progress_bar,
                 self.lbl_status,
@@ -1531,8 +1668,6 @@ if GUI_AVAILABLE:
             self._setup_layout(file_layout, act_layout)
 
         def _setup_layout(self, file_layout: QHBoxLayout, act_layout: QHBoxLayout) -> None:
-            layout = QVBoxLayout(self)
-            group = QGroupBox("Target [TARGET] Generator Settings")
             form = QFormLayout()
 
             form.addRow("Output file path:", file_layout)
@@ -1542,7 +1677,6 @@ if GUI_AVAILABLE:
             self.spin_interval.setValue(15)
             form.addRow("Inject target every N lines:", self.spin_interval)
 
-            self.rb_live.setChecked(True)
             self.rb_live.toggled.connect(self.toggle_mode)
 
             mode_layout = QVBoxLayout()
@@ -1561,12 +1695,16 @@ if GUI_AVAILABLE:
             self.spin_count.setEnabled(False)
             form.addRow("Line count (batch mode):", self.spin_count)
 
-            group.setLayout(form)
-            layout.addWidget(group)
-            layout.addWidget(self.progress_bar)
-            layout.addWidget(self.lbl_status)
-            layout.addLayout(act_layout)
-            layout.addStretch()
+            _assemble_batch_tab_layout(
+                self,
+                "Target [TARGET] Generator Settings",
+                form,
+                self.progress_bar,
+                self.lbl_status,
+                act_layout,
+                chk_overwrite=self.chk_overwrite,
+                overwrite_enabled=False,
+            )
 
         def browse_file(self) -> None:
             f, _ = QFileDialog.getSaveFileName(
@@ -1579,6 +1717,7 @@ if GUI_AVAILABLE:
             is_live = self.rb_live.isChecked()
             self.spin_delay.setEnabled(is_live)
             self.spin_count.setEnabled(not is_live)
+            self.chk_overwrite.setEnabled(not is_live)
 
         def update_progress(self, current: int, total: int) -> None:
             if total > 0:
@@ -1587,6 +1726,11 @@ if GUI_AVAILABLE:
                 self.lbl_status.setText(f"Progress: {current} / {total} lines ({pct}%)")
             else:
                 self.lbl_status.setText(f"Generated lines: {current}")
+
+        def update_stats(self, current: int, total: int, speed: float, elapsed: float) -> None:
+            pct, text = _format_batch_status("Progress", current, total, "lines", speed, "lines/s", elapsed)
+            self.progress_bar.setValue(pct)
+            self.lbl_status.setText(text)
 
         def start_gen(self) -> None:
             filepath = self.entry_file.text().strip()
@@ -1623,6 +1767,7 @@ if GUI_AVAILABLE:
 
             else:
                 count = self.spin_count.value()
+                overwrite = self.chk_overwrite.isChecked()
                 self.progress_bar.setRange(0, 100)
                 self.progress_bar.setValue(0)
                 self.lbl_status.setText("Batch generation in progress...")
@@ -1634,9 +1779,11 @@ if GUI_AVAILABLE:
                             count=count,
                             phrase=phrase,
                             interval=interval,
-                            overwrite=False,
+                            overwrite=overwrite,
                             stop_event=self.stop_event,
-                            progress_callback=lambda cur, tot: self.signals.progress_val.emit(cur, tot),
+                            progress_callback=lambda cur, tot, spd, el: self.signals.progress_stats.emit(
+                                cur, tot, spd, el
+                            ),
                             log_callback=lambda msg: self.signals.log_msg.emit(msg),
                         )
                     except Exception as err:
@@ -1663,7 +1810,10 @@ if GUI_AVAILABLE:
             self.main_window = main_window
             self.stop_event = threading.Event()
             self.signals = _create_tab_signals(
-                main_window, on_finished=self.on_finished, on_progress=self.update_progress
+                main_window,
+                on_finished=self.on_finished,
+                on_progress=self.update_progress,
+                on_stats=self.update_stats,
             )
 
             self.entry_file, self.btn_browse, file_layout = _create_file_picker_row(
@@ -1682,6 +1832,7 @@ if GUI_AVAILABLE:
             self.spin_count = QSpinBox(self)
             self.spin_delay = QDoubleSpinBox(self)
             self.chk_overwrite = QCheckBox("Overwrite file (batch mode)", self)
+            self.rb_batch.setChecked(True)
             (
                 self.progress_bar,
                 self.lbl_status,
@@ -1695,8 +1846,6 @@ if GUI_AVAILABLE:
             self._setup_layout(file_layout, act_layout)
 
         def _setup_layout(self, file_layout: QHBoxLayout, act_layout: QHBoxLayout) -> None:
-            layout = QVBoxLayout(self)
-            group = QGroupBox("Structured JSON / XML & Challenge Generator Settings")
             form = QFormLayout()
 
             form.addRow("Output file path:", file_layout)
@@ -1715,7 +1864,6 @@ if GUI_AVAILABLE:
             challenge_layout.addWidget(self.chk_long)
             form.addRow("Challenge features:", challenge_layout)
 
-            self.rb_batch.setChecked(True)
             self.rb_batch.toggled.connect(self.toggle_mode)
 
             mode_layout = QVBoxLayout()
@@ -1734,15 +1882,15 @@ if GUI_AVAILABLE:
             self.spin_delay.setEnabled(False)
             form.addRow("Stream delay (s):", self.spin_delay)
 
-            self.chk_overwrite.setChecked(True)
-            form.addRow("Write options:", self.chk_overwrite)
-
-            group.setLayout(form)
-            layout.addWidget(group)
-            layout.addWidget(self.progress_bar)
-            layout.addWidget(self.lbl_status)
-            layout.addLayout(act_layout)
-            layout.addStretch()
+            _assemble_batch_tab_layout(
+                self,
+                "Structured JSON / XML & Challenge Generator Settings",
+                form,
+                self.progress_bar,
+                self.lbl_status,
+                act_layout,
+                chk_overwrite=self.chk_overwrite,
+            )
 
         def browse_file(self) -> None:
             f, _ = QFileDialog.getSaveFileName(
@@ -1766,6 +1914,11 @@ if GUI_AVAILABLE:
                 self.lbl_status.setText(f"Progress: {current} / {total} records ({pct}%)")
             else:
                 self.lbl_status.setText(f"Generated structured records: {current}")
+
+        def update_stats(self, current: int, total: int, speed: float, elapsed: float) -> None:
+            pct, text = _format_batch_status("Progress", current, total, "records", speed, "rec/s", elapsed)
+            self.progress_bar.setValue(pct)
+            self.lbl_status.setText(text)
 
         def start_gen(self) -> None:
             filepath = self.entry_file.text().strip()
@@ -1800,7 +1953,9 @@ if GUI_AVAILABLE:
                             include_decoys=include_decoys,
                             long_lines=long_lines,
                             stop_event=self.stop_event,
-                            progress_callback=lambda cur, tot: self.signals.progress_val.emit(cur, tot),
+                            progress_callback=lambda cur, tot, spd, el: self.signals.progress_stats.emit(
+                                cur, tot, spd, el
+                            ),
                             log_callback=lambda msg: self.signals.log_msg.emit(msg),
                         )
                     except Exception as err:
