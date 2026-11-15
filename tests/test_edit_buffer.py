@@ -9,7 +9,7 @@ from pathlib import Path
 # noinspection PyPackageRequirements
 import pytest
 from log_viewer.edit_buffer import EditBuffer
-from log_viewer.exceptions import CompressedSaveError, FileChangedError
+from log_viewer.exceptions import CompressedSaveError, FileChangedError, SaveCancelledError
 
 
 def _assert_save_preserves_mode(path: str, mode_val: int) -> None:
@@ -78,6 +78,63 @@ class TestEditBufferSave:
             os.unlink(backup)
         except PermissionError:
             pass
+
+
+class TestEditBufferCancelAndLineEndings:
+    def test_cancel_check_aborts_before_replace_and_cleans_temp_files(self, tmp_path: Path):
+        log_file = tmp_path / "large_cancel.log"
+        # > 2 MB aby pętla przekroczyła próg 1 MB sprawdzania postępu i cancel_check
+        payload = (b"X" * 1023 + b"\n") * 2200
+        log_file.write_bytes(payload)
+
+        buf = EditBuffer()
+        buf.set(0, "MODIFIED LINE 0")
+
+        calls = 0
+
+        def cancel_after_first_chunk() -> bool:
+            nonlocal calls
+            calls += 1
+            return calls >= 1
+
+        with pytest.raises(SaveCancelledError):
+            buf.save_to_file(str(log_file), cancel_check=cancel_after_first_chunk)
+
+        assert log_file.read_bytes() == payload
+        assert not (tmp_path / "large_cancel.log.bak").exists()
+        assert list(tmp_path.glob(".log-viewer_tmp_*")) == []
+
+    def test_save_preserves_crlf_lf_and_eof_without_newline(self, tmp_path: Path):
+        log_file = tmp_path / "mixed_endings.log"
+        log_file.write_bytes(b"line0\r\nline1\r\nline2\nline3_eof")
+
+        buf = EditBuffer()
+        buf.set(1, "EDITED_CRLF")
+        buf.set(2, "EDITED_LF\n")
+        buf.set(3, "EDITED_EOF")
+
+        backup = buf.save_to_file(str(log_file))
+        try:
+            assert log_file.read_bytes() == b"line0\r\nEDITED_CRLF\r\nEDITED_LF\nEDITED_EOF"
+        finally:
+            try:
+                os.unlink(backup)
+            except PermissionError:
+                pass
+
+    def test_save_preserves_pure_crlf_file(self, tmp_path: Path):
+        log_file = tmp_path / "crlf_only.log"
+        log_file.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+        buf = EditBuffer()
+        buf.set(1, "BETA_NEW")
+        backup = buf.save_to_file(str(log_file))
+        try:
+            assert log_file.read_bytes() == b"alpha\r\nBETA_NEW\r\ngamma\r\n"
+        finally:
+            try:
+                os.unlink(backup)
+            except PermissionError:
+                pass
 
     def test_save_preserves_permissions(self, temp_log_file):
         path = temp_log_file(num_lines=100)

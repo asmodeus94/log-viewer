@@ -84,3 +84,22 @@ class TestI18N:
 
         msg_bm = I18N["pl"]["msg_bookmark_added"].format(n=12345)
         assert "12,345" in msg_bm
+
+    def test_about_updated_and_no_tkinter_mentions(self):
+        for lang in ("pl", "en"):
+            about = I18N[lang]["msg_about"]
+            assert "PySide6" in about
+            assert "16 KB" in about
+            assert "Drag & Drop" in about
+            assert "tkinter" not in about.lower()
+            assert "1MB" not in about
+
+    def test_save_slow_warning_exists_and_formats(self):
+        pl_warn = I18N["pl"]["msg_save_slow_warning"].format(size="2.5 GB", sec="5")
+        en_warn = I18N["en"]["msg_save_slow_warning"].format(size="2.5 GB", sec="5")
+        assert "2.5 GB" in pl_warn
+        assert "5" in pl_warn
+        assert "2.5 GB" in en_warn
+        assert "5" in en_warn
+        assert "Plik ma" in pl_warn
+        assert "File size is" in en_warn

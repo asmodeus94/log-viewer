@@ -6,7 +6,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QThread, Slot
 from PySide6.QtWidgets import QMessageBox
 
-from log_viewer.bitset import Bitset
+from log_viewer.bitset import Bitset, bisect_left_custom
 from log_viewer.filter_engine import FilterEngine
 from log_viewer.workers import FilterWorker
 
@@ -15,6 +15,8 @@ class FilterController(QObject):
     def __init__(self, tab: Any) -> None:
         super().__init__(tab)
         self.tab = tab
+        self._is_reapplying_filter: bool = False
+        self._reapply_saved_line: int = 0
 
     def cmd_filter_dialog(self) -> None:
         self.tab.main_window.filter_entry.setFocus()
@@ -57,6 +59,27 @@ class FilterController(QObject):
                 )
                 return
 
+        self._is_reapplying_filter = False
+        self._reapply_saved_line = 0
+        self._run_filter_worker(pattern, use_regex, case, negate, self.tab.filter_context_after)
+
+    def reapply_filter(self, saved_line: int = 0) -> bool:
+        """Ponownie uruchamia aktywny filtr na bazie zapisanych parametrów zakładki."""
+        if not self.tab.filter_active or not self.tab.filter_pattern:
+            return False
+        if not self.tab.file_path or not self.tab.indexer:
+            return False
+        self._is_reapplying_filter = True
+        self._reapply_saved_line = saved_line
+        return self._run_filter_worker(
+            self.tab.filter_pattern,
+            self.tab.filter_use_regex,
+            self.tab.filter_case_sensitive,
+            self.tab.filter_negate,
+            self.tab.filter_context_after,
+        )
+
+    def _run_filter_worker(self, pattern: str, use_regex: bool, case: bool, negate: bool, context_after: int) -> bool:
         if self.tab.filter_engine and self.tab.filter_engine.is_running():
             self.tab.filter_engine.cancel()
 
@@ -73,7 +96,7 @@ class FilterController(QObject):
         indexer = self.tab.indexer
         if not file_path or not indexer:
             QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_file"))
-            return
+            return False
 
         self.tab.filter_engine = FilterEngine(file_path, indexer)
         self.tab.filter_active = True
@@ -81,7 +104,7 @@ class FilterController(QObject):
 
         self.tab.filter_thread = QThread()
         self.tab.filter_worker = FilterWorker(
-            self.tab.filter_engine, pattern, use_regex, case, negate, context_after=self.tab.filter_context_after
+            self.tab.filter_engine, pattern, use_regex, case, negate, context_after=context_after
         )
         self.tab.start_filter_worker_thread(
             self.tab.filter_thread,
@@ -90,6 +113,7 @@ class FilterController(QObject):
             self._on_filter_done,
         )
         self.tab.set_status(self.tab.fmt("st_filtering", pct=0.0, hits=0))
+        return True
 
     @Slot(float, int, str, object)
     def _on_filter_progress(self, pct: float, hits: int, state: str, _partial_results: object = None) -> None:
@@ -108,12 +132,20 @@ class FilterController(QObject):
         hit_lines_set: Any,
         error: str | None,
     ) -> None:
+        is_reapply = self._is_reapplying_filter
+        saved_line = self._reapply_saved_line
+        self._is_reapplying_filter = False
+        self._reapply_saved_line = 0
+
         if error:
             if error != "cancelled":
                 try:
-                    QMessageBox.critical(
-                        self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_filter_error").format(e=error)
-                    )
+                    if not is_reapply:
+                        QMessageBox.critical(
+                            self.tab.main_window,
+                            self.tab.t("app_title"),
+                            self.tab.t("msg_filter_error").format(e=error),
+                        )
                     self.tab.filter_active = False
                     self.tab.refresh_status()
                     self.tab.update_position_slider()
@@ -121,6 +153,20 @@ class FilterController(QObject):
                     pass
             return
         if not results_data:
+            if is_reapply:
+                total_lines = self.tab.indexer.line_count if self.tab.indexer else 0
+                self.tab.filter_active = True
+                self.tab.filter_results = Bitset(total_lines)
+                self.tab.filter_context_lines = set()
+                self._reset_filter_cache()
+                self.tab.filter_all_lines = Bitset(total_lines)
+                self.tab.ignore_scroll_events = True
+                try:
+                    self.tab.load_window(at_line=0, force_reload=True)
+                finally:
+                    self.tab.ignore_scroll_events = False
+                self.tab.refresh_status()
+                return
             QMessageBox.information(self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_no_matches"))
             self.tab.filter_active = False
             self.tab.refresh_status()
@@ -138,10 +184,20 @@ class FilterController(QObject):
         if self.tab.indexer is not None:
             self.tab.last_file_size = self.tab.indexer.size
 
+        if self.tab.follow_active:
+            target_at_line = max(0, len(filter_all_lines) - self.tab.window_size_lines)
+        elif is_reapply and saved_line > 0:
+            target_at_line = bisect_left_custom(filter_all_lines, saved_line)
+        else:
+            target_at_line = 0
+
         self.tab.ignore_scroll_events = True
         try:
-            self.tab.load_window(at_line=0, force_reload=True)
-            self.tab.text.verticalScrollBar().setValue(0)
+            self.tab.load_window(at_line=target_at_line, force_reload=True)
+            if self.tab.follow_active:
+                self.tab.text.verticalScrollBar().setValue(self.tab.text.verticalScrollBar().maximum())
+            elif target_at_line == 0:
+                self.tab.text.verticalScrollBar().setValue(0)
         finally:
             self.tab.ignore_scroll_events = False
 

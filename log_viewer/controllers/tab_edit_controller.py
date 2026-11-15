@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from log_viewer.helpers import fmt_size
+from log_viewer.helpers import fmt_size, sanitize_single_line_text
 from log_viewer.widgets import FormatDialog, get_full_line_text_at_cursor
 from log_viewer.workers import ExportWorker, SaveAsWorker, SaveWorker
 
@@ -99,7 +99,7 @@ class EditController(QObject):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_text = edit.toPlainText().rstrip("\n")
+            new_text = sanitize_single_line_text(edit.toPlainText())
             self.tab.edit_buffer.set(file_line, new_text)
             self.tab.refresh_edits_tree()
             self.tab.reload_current_view()
@@ -156,6 +156,13 @@ class EditController(QObject):
         thread.finished.connect(thread.deleteLater)
         thread.start()
 
+    @staticmethod
+    def _close_progress_dialog(progress: QProgressDialog | None) -> None:
+        if progress is not None:
+            progress.blockSignals(True)
+            progress.close()
+            progress.deleteLater()
+
     def cmd_save_edits(self) -> None:
         """Rozpoczyna asynchroniczny zapis zmodyfikowanych linii do bieżącego pliku."""
         if not self._can_start_file_operation(self.tab.save_thread):
@@ -170,7 +177,7 @@ class EditController(QObject):
         if self.tab.indexer.size > 1 * 1024 * 1024 * 1024:  # > 1 GB
             est_seconds = self.tab.indexer.size / (500 * 1024 * 1024)  # ~500 MB/s
             if est_seconds > 5:
-                save_warning = f"\n\n⚠️ Plik ma {size} — zapis potrwa ~{est_seconds:.0f}s."
+                save_warning = "\n\n" + self.tab.fmt("msg_save_slow_warning", size=size, sec=f"{est_seconds:.0f}")
         choice = QMessageBox.question(
             self.tab.main_window,
             self.tab.t("app_title"),
@@ -188,7 +195,11 @@ class EditController(QObject):
         save_progress = QProgressDialog(self.tab.t("mi_save"), self.tab.t("btn_cancel"), 0, 100, self.tab.main_window)
         save_progress.setWindowTitle(self.tab.t("mi_save"))
         save_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        save_progress.setAutoClose(False)
+        save_progress.setAutoReset(False)
         save_progress.setValue(0)
+        save_progress.canceled.connect(self._on_save_canceled)
+        save_progress.show()
         self.tab.save_progress = save_progress
 
         save_thread = QThread()
@@ -205,21 +216,30 @@ class EditController(QObject):
         self._start_worker_thread(
             save_thread,
             save_worker,
-            on_progress=save_progress.setValue,
+            on_progress=self._update_save_edits_progress,
             on_finished=self._on_save_done,
             on_error=self._on_save_error,
+            progress_dialog=save_progress,
             extra_done_signals=(
                 (save_worker.file_changed, self._on_save_file_changed),
                 (save_worker.compressed, self._on_save_compressed),
             ),
         )
 
+    @Slot(float)
+    def _update_save_edits_progress(self, val: float) -> None:
+        progress = self.tab.save_progress
+        if progress is not None and not progress.wasCanceled():
+            progress.setValue(int(val))
+
+    @Slot()
+    def _on_save_canceled(self) -> None:
+        self.tab.set_status(self.tab.t("st_cancelling"))
+
     @Slot(str)
     def _on_save_done(self, _backup_path: str) -> None:
-        progress = self.tab.save_progress
-        if progress is not None:
-            progress.close()
-            self.tab.save_progress = None
+        self._close_progress_dialog(self.tab.save_progress)
+        self.tab.save_progress = None
         QMessageBox.information(
             self.tab.main_window,
             self.tab.t("app_title"),
@@ -232,22 +252,25 @@ class EditController(QObject):
             saved_line = 0
         self.tab.edit_buffer.clear()
         self.tab.refresh_edits_tree()
+        if self.tab.search_model is not None:
+            self.tab.search_model.clear_cache()
         self.tab.start_reindex(saved_line)
 
     @Slot(str)
     def _on_save_error(self, err: str) -> None:
-        progress = self.tab.save_progress
-        if progress is not None:
-            progress.close()
-            self.tab.save_progress = None
-        QMessageBox.critical(self.tab.main_window, self.tab.t("app_title"), f"Save error: {err}")
+        self._close_progress_dialog(self.tab.save_progress)
+        self.tab.save_progress = None
+        if err == "cancelled":
+            self.tab.set_status(self.tab.t("st_cancelled"))
+        else:
+            QMessageBox.critical(
+                self.tab.main_window, self.tab.t("app_title"), self.tab.t("msg_save_error").format(err=err)
+            )
 
     @Slot(str)
     def _on_save_file_changed(self, err: str) -> None:
-        progress = self.tab.save_progress
-        if progress is not None:
-            progress.close()
-            self.tab.save_progress = None
+        self._close_progress_dialog(self.tab.save_progress)
+        self.tab.save_progress = None
         choice = QMessageBox.question(
             self.tab.main_window,
             self.tab.t("app_title"),
@@ -273,10 +296,8 @@ class EditController(QObject):
 
     @Slot(str)
     def _on_save_compressed(self, _err: str) -> None:
-        progress = self.tab.save_progress
-        if progress is not None:
-            progress.close()
-            self.tab.save_progress = None
+        self._close_progress_dialog(self.tab.save_progress)
+        self.tab.save_progress = None
         QMessageBox.warning(self.tab.main_window, self.tab.t("app_title"), self.tab.t("mi_compressed_warn"))
 
     def cmd_clear_edits(self) -> None:
@@ -305,12 +326,8 @@ class EditController(QObject):
 
     @Slot()
     def _on_save_as_done(self) -> None:
-        progress = self.tab.save_as_progress
-        if progress is not None:
-            progress.blockSignals(True)
-            progress.close()
-            progress.deleteLater()
-            self.tab.save_as_progress = None
+        self._close_progress_dialog(self.tab.save_as_progress)
+        self.tab.save_as_progress = None
         path = self.tab.save_as_path or ""
         QMessageBox.information(
             self.tab.main_window,
@@ -320,12 +337,8 @@ class EditController(QObject):
 
     @Slot(str)
     def _on_save_as_error(self, err: str) -> None:
-        progress = self.tab.save_as_progress
-        if progress is not None:
-            progress.blockSignals(True)
-            progress.close()
-            progress.deleteLater()
-            self.tab.save_as_progress = None
+        self._close_progress_dialog(self.tab.save_as_progress)
+        self.tab.save_as_progress = None
         if err == "cancelled":
             self.tab.set_status(self.tab.t("st_cancelled"))
         else:
@@ -379,10 +392,8 @@ class EditController(QObject):
 
     @Slot(int)
     def _on_export_done(self, count: int) -> None:
-        progress = self.tab.export_progress
-        if progress is not None:
-            progress.deleteLater()
-            self.tab.export_progress = None
+        self._close_progress_dialog(self.tab.export_progress)
+        self.tab.export_progress = None
         path = self.tab.export_path or ""
         self.tab.set_status(self.tab.t("msg_exported").format(n=count, path=path))
         QMessageBox.information(
@@ -391,12 +402,8 @@ class EditController(QObject):
 
     @Slot(str)
     def _on_export_error(self, err: str) -> None:
-        progress = self.tab.export_progress
-        if progress is not None:
-            progress.blockSignals(True)
-            progress.close()
-            progress.deleteLater()
-            self.tab.export_progress = None
+        self._close_progress_dialog(self.tab.export_progress)
+        self.tab.export_progress = None
         if err == "cancelled":
             self.tab.set_status(self.tab.t("st_cancelled"))
         else:

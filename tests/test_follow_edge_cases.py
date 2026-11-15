@@ -1,3 +1,4 @@
+import array
 import os
 import sys
 import time
@@ -7,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from log_viewer.bitset import Bitset
 from log_viewer.config import UserConfig
 from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
@@ -219,5 +221,129 @@ def test_follow_incremental_context_and_highlighting(tmp_path):
             assert len(context_sels) >= 3, (
                 f"Linie 11..13 powinny mieć szare tło kontekstu, znaleziono: {len(context_sels)}"
             )
+    finally:
+        _cleanup_window(window)
+
+
+def test_follow_rotation_resets_search_and_reapplies_filter(tmp_path):
+    """Po rotacji pliku w trybie Follow stare wyniki wyszukiwania muszą zostać wyczyszczone,
+    a aktywny filtr przeliczony dla nowej zawartości (nawet gdy nowy plik ma 0 trafień)."""
+    _ = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=str(tmp_path / "follow_rot.json"))
+    window = LogViewerWindow(config=cfg)
+
+    tf_path = tmp_path / "follow_rot.log"
+    initial_lines = [
+        f"Line {i} - ERROR initial\n".encode() if i % 10 == 0 else f"Line {i} - INFO ok\n".encode() for i in range(100)
+    ]
+    tf_path.write_bytes(b"".join(initial_lines))
+    file_path = str(tf_path)
+
+    try:
+        with (
+            patch.object(QtWidgets.QMessageBox, "information") as mock_info,
+            patch.object(QtWidgets.QMessageBox, "warning"),
+            patch.object(QtWidgets.QMessageBox, "critical"),
+            patch.object(QtWidgets.QMessageBox, "question"),
+        ):
+            tab, _ = _setup_tab_with_manual_indexer(window, file_path)
+            window.filter_entry.setText("ERROR")
+            window.cmd_apply_filter()
+            _pump_events(iterations=50, sleep_sec=0.01)
+
+            assert tab.filter_active is True
+            assert tab.filter_results is not None
+            assert len(tab.filter_results) == 10
+
+            # Zasymuluj poprzednie wyniki wyszukiwania
+            tab.search_results_all = Bitset.from_indices(array.array("Q", [0, 50, 90]), 100)
+            tab.search_results = tab.search_results_all
+            if tab.search_model is not None:
+                tab.search_model.set_results(tab.search_results_all, indexer=tab.indexer)
+
+            tab.cmd_toggle_follow()
+            assert tab.follow_active is True
+
+            # Rotacja do nowego, mniejszego pliku z 2 trafieniami (linie 2 i 7)
+            rotated_payload = (
+                b"Line 0 - INFO ok\n"
+                b"Line 1 - INFO ok\n"
+                b"Line 2 - ERROR rotated\n"
+                b"Line 3 - INFO ok\n"
+                b"Line 4 - INFO ok\n"
+                b"Line 5 - INFO ok\n"
+                b"Line 6 - INFO ok\n"
+                b"Line 7 - ERROR rotated\n"
+            )
+            tf_path.write_bytes(rotated_payload)
+            new_idx = LineIndexer(file_path, encoding="utf-8", index_interval_bytes=1024)
+            tab.file_controller._on_follow_reindex(new_idx, len(rotated_payload), 0)
+            _pump_events(iterations=50, sleep_sec=0.01)
+
+            assert len(tab.search_results_all) == 0
+            if tab.search_model is not None:
+                assert tab.search_model.rowCount() == 0
+            assert tab.filter_active is True
+            assert tab.filter_results is not None
+            assert list(tab.filter_results) == [2, 7]
+            assert tab.line_map == [2, 7]
+
+            # Druga rotacja — tym razem 0 trafień; brak modalnego okienka QMessageBox, filtr nadal aktywny
+            tf_path.write_bytes(b"Line 0 - INFO only\nLine 1 - INFO only\n")
+            empty_match_idx = LineIndexer(file_path, encoding="utf-8", index_interval_bytes=1024)
+            tab.file_controller._on_follow_reindex(empty_match_idx, tf_path.stat().st_size, 0)
+            _pump_events(iterations=50, sleep_sec=0.01)
+
+            assert tab.filter_active is True
+            assert tab.filter_results is not None
+            assert len(tab.filter_results) == 0
+            assert tab.line_map == []
+            mock_info.assert_not_called()
+    finally:
+        _cleanup_window(window)
+
+
+def test_reindex_after_save_resets_search_and_reapplies_filter(tmp_path):
+    """Po zapisie edycji i reindeksowaniu wyniki wyszukiwania są czyszczone, a aktywny filtr przeliczany."""
+    _ = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    cfg = UserConfig(config_path=str(tmp_path / "save_reindex.json"))
+    window = LogViewerWindow(config=cfg)
+
+    tf_path = tmp_path / "save_reindex.log"
+    tf_path.write_bytes(b"Line 0 - ERROR a\nLine 1 - INFO b\nLine 2 - ERROR c\n")
+    file_path = str(tf_path)
+
+    try:
+        with (
+            patch.object(QtWidgets.QMessageBox, "information"),
+            patch.object(QtWidgets.QMessageBox, "warning"),
+            patch.object(QtWidgets.QMessageBox, "critical"),
+            patch.object(QtWidgets.QMessageBox, "question"),
+        ):
+            tab, _ = _setup_tab_with_manual_indexer(window, file_path)
+            window.filter_entry.setText("ERROR")
+            window.cmd_apply_filter()
+            _pump_events(iterations=50, sleep_sec=0.01)
+
+            assert tab.filter_results is not None
+            assert list(tab.filter_results) == [0, 2]
+
+            tab.search_results_all = Bitset.from_indices(array.array("Q", [0, 2]), 3)
+            if tab.search_model is not None:
+                tab.search_model.set_results(tab.search_results_all, indexer=tab.indexer)
+
+            # Nadpisz plik tak, aby linia 0 przestała pasować do filtra, a linia 1 zaczęła
+            tf_path.write_bytes(b"Line 0 - INFO fixed\nLine 1 - ERROR new\nLine 2 - ERROR c\n")
+            new_idx = LineIndexer(file_path, encoding="utf-8", index_interval_bytes=1024)
+            tab.file_controller._on_reindex_after_save(new_idx, 1)
+            _pump_events(iterations=50, sleep_sec=0.01)
+
+            assert len(tab.search_results_all) == 0
+            if tab.search_model is not None:
+                assert tab.search_model.rowCount() == 0
+            assert tab.filter_active is True
+            assert tab.filter_results is not None
+            assert list(tab.filter_results) == [1, 2]
+            assert tab.line_map == [1, 2]
     finally:
         _cleanup_window(window)

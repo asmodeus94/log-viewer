@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from log_viewer.main_window import LogViewerWindow
 
 
@@ -58,3 +60,36 @@ def test_dnd_large_file_over_50mb(qtbot, tmp_path):
         assert window.tabs.count() == initial_tabs + 1
 
     qtbot.waitUntil(check_finished, timeout=10000)
+
+
+def test_dnd_cancel_queue_calls_cancel_indexing(qtbot, tmp_path):
+    large_file = tmp_path / "large_cancel.log"
+    chunk = b"B" * (1024 * 1024) + b"\n"
+    with open(large_file, "wb") as f:
+        for _ in range(51):
+            f.write(chunk)
+    second_file = tmp_path / "second.log"
+    second_file.write_text("line1\n", encoding="utf-8")
+
+    window = LogViewerWindow()
+    qtbot.addWidget(window)
+    window.show()
+    qtbot.waitUntil(window.isVisible)
+
+    initial_tabs = window.tabs.count()
+    window._on_files_dropped([str(large_file), str(second_file)])
+
+    current_tab = window._dnd_current_tab
+    assert current_tab is not None
+
+    with patch.object(current_tab, "cancel_indexing", wraps=current_tab.cancel_indexing) as mock_cancel:
+        window._cancel_dnd_queue()
+        mock_cancel.assert_called_once()
+
+    def check_cancelled_cleanup():
+        assert len(window._dnd_queue) == 0
+        assert window._dnd_current_tab is None
+        assert window._dnd_progress_dialog is None
+        assert window.tabs.count() == initial_tabs
+
+    qtbot.waitUntil(check_cancelled_cleanup, timeout=10000)

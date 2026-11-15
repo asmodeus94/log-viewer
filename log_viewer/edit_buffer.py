@@ -9,8 +9,8 @@ import uuid
 from collections.abc import Callable, ItemsView, Iterator, KeysView
 from pathlib import Path
 
-from .exceptions import CompressedSaveError, FileChangedError
-from .helpers import is_compressed
+from .exceptions import CompressedSaveError, FileChangedError, SaveCancelledError
+from .helpers import extract_line_ending, is_compressed
 
 
 def secure_opener(path: str, flags: int) -> int:
@@ -61,6 +61,7 @@ class EditBuffer:
         expected_mtime: float | int | None = None,
         expected_size: int | None = None,
         encoding: str = "utf-8",
+        cancel_check: Callable[[], bool] | None = None,
     ) -> str:
         """
         Tworzy backup src_path.bak, zapisuje nową treść do src_path.
@@ -105,6 +106,9 @@ class EditBuffer:
             if abs(current_mtime_ns - expected_mtime_ns) > 1_000_000:
                 raise FileChangedError(f"File mtime changed: expected {expected_mtime_ns}, got {current_mtime_ns}")
 
+        if cancel_check is not None and cancel_check():
+            raise SaveCancelledError("Save cancelled")
+
         backup_path = src_path + ".bak"
         size = current_stat.st_size
 
@@ -116,29 +120,35 @@ class EditBuffer:
         tmp_path = str(tmp_p)
         bytes_written = 0
         last_progress_bytes = 0
+        created_paths: list[Path] = []
 
         try:
-            with (
-                open(src_path, "rb") as src,
-                open(backup_path, "wb", opener=secure_opener) as bak,
-                open(tmp_path, "wb", opener=secure_opener) as out,
-            ):
-                for line_no, raw in enumerate(src):
-                    # Kopiuj do backup (oryginalna treść)
-                    bak.write(raw)
-                    # Zapisz do tmp (z edycjami)
-                    if line_no in self._edits:
-                        new_text = self._edits[line_no]
-                        # #1: Użyj kodowania pliku, nie hardcoded UTF-8
-                        out.write(new_text.encode(encoding, errors="replace"))
-                        if not new_text.endswith("\n"):
-                            out.write(b"\n")
-                    else:
-                        out.write(raw)
-                    bytes_written += len(raw)
-                    if progress_cb and size and (bytes_written - last_progress_bytes) > 1_048_576:
-                        progress_cb(bytes_written / size * 100.0)
-                        last_progress_bytes = bytes_written
+            with open(src_path, "rb") as src, open(backup_path, "wb", opener=secure_opener) as bak:
+                created_paths.append(Path(backup_path))
+                with open(tmp_path, "wb", opener=secure_opener) as out:
+                    created_paths.append(tmp_p)
+                    for line_no, raw in enumerate(src):
+                        # Kopiuj do backup (oryginalna treść)
+                        bak.write(raw)
+                        # Zapisz do tmp (z edycjami)
+                        if line_no in self._edits:
+                            new_text = self._edits[line_no]
+                            # #1: Użyj kodowania pliku, nie hardcoded UTF-8, i zachowaj oryginalny koniec linii
+                            out.write(
+                                new_text.rstrip("\r\n").encode(encoding, errors="replace") + extract_line_ending(raw)
+                            )
+                        else:
+                            out.write(raw)
+                        bytes_written += len(raw)
+                        if (bytes_written - last_progress_bytes) > 1_048_576:
+                            if cancel_check is not None and cancel_check():
+                                raise SaveCancelledError("Save cancelled")
+                            if progress_cb and size:
+                                progress_cb(bytes_written / size * 100.0)
+                            last_progress_bytes = bytes_written
+
+            if cancel_check is not None and cancel_check():
+                raise SaveCancelledError("Save cancelled")
 
             # #4: Błędy copystat logujemy, ale nie crashujemy — plik już jest zapisany
             try:
@@ -152,10 +162,11 @@ class EditBuffer:
 
             # Atomic replace
             tmp_p.replace(src_path)
-        except Exception:
-            try:
-                tmp_p.unlink()
-            except OSError:
-                pass
+        except BaseException:
+            for p in reversed(created_paths):
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
             raise
         return backup_path

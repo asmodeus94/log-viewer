@@ -14,7 +14,7 @@ from log_viewer.indexer import LineIndexer
 from log_viewer.log_tab import LogTab
 from log_viewer.main_window import LogViewerWindow
 from PySide6 import QtWidgets
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
+from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QProgressDialog
 
 
 # noinspection PyProtectedMember
@@ -229,3 +229,45 @@ class TestEditController:
             controller._on_export_error("Write error")
             assert tab.export_progress is None
             mock_crit.assert_called_once()
+
+    def test_on_save_error_cancelled_no_dialog(self, app_context):
+        _, tab, _ = app_context
+        controller: EditController = tab.edit_controller
+        tab.save_progress = QProgressDialog()
+
+        with patch.object(QMessageBox, "critical") as mock_crit, patch.object(tab, "set_status") as mock_status:
+            controller._on_save_error("cancelled")
+            assert tab.save_progress is None
+            mock_crit.assert_not_called()
+            mock_status.assert_called_once_with(tab.t("st_cancelled"))
+
+    def test_cmd_edit_line_sanitizes_multiline_paste(self, app_context):
+        _, tab, _ = app_context
+        controller: EditController = tab.edit_controller
+
+        with (
+            patch.object(QDialog, "exec", return_value=QDialog.DialogCode.Accepted),
+            patch.object(QPlainTextEdit, "toPlainText", return_value="Part1\r\nPart2\nPart3\u2029Part4\n"),
+        ):
+            controller.cmd_edit_line()
+
+        assert tab.line_map is not None
+        file_line = tab.line_map[0]
+        assert tab.edit_buffer.get(file_line) == "Part1 Part2 Part3 Part4"
+        assert tab.text.document().blockCount() == len(tab.line_map)
+
+    def test_cmd_save_edits_large_file_uses_i18n_warning(self, app_context):
+        window, tab, _ = app_context
+        controller: EditController = tab.edit_controller
+        tab.edit_buffer.set(0, "Edited")
+        window.lang = "en"
+        assert tab.indexer is not None
+
+        with (
+            patch.object(tab.indexer, "size", 4 * 1024 * 1024 * 1024),
+            patch.object(QMessageBox, "question", return_value=QMessageBox.StandardButton.No) as mock_q,
+        ):
+            controller.cmd_save_edits()
+            mock_q.assert_called_once()
+            prompt_text = mock_q.call_args.args[2]
+            assert "File size is" in prompt_text

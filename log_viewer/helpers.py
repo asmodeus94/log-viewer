@@ -175,6 +175,21 @@ def truncate_for_display(text: str, max_length: int = MAX_DISPLAY_LINE_LENGTH) -
     return text[:keep] + suffix, True
 
 
+def sanitize_single_line_text(text: str) -> str:
+    """Normalizuje edytowany tekst tak, aby stanowił dokładnie jedną linię bez separatorów akapitu."""
+    cleaned = text.rstrip("\r\n\u2029")
+    return cleaned.replace("\r\n", " ").replace("\r", " ").replace("\n", " ").replace("\u2029", " ")
+
+
+def extract_line_ending(raw: bytes) -> bytes:
+    """Wykrywa oryginalny separator końca linii z surowego wiersza bajtów."""
+    if raw.endswith(b"\r\n"):
+        return b"\r\n"
+    if raw.endswith(b"\n"):
+        return b"\n"
+    return b""
+
+
 def parse_dnd_files(dnd_data: str) -> list[str]:
     """Parsuje dane z DnD eventa — format zależy od platformy."""
     if not dnd_data:

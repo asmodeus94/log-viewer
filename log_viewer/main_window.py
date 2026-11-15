@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from .config import UserConfig
 from .helpers import (
     DEFAULT_ENCODING,
+    INDEX_INTERVAL_BYTES,
     MAX_DISPLAY_LINE_LENGTH,
     MAX_DISPLAY_LINES,
     OPEN_FILETYPES,
@@ -122,7 +123,7 @@ class LogViewerWindow(QMainWindow):
         self.window_size_lines: int = int(self.config.get("window_size_lines", WINDOW_SIZE_LINES))
         self.max_display_lines: int = int(self.config.get("max_display_lines", MAX_DISPLAY_LINES))
         self.max_display_line_length: int = int(self.config.get("max_display_line_length", MAX_DISPLAY_LINE_LENGTH))
-        self.index_interval_bytes: int = int(self.config.get("index_interval_bytes", 1024 * 1024))
+        self.index_interval_bytes: int = int(self.config.get("index_interval_bytes", INDEX_INTERVAL_BYTES))
         self.font_family: str | None = self.config.get("font_family", None)
         self.font_size: int = int(self.config.get("font_size", 10))
 
@@ -1431,10 +1432,10 @@ class LogViewerWindow(QMainWindow):
         self._process_next_dnd_file()
 
     def _cancel_dnd_queue(self) -> None:
-        self._dnd_queue.clear()
-        if self._dnd_current_tab:
-            self._dnd_current_tab.close_index_progress()
+        current_tab = self._dnd_current_tab
         self._cleanup_dnd_dialog()
+        if current_tab is not None:
+            current_tab.cancel_indexing()
 
     def _cleanup_dnd_dialog(self) -> None:
         self._dnd_queue.clear()
